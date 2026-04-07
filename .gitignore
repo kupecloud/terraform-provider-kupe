@@ -1,0 +1,33 @@
+# Build artifacts
+terraform-provider-kupe
+bin/
+
+# Test artifacts
+coverage.out
+coverage.html
+cover.review.out
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local tooling
+.tmp/
+
+# Env files
+*.env
+.env.*
