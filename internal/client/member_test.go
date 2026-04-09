@@ -54,7 +54,9 @@ func TestAddMember(t *testing.T) {
 
 	req := mock.lastRequest()
 	var body AddMemberRequest
-	json.Unmarshal([]byte(req.Body), &body)
+	if err := json.Unmarshal([]byte(req.Body), &body); err != nil {
+		t.Fatalf("failed to unmarshal request body: %v", err)
+	}
 	if body.Role != "readonly" {
 		t.Errorf("expected role=readonly, got %q", body.Role)
 	}

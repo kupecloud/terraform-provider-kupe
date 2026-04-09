@@ -56,6 +56,12 @@ repos:
 
   - repo: local
     hooks:
+      - id: actionlint
+        name: actionlint
+        entry: bash -c 'GOWORK=off go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12'
+        language: system
+        pass_filenames: false
+        files: ^\.github/workflows/.*\.ya?ml$
       - id: gofmt
         name: gofmt
         entry: gofmt -w

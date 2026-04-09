@@ -70,7 +70,9 @@ func TestUpdateSecret(t *testing.T) {
 		}
 		w.Header().Set("ETag", `"v2"`)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(Secret{Name: "db-pass"})
+		if err := json.NewEncoder(w).Encode(Secret{Name: "db-pass"}); err != nil {
+			t.Fatalf("failed to encode secret response: %v", err)
+		}
 	})
 
 	c := mock.client("acme")

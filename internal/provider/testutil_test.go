@@ -58,6 +58,18 @@ func (m *mockKupeAPI) nextRV() string {
 	return fmt.Sprintf("%d", m.rvCounter)
 }
 
+func mustEncodeJSON(w http.ResponseWriter, v any) {
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		panic(err)
+	}
+}
+
+func mustDecodeJSON(r *http.Request, v any) {
+	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+		panic(err)
+	}
+}
+
 func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -72,21 +84,21 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 		for _, p := range m.plans {
 			items = append(items, p)
 		}
-		json.NewEncoder(w).Encode(map[string]any{"items": items})
+		mustEncodeJSON(w, map[string]any{"items": items})
 
 	case r.Method == "GET" && matchPath(r.URL.Path, "/api/v1/plans/"):
 		name := lastSegment(r.URL.Path)
 		if p, ok := m.plans[name]; ok {
-			json.NewEncoder(w).Encode(p)
+			mustEncodeJSON(w, p)
 		} else {
 			w.WriteHeader(404)
-			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			mustEncodeJSON(w, map[string]string{"error": "not found"})
 		}
 
 	// Tenant
 	case r.Method == "GET" && r.URL.Path == "/api/v1/tenants/acme":
 		w.Header().Set("ETag", `"`+m.tenant["resourceVersion"].(string)+`"`)
-		json.NewEncoder(w).Encode(m.tenant)
+		mustEncodeJSON(w, m.tenant)
 
 	// Clusters
 	case r.Method == "GET" && r.URL.Path == "/api/v1/tenants/acme/clusters":
@@ -94,11 +106,11 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 		for _, c := range m.clusters {
 			items = append(items, c)
 		}
-		json.NewEncoder(w).Encode(map[string]any{"items": items})
+		mustEncodeJSON(w, map[string]any{"items": items})
 
 	case r.Method == "POST" && r.URL.Path == "/api/v1/tenants/acme/clusters":
 		var body map[string]any
-		json.NewDecoder(r.Body).Decode(&body)
+		mustDecodeJSON(r, &body)
 		name := body["name"].(string)
 		rv := m.nextRV()
 		cluster := map[string]any{
@@ -111,16 +123,16 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 		m.clusters[name] = cluster
 		w.Header().Set("ETag", `"`+rv+`"`)
 		w.WriteHeader(201)
-		json.NewEncoder(w).Encode(cluster)
+		mustEncodeJSON(w, cluster)
 
 	case r.Method == "GET" && matchPath(r.URL.Path, "/api/v1/tenants/acme/clusters/"):
 		name := lastSegment(r.URL.Path)
 		if c, ok := m.clusters[name]; ok {
 			w.Header().Set("ETag", `"`+c["resourceVersion"].(string)+`"`)
-			json.NewEncoder(w).Encode(c)
+			mustEncodeJSON(w, c)
 		} else {
 			w.WriteHeader(404)
-			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			mustEncodeJSON(w, map[string]string{"error": "not found"})
 		}
 
 	case r.Method == "PATCH" && matchPath(r.URL.Path, "/api/v1/tenants/acme/clusters/"):
@@ -128,11 +140,11 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 		c, ok := m.clusters[name]
 		if !ok {
 			w.WriteHeader(404)
-			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			mustEncodeJSON(w, map[string]string{"error": "not found"})
 			return
 		}
 		var body map[string]any
-		json.NewDecoder(r.Body).Decode(&body)
+		mustDecodeJSON(r, &body)
 		if v, ok := body["version"]; ok {
 			c["version"] = v
 		}
@@ -142,7 +154,7 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 		rv := m.nextRV()
 		c["resourceVersion"] = rv
 		w.Header().Set("ETag", `"`+rv+`"`)
-		json.NewEncoder(w).Encode(c)
+		mustEncodeJSON(w, c)
 
 	case r.Method == "DELETE" && matchPath(r.URL.Path, "/api/v1/tenants/acme/clusters/"):
 		name := lastSegment(r.URL.Path)
@@ -151,33 +163,33 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(204)
 		} else {
 			w.WriteHeader(404)
-			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			mustEncodeJSON(w, map[string]string{"error": "not found"})
 		}
 
 	// Members
 	case r.Method == "GET" && r.URL.Path == "/api/v1/tenants/acme/members":
-		json.NewEncoder(w).Encode(map[string]any{"items": m.members})
+		mustEncodeJSON(w, map[string]any{"items": m.members})
 
 	case r.Method == "POST" && r.URL.Path == "/api/v1/tenants/acme/members":
 		var body map[string]any
-		json.NewDecoder(r.Body).Decode(&body)
+		mustDecodeJSON(r, &body)
 		m.members = append(m.members, body)
 		w.WriteHeader(201)
-		json.NewEncoder(w).Encode(body)
+		mustEncodeJSON(w, body)
 
 	case r.Method == "PATCH" && matchPath(r.URL.Path, "/api/v1/tenants/acme/members/"):
 		email := lastSegment(r.URL.Path)
 		var body map[string]any
-		json.NewDecoder(r.Body).Decode(&body)
+		mustDecodeJSON(r, &body)
 		for i, member := range m.members {
 			if member["email"] == email {
 				m.members[i]["role"] = body["role"]
-				json.NewEncoder(w).Encode(m.members[i])
+				mustEncodeJSON(w, m.members[i])
 				return
 			}
 		}
 		w.WriteHeader(404)
-		json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+		mustEncodeJSON(w, map[string]string{"error": "not found"})
 
 	case r.Method == "DELETE" && matchPath(r.URL.Path, "/api/v1/tenants/acme/members/"):
 		email := lastSegment(r.URL.Path)
@@ -189,7 +201,7 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		w.WriteHeader(404)
-		json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+		mustEncodeJSON(w, map[string]string{"error": "not found"})
 
 	// API Keys
 	case r.Method == "GET" && r.URL.Path == "/api/v1/tenants/acme/apikeys":
@@ -197,11 +209,11 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 		for _, k := range m.apiKeys {
 			items = append(items, k)
 		}
-		json.NewEncoder(w).Encode(map[string]any{"items": items})
+		mustEncodeJSON(w, map[string]any{"items": items})
 
 	case r.Method == "POST" && r.URL.Path == "/api/v1/tenants/acme/apikeys":
 		var body map[string]any
-		json.NewDecoder(r.Body).Decode(&body)
+		mustDecodeJSON(r, &body)
 		id := fmt.Sprintf("ak-%d", m.rvCounter)
 		key := map[string]any{
 			"id": id, "displayName": body["displayName"],
@@ -214,7 +226,7 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 		m.apiKeys[id] = key
 		m.rvCounter++
 		w.WriteHeader(201)
-		json.NewEncoder(w).Encode(key)
+		mustEncodeJSON(w, key)
 
 	case r.Method == "DELETE" && matchPath(r.URL.Path, "/api/v1/tenants/acme/apikeys/"):
 		id := lastSegment(r.URL.Path)
@@ -223,13 +235,13 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(204)
 		} else {
 			w.WriteHeader(404)
-			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			mustEncodeJSON(w, map[string]string{"error": "not found"})
 		}
 
 	// Secrets
 	case r.Method == "POST" && r.URL.Path == "/api/v1/tenants/acme/secrets":
 		var body map[string]any
-		json.NewDecoder(r.Body).Decode(&body)
+		mustDecodeJSON(r, &body)
 		name := body["name"].(string)
 		rv := m.nextRV()
 		secret := map[string]any{
@@ -241,16 +253,16 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 		m.secrets[name] = secret
 		w.Header().Set("ETag", `"`+rv+`"`)
 		w.WriteHeader(201)
-		json.NewEncoder(w).Encode(secret)
+		mustEncodeJSON(w, secret)
 
 	case r.Method == "GET" && matchPath(r.URL.Path, "/api/v1/tenants/acme/secrets/"):
 		name := lastSegment(r.URL.Path)
 		if s, ok := m.secrets[name]; ok {
 			w.Header().Set("ETag", `"`+s["resourceVersion"].(string)+`"`)
-			json.NewEncoder(w).Encode(s)
+			mustEncodeJSON(w, s)
 		} else {
 			w.WriteHeader(404)
-			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			mustEncodeJSON(w, map[string]string{"error": "not found"})
 		}
 
 	case r.Method == "PATCH" && matchPath(r.URL.Path, "/api/v1/tenants/acme/secrets/"):
@@ -258,18 +270,18 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 		s, ok := m.secrets[name]
 		if !ok {
 			w.WriteHeader(404)
-			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			mustEncodeJSON(w, map[string]string{"error": "not found"})
 			return
 		}
 		var body map[string]any
-		json.NewDecoder(r.Body).Decode(&body)
+		mustDecodeJSON(r, &body)
 		if v, ok := body["sync"]; ok {
 			s["sync"] = v
 		}
 		rv := m.nextRV()
 		s["resourceVersion"] = rv
 		w.Header().Set("ETag", `"`+rv+`"`)
-		json.NewEncoder(w).Encode(s)
+		mustEncodeJSON(w, s)
 
 	case r.Method == "DELETE" && matchPath(r.URL.Path, "/api/v1/tenants/acme/secrets/"):
 		name := lastSegment(r.URL.Path)
@@ -278,12 +290,12 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(204)
 		} else {
 			w.WriteHeader(404)
-			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			mustEncodeJSON(w, map[string]string{"error": "not found"})
 		}
 
 	default:
 		w.WriteHeader(404)
-		json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+		mustEncodeJSON(w, map[string]string{"error": "not found"})
 	}
 }
 

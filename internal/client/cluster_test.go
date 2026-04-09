@@ -90,7 +90,9 @@ func TestCreateCluster(t *testing.T) {
 	}
 
 	var body CreateClusterRequest
-	json.Unmarshal([]byte(req.Body), &body)
+	if err := json.Unmarshal([]byte(req.Body), &body); err != nil {
+		t.Fatalf("failed to unmarshal request body: %v", err)
+	}
 	if body.Resources.CPU != "2" {
 		t.Errorf("expected CPU=2, got %q", body.Resources.CPU)
 	}
@@ -108,7 +110,9 @@ func TestUpdateCluster(t *testing.T) {
 		w.Header().Set("ETag", `"new-etag"`)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(Cluster{Name: "prod", Version: "1.32"})
+		if err := json.NewEncoder(w).Encode(Cluster{Name: "prod", Version: "1.32"}); err != nil {
+			t.Fatalf("failed to encode cluster response: %v", err)
+		}
 	})
 
 	c := mock.client("acme")

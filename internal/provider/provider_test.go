@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"os"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -24,7 +23,7 @@ func TestStringValueOrEnv(t *testing.T) {
 	})
 
 	t.Run("returns empty when neither set", func(t *testing.T) {
-		os.Unsetenv("TEST_PROVIDER_MISSING")
+		t.Setenv("TEST_PROVIDER_MISSING", "")
 		v := stringValueOrEnv(types.StringNull(), "TEST_PROVIDER_MISSING")
 		if v != "" {
 			t.Errorf("expected empty, got %q", v)

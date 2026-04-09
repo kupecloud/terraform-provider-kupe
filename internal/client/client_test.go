@@ -46,7 +46,9 @@ func newMockAPI() *mockAPI {
 
 		// Default: 404
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(ErrorResponse{Error: "not found"})
+		if err := json.NewEncoder(w).Encode(ErrorResponse{Error: "not found"}); err != nil {
+			panic(err)
+		}
 	}))
 	return m
 }
@@ -62,7 +64,9 @@ func (m *mockAPI) onJSON(method, path string, status int, body any) {
 			w.Header().Set("ETag", `"12345"`)
 		}
 		w.WriteHeader(status)
-		json.NewEncoder(w).Encode(body)
+		if err := json.NewEncoder(w).Encode(body); err != nil {
+			panic(err)
+		}
 	}
 }
 
@@ -82,7 +86,7 @@ func (m *mockAPI) lastRequest() recordedRequest {
 }
 
 func readBody(r *http.Request) ([]byte, error) {
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 	buf := make([]byte, 0, 1024)
 	for {
 		tmp := make([]byte, 512)
