@@ -1,0 +1,71 @@
+name: Publish
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Semantic release version without the leading v
+        required: true
+        type: string
+    secrets:
+      GPG_PRIVATE_KEY:
+        required: true
+      GPG_PASSPHRASE:
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Publish release artifacts
+    runs-on: ubuntu-latest
+    env:
+      GORELEASER_VERSION: v2.15.2
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Import GPG key
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.gnupg"
+          chmod 700 "$HOME/.gnupg"
+          printf 'allow-loopback-pinentry\n' > "$HOME/.gnupg/gpg-agent.conf"
+          printf 'pinentry-mode loopback\n' > "$HOME/.gnupg/gpg.conf"
+          printf '%s' "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+          gpgconf --kill gpg-agent || true
+
+      - name: Install GoReleaser
+        shell: bash
+        run: |
+          GOBIN="$RUNNER_TEMP/bin" go install "github.com/goreleaser/goreleaser/v2@${GORELEASER_VERSION}"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Build Terraform registry artifacts
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: goreleaser release --clean --skip=publish --config .goreleaser.terraform.yaml
+
+      - name: Build OpenTofu registry artifacts
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: goreleaser release --clean --skip=publish --config .goreleaser.opentofu.yaml
+
+      - name: Upload release artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "v${{ inputs.version }}" \
+            dist/terraform/* \
+            dist/opentofu/* \
+            terraform-registry-manifest.json \
+            --clobber

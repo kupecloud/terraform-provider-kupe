@@ -1,0 +1,52 @@
+version: 2
+
+project_name: terraform-provider-kupe-opentofu
+dist: dist/opentofu
+
+builds:
+  - id: opentofu
+    main: .
+    binary: terraform-provider-kupe_v{{ .Version }}
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{ .Version }} -X main.providerAddress=registry.opentofu.org/kupecloud/kupe
+
+archives:
+  - id: opentofu
+    ids:
+      - opentofu
+    formats:
+      - zip
+    name_template: terraform-provider-kupe-opentofu_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - none*
+
+checksum:
+  name_template: terraform-provider-kupe-opentofu_{{ .Version }}_SHA256SUMS
+
+signs:
+  - artifacts: checksum
+    signature: "${artifact}.sig"
+    cmd: gpg
+    args:
+      - --batch
+      - --yes
+      - --pinentry-mode
+      - loopback
+      - --passphrase
+      - "{{ .Env.GPG_PASSPHRASE }}"
+      - --detach-sign
+      - --output
+      - "${signature}"
+      - "${artifact}"
+
+release:
+  disable: true

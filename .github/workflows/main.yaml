@@ -1,0 +1,67 @@
+name: Main
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  go-lint:
+    name: Go Lint
+    uses: ./.github/workflows/go-lint.yaml
+
+  action-lint:
+    name: Action Lint
+    uses: ./.github/workflows/action-lint.yaml
+
+  unit-tests:
+    name: Unit Tests
+    needs:
+      - go-lint
+      - action-lint
+    uses: ./.github/workflows/unit-tests.yaml
+
+  gosec:
+    name: Go Security
+    needs:
+      - unit-tests
+    uses: ./.github/workflows/gosec.yaml
+
+  build:
+    name: Build
+    needs:
+      - gosec
+    uses: ./.github/workflows/build.yaml
+
+  release:
+    name: Release
+    needs:
+      - build
+    uses: kupecloud/github-workflows/.github/workflows/semantic-release.yaml@530d751e117f3a8451429d49e532a6df70b74432
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      packages: write
+      id-token: write
+    secrets: inherit
+
+  # publish:
+  #   name: Publish
+  #   needs:
+  #     - release
+  #   if: needs.release.outputs.new_release_published == 'true'
+  #   uses: ./.github/workflows/publish.yaml
+  #   permissions:
+  #     contents: write
+  #   with:
+  #     version: ${{ needs.release.outputs.new_release_version }}
+  #   secrets: inherit

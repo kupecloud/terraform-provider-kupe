@@ -1,0 +1,8 @@
+name: Unit Tests
+
+on:
+  workflow_call:
+
+jobs:
+  unit-tests:
+    uses: kupecloud/github-workflows/.github/workflows/go-unit-tests.yaml@530d751e117f3a8451429d49e532a6df70b74432

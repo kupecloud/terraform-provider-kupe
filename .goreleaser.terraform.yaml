@@ -1,0 +1,52 @@
+version: 2
+
+project_name: terraform-provider-kupe
+dist: dist/terraform
+
+builds:
+  - id: terraform
+    main: .
+    binary: terraform-provider-kupe_v{{ .Version }}
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{ .Version }} -X main.providerAddress=registry.terraform.io/kupecloud/kupe
+
+archives:
+  - id: terraform
+    ids:
+      - terraform
+    formats:
+      - zip
+    name_template: terraform-provider-kupe_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - none*
+
+checksum:
+  name_template: terraform-provider-kupe_{{ .Version }}_SHA256SUMS
+
+signs:
+  - artifacts: checksum
+    signature: "${artifact}.sig"
+    cmd: gpg
+    args:
+      - --batch
+      - --yes
+      - --pinentry-mode
+      - loopback
+      - --passphrase
+      - "{{ .Env.GPG_PASSPHRASE }}"
+      - --detach-sign
+      - --output
+      - "${signature}"
+      - "${artifact}"
+
+release:
+  disable: true

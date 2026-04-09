@@ -1,0 +1,8 @@
+name: Go Security
+
+on:
+  workflow_call:
+
+jobs:
+  go-security:
+    uses: kupecloud/github-workflows/.github/workflows/go-security.yaml@530d751e117f3a8451429d49e532a6df70b74432

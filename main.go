@@ -10,10 +10,11 @@ import (
 )
 
 var version = "dev"
+var providerAddress = "registry.terraform.io/kupecloud/kupe"
 
 func main() {
 	opts := providerserver.ServeOpts{
-		Address: "registry.terraform.io/kupecloud/kupe",
+		Address: providerAddress,
 	}
 
 	err := providerserver.Serve(context.Background(), provider.New(version), opts)

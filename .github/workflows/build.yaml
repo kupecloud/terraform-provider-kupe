@@ -1,0 +1,43 @@
+name: Build
+
+on:
+  workflow_call:
+
+jobs:
+  build:
+    name: Build and Validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_wrapper: false
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@000eeb8522f0572907c393e8151076c205fdba1b # v1.0.6
+        with:
+          tofu_wrapper: false
+
+      - name: Install tfplugindocs
+        run: make docs-install
+
+      - name: Build provider variants
+        run: make build-terraform build-opentofu
+
+      - name: Validate OpenTofu examples
+        run: make tofu-validate
+
+      - name: Generate provider docs
+        run: make docs-generate
+
+      - name: Validate provider docs
+        run: make docs-validate

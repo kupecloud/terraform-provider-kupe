@@ -1,0 +1,34 @@
+name: PR
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "go.mod"
+      - "go.sum"
+      - "**.go"
+      - ".github/workflows/**"
+      - "examples/**"
+      - "scripts/**"
+      - "templates/**"
+      - "Makefile"
+
+permissions:
+  contents: read
+
+jobs:
+  go-lint:
+    name: Go Lint
+    uses: ./.github/workflows/go-lint.yaml
+
+  action-lint:
+    name: Action Lint
+    uses: ./.github/workflows/action-lint.yaml
+
+  unit-tests:
+    name: Unit Tests
+    needs:
+      - go-lint
+      - action-lint
+    uses: ./.github/workflows/unit-tests.yaml

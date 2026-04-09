@@ -1,0 +1,76 @@
+minimum_pre_commit_version: "3.7.0"
+default_install_hook_types:
+  - pre-commit
+  - commit-msg
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c
+    hooks:
+      - id: check-added-large-files
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-symlinks
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: 3db014c16a9d31997ab8c07a4d61fcce936c8f0d
+    hooks:
+      - id: conventional-pre-commit
+        stages:
+          - commit-msg
+
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: 3766ad839ad3a74558031510b3bc9872bb1d9980
+    hooks:
+      - id: markdownlint-cli2
+        files: ^(README\.md|templates/.*\.md\.tmpl)$
+
+  - repo: https://github.com/trussworks/pre-commit-hooks
+    rev: f72781be8d6b5e92653232bfb13f3f10cb1fc0c4
+    hooks:
+      - id: markdown-toc
+        files: ^README\.md$
+
+  - repo: https://github.com/codespell-project/codespell
+    rev: 2ccb47ff45ad361a21071a7eedda4c37e6ae8c5a
+    hooks:
+      - id: codespell
+        args:
+          - --write-changes
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: 745eface02aef23e168a8afb6b5737818efbea95
+    hooks:
+      - id: shellcheck
+        files: ^scripts/.*\.sh$
+
+  - repo: https://github.com/golangci/golangci-lint
+    rev: 8f3b0c7ed018e57905fbd873c697e0b1ede605a5
+    hooks:
+      - id: golangci-lint
+        args:
+          - --timeout=10m
+
+  - repo: local
+    hooks:
+      - id: gofmt
+        name: gofmt
+        entry: gofmt -w
+        language: system
+        types:
+          - go
+      - id: govulncheck
+        name: govulncheck
+        entry: bash -c 'GOWORK=off go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...'
+        language: system
+        pass_filenames: false
+        files: ^(internal/|scripts/|main\.go|go\.mod|Makefile)
+      - id: gosec
+        name: gosec
+        entry: bash -c 'GOWORK=off go run github.com/securego/gosec/v2/cmd/gosec@v2.25.0 -exclude-generated ./...'
+        language: system
+        pass_filenames: false
+        files: ^(internal/|scripts/|main\.go|go\.mod|Makefile)

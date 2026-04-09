@@ -2,33 +2,49 @@
 
 BINARY_NAME = terraform-provider-kupe
 VERSION ?= dev
+PROVIDER_ADDRESS ?= registry.terraform.io/kupecloud/kupe
 TFPLUGINDOCS_VERSION ?= v0.24.0
 GO := go
 GOBIN ?= $(PWD)/bin
 GOCACHE ?= $(PWD)/.tmp/go-build
 
-.PHONY: all build test install tidy fmt vet tofu-validate docs-install docs-generate docs-validate docs clean
+.PHONY: all build build-terraform build-opentofu test gosec govulncheck install local-provider tidy fmt vet tofu-validate docs-install docs-generate docs-validate docs clean help
 
 all: build
 
 build: ## Build the provider binary
-	$(GO) build -ldflags "-X main.version=$(VERSION)" -o $(BINARY_NAME)
+	GOCACHE=$(GOCACHE) $(GO) build -ldflags "-X main.version=$(VERSION) -X main.providerAddress=$(PROVIDER_ADDRESS)" -o $(BINARY_NAME)
+
+build-terraform: ## Build the provider binary for Terraform registry identity
+	$(MAKE) build PROVIDER_ADDRESS=registry.terraform.io/kupecloud/kupe
+
+build-opentofu: ## Build the provider binary for OpenTofu registry identity
+	$(MAKE) build PROVIDER_ADDRESS=registry.opentofu.org/kupecloud/kupe
 
 test: ## Run unit tests
-	$(GO) test -v ./...
+	GOCACHE=$(GOCACHE) $(GO) test -v ./...
+
+gosec: ## Run gosec against the provider codebase
+	GOCACHE=$(GOCACHE) GOWORK=off $(GO) run github.com/securego/gosec/v2/cmd/gosec@v2.25.0 -exclude-generated ./...
+
+govulncheck: ## Run govulncheck against the provider codebase
+	GOCACHE=$(GOCACHE) GOWORK=off $(GO) run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
 
 install: build ## Install to local Terraform plugin directory
 	mkdir -p ~/.terraform.d/plugins/registry.terraform.io/kupecloud/kupe/$(VERSION)/darwin_arm64
 	cp $(BINARY_NAME) ~/.terraform.d/plugins/registry.terraform.io/kupecloud/kupe/$(VERSION)/darwin_arm64/
 
+local-provider: ## Build a local provider binary and write a dev override config under .tmp/
+	./scripts/prepare_local_provider.sh
+
 tidy: ## Run go mod tidy
-	$(GO) mod tidy
+	GOCACHE=$(GOCACHE) $(GO) mod tidy
 
 fmt: ## Format code
-	$(GO) fmt ./...
+	GOCACHE=$(GOCACHE) $(GO) fmt ./...
 
 vet: ## Run go vet
-	$(GO) vet ./...
+	GOCACHE=$(GOCACHE) $(GO) vet ./...
 
 tofu-validate: ## Run OpenTofu validation against the local provider build
 	./scripts/tofu_validate_examples.sh
