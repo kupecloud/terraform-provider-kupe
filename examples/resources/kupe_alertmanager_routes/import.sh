@@ -1,0 +1,1 @@
+terraform import kupe_alertmanager_routes.main alertmanager-routes

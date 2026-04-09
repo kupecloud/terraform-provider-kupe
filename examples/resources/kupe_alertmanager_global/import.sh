@@ -1,0 +1,1 @@
+terraform import kupe_alertmanager_global.main alertmanager-global

@@ -115,6 +115,9 @@ func (p *KupeProvider) Resources(_ context.Context) []func() resource.Resource {
 		NewSecretResource,
 		NewTenantMemberResource,
 		NewAPIKeyResource,
+		NewAlertmanagerReceiverResource,
+		NewAlertmanagerRoutesResource,
+		NewAlertmanagerGlobalResource,
 	}
 }
 

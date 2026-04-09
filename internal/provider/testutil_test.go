@@ -23,16 +23,28 @@ type mockKupeAPI struct {
 	tenant    map[string]any
 	plans     map[string]map[string]any
 	rvCounter int
+	// Alertmanager state. Receivers keyed by name; routes is the ordered
+	// child route list; global is a single map. The mock does not run the
+	// kupe-api validator — tests that need validation should run against
+	// the real API. The ETag is a simple counter shared by every section.
+	amReceivers map[string]map[string]any
+	amRoutes    []map[string]any
+	amGlobal    map[string]any
+	amETag      string
 }
 
 func newMockKupeAPI() *mockKupeAPI {
 	m := &mockKupeAPI{
-		clusters:  make(map[string]map[string]any),
-		secrets:   make(map[string]map[string]any),
-		members:   []map[string]any{},
-		apiKeys:   make(map[string]map[string]any),
-		plans:     make(map[string]map[string]any),
-		rvCounter: 1,
+		clusters:    make(map[string]map[string]any),
+		secrets:     make(map[string]map[string]any),
+		members:     []map[string]any{},
+		apiKeys:     make(map[string]map[string]any),
+		plans:       make(map[string]map[string]any),
+		amReceivers: make(map[string]map[string]any),
+		amRoutes:    []map[string]any{},
+		amGlobal:    map[string]any{},
+		amETag:      `"1"`,
+		rvCounter:   1,
 		tenant: map[string]any{
 			"name": "acme", "displayName": "Acme Corp",
 			"contactEmail": "admin@acme.com", "plan": "starter",
@@ -292,6 +304,70 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(404)
 			mustEncodeJSON(w, map[string]string{"error": "not found"})
 		}
+
+	// Alertmanager — receivers
+	case r.Method == "PUT" && matchPath(r.URL.Path, "/api/v1/tenants/acme/alertmanager/receivers/"):
+		name := lastSegment(r.URL.Path)
+		var body map[string]any
+		mustDecodeJSON(r, &body)
+		body["name"] = name
+		m.amReceivers[name] = body
+		m.amETag = `"` + m.nextRV() + `"`
+		w.Header().Set("ETag", m.amETag)
+		mustEncodeJSON(w, body)
+
+	case r.Method == "GET" && matchPath(r.URL.Path, "/api/v1/tenants/acme/alertmanager/receivers/"):
+		name := lastSegment(r.URL.Path)
+		recv, ok := m.amReceivers[name]
+		if !ok {
+			w.WriteHeader(404)
+			mustEncodeJSON(w, map[string]string{"error": "not found"})
+			return
+		}
+		w.Header().Set("ETag", m.amETag)
+		mustEncodeJSON(w, recv)
+
+	case r.Method == "DELETE" && matchPath(r.URL.Path, "/api/v1/tenants/acme/alertmanager/receivers/"):
+		name := lastSegment(r.URL.Path)
+		if _, ok := m.amReceivers[name]; !ok {
+			w.WriteHeader(404)
+			mustEncodeJSON(w, map[string]string{"error": "not found"})
+			return
+		}
+		delete(m.amReceivers, name)
+		m.amETag = `"` + m.nextRV() + `"`
+		w.WriteHeader(204)
+
+	// Alertmanager — routes (whole list)
+	case r.Method == "GET" && r.URL.Path == "/api/v1/tenants/acme/alertmanager/routes":
+		w.Header().Set("ETag", m.amETag)
+		mustEncodeJSON(w, map[string]any{"items": m.amRoutes})
+
+	case r.Method == "PUT" && r.URL.Path == "/api/v1/tenants/acme/alertmanager/routes":
+		var body struct {
+			Items []map[string]any `json:"items"`
+		}
+		mustDecodeJSON(r, &body)
+		m.amRoutes = body.Items
+		if m.amRoutes == nil {
+			m.amRoutes = []map[string]any{}
+		}
+		m.amETag = `"` + m.nextRV() + `"`
+		w.Header().Set("ETag", m.amETag)
+		mustEncodeJSON(w, map[string]any{"items": m.amRoutes})
+
+	// Alertmanager — global
+	case r.Method == "GET" && r.URL.Path == "/api/v1/tenants/acme/alertmanager/global":
+		w.Header().Set("ETag", m.amETag)
+		mustEncodeJSON(w, m.amGlobal)
+
+	case r.Method == "PUT" && r.URL.Path == "/api/v1/tenants/acme/alertmanager/global":
+		var body map[string]any
+		mustDecodeJSON(r, &body)
+		m.amGlobal = body
+		m.amETag = `"` + m.nextRV() + `"`
+		w.Header().Set("ETag", m.amETag)
+		mustEncodeJSON(w, m.amGlobal)
 
 	default:
 		w.WriteHeader(404)
