@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"net/http"
-	"net/url"
 )
 
 // Member represents a tenant member.
@@ -45,7 +44,7 @@ func (c *Client) AddMember(ctx context.Context, req AddMemberRequest) (*Member, 
 // UpdateMember updates a member's role.
 func (c *Client) UpdateMember(ctx context.Context, email string, req UpdateMemberRequest) (*Member, error) {
 	var member Member
-	_, err := c.request(ctx, http.MethodPatch, c.tenantPath("members", url.PathEscape(email)), req, &member)
+	_, err := c.request(ctx, http.MethodPatch, c.tenantPath("members", email), req, &member)
 	if err != nil {
 		return nil, err
 	}
@@ -54,6 +53,6 @@ func (c *Client) UpdateMember(ctx context.Context, email string, req UpdateMembe
 
 // RemoveMember removes a member from the tenant.
 func (c *Client) RemoveMember(ctx context.Context, email string) error {
-	_, err := c.request(ctx, http.MethodDelete, c.tenantPath("members", url.PathEscape(email)), nil, nil)
+	_, err := c.request(ctx, http.MethodDelete, c.tenantPath("members", email), nil, nil)
 	return err
 }
