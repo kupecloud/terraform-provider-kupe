@@ -91,14 +91,17 @@ func (r *ClusterResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 					"cpu": schema.StringAttribute{
 						Description: "CPU limit (e.g., 4, 500m).",
 						Optional:    true,
+						Computed:    true,
 					},
 					"memory": schema.StringAttribute{
 						Description: "Memory limit (e.g., 16Gi, 512Mi).",
 						Optional:    true,
+						Computed:    true,
 					},
 					"storage": schema.StringAttribute{
 						Description: "Storage limit (e.g., 100Gi).",
 						Optional:    true,
+						Computed:    true,
 					},
 				},
 			},
@@ -149,11 +152,7 @@ func (r *ClusterResource) Create(ctx context.Context, req resource.CreateRequest
 	}
 
 	if plan.Resources != nil {
-		createReq.Resources = &client.ClusterResource{
-			CPU:     plan.Resources.CPU.ValueString(),
-			Memory:  plan.Resources.Memory.ValueString(),
-			Storage: plan.Resources.Storage.ValueString(),
-		}
+		createReq.Resources = clusterResourcesFromPlan(plan.Resources)
 	}
 
 	cluster, etag, err := r.client.CreateCluster(ctx, createReq)
@@ -210,11 +209,7 @@ func (r *ClusterResource) Update(ctx context.Context, req resource.UpdateRequest
 		!plan.Resources.CPU.Equal(state.Resources.CPU) ||
 		!plan.Resources.Memory.Equal(state.Resources.Memory) ||
 		!plan.Resources.Storage.Equal(state.Resources.Storage)):
-		patchReq.Resources = &client.ClusterResource{
-			CPU:     plan.Resources.CPU.ValueString(),
-			Memory:  plan.Resources.Memory.ValueString(),
-			Storage: plan.Resources.Storage.ValueString(),
-		}
+		patchReq.Resources = clusterResourcesFromPlan(plan.Resources)
 		hasChanges = true
 	case plan.Resources == nil && state.Resources != nil:
 		// User removed the resources block — send empty to clear.
@@ -275,13 +270,40 @@ func mapClusterToState(c *client.Cluster, etag string, state *ClusterResourceMod
 		state.Endpoint = types.StringValue("")
 	}
 
-	if c.Resources != nil {
+	if c.Resources != nil && (c.Resources.CPU != "" || c.Resources.Memory != "" || c.Resources.Storage != "") {
 		state.Resources = &ClusterResourcesModel{
-			CPU:     types.StringValue(c.Resources.CPU),
-			Memory:  types.StringValue(c.Resources.Memory),
-			Storage: types.StringValue(c.Resources.Storage),
+			CPU:     stringOrNull(c.Resources.CPU),
+			Memory:  stringOrNull(c.Resources.Memory),
+			Storage: stringOrNull(c.Resources.Storage),
 		}
 	} else {
 		state.Resources = nil
 	}
+}
+
+// clusterResourcesFromPlan builds a ClusterResource only including
+// non-null fields so omitted nested values are absent from the JSON body
+// rather than sent as empty strings.
+func clusterResourcesFromPlan(m *ClusterResourcesModel) *client.ClusterResource {
+	r := &client.ClusterResource{}
+	if !m.CPU.IsNull() && !m.CPU.IsUnknown() {
+		r.CPU = m.CPU.ValueString()
+	}
+	if !m.Memory.IsNull() && !m.Memory.IsUnknown() {
+		r.Memory = m.Memory.ValueString()
+	}
+	if !m.Storage.IsNull() && !m.Storage.IsUnknown() {
+		r.Storage = m.Storage.ValueString()
+	}
+	return r
+}
+
+// stringOrNull returns types.StringNull for empty API values so terraform
+// state doesn't contain "" for fields the user never set — that prevents
+// perpetual diffs on partial resources blocks (e.g., memory-only).
+func stringOrNull(s string) types.String {
+	if s == "" {
+		return types.StringNull()
+	}
+	return types.StringValue(s)
 }
