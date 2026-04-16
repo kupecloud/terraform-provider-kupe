@@ -205,15 +205,20 @@ func (r *ClusterResource) Update(ctx context.Context, req resource.UpdateRequest
 		hasChanges = true
 	}
 
-	if plan.Resources != nil && (state.Resources == nil ||
+	switch {
+	case plan.Resources != nil && (state.Resources == nil ||
 		!plan.Resources.CPU.Equal(state.Resources.CPU) ||
 		!plan.Resources.Memory.Equal(state.Resources.Memory) ||
-		!plan.Resources.Storage.Equal(state.Resources.Storage)) {
+		!plan.Resources.Storage.Equal(state.Resources.Storage)):
 		patchReq.Resources = &client.ClusterResource{
 			CPU:     plan.Resources.CPU.ValueString(),
 			Memory:  plan.Resources.Memory.ValueString(),
 			Storage: plan.Resources.Storage.ValueString(),
 		}
+		hasChanges = true
+	case plan.Resources == nil && state.Resources != nil:
+		// User removed the resources block — send empty to clear.
+		patchReq.Resources = &client.ClusterResource{}
 		hasChanges = true
 	}
 

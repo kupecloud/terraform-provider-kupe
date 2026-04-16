@@ -157,7 +157,7 @@ func renderReceiverBody(recv client.AlertmanagerReceiver) (string, error) {
 		body[k] = v
 	}
 	if len(body) == 0 {
-		return "", nil
+		return "{}", nil
 	}
 	out, err := json.Marshal(body)
 	if err != nil {
