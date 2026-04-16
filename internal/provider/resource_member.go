@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -79,8 +80,13 @@ func (r *TenantMemberResource) Create(ctx context.Context, req resource.CreateRe
 		return
 	}
 
+	// Lowercase the email before sending — the API normalizes to lowercase
+	// anyway, and storing the lowered form from the start prevents a
+	// RequiresReplace diff between "User@Example.com" (config) and
+	// "user@example.com" (API response).
+	email := strings.ToLower(plan.Email.ValueString())
 	member, err := r.client.AddMember(ctx, client.AddMemberRequest{
-		Email: plan.Email.ValueString(),
+		Email: email,
 		Role:  plan.Role.ValueString(),
 	})
 	if err != nil {
@@ -108,7 +114,7 @@ func (r *TenantMemberResource) Read(ctx context.Context, req resource.ReadReques
 
 	email := state.Email.ValueString()
 	for _, m := range members {
-		if m.Email == email {
+		if strings.EqualFold(m.Email, email) {
 			state.Role = types.StringValue(m.Role)
 			resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 			return
