@@ -50,7 +50,7 @@ func (c *Client) GetAlertmanagerReceiver(ctx context.Context, name string) (Aler
 }
 
 // PutAlertmanagerReceiver creates or replaces a receiver by name.
-func (c *Client) PutAlertmanagerReceiver(ctx context.Context, name string, etag string, recv AlertmanagerReceiver) (AlertmanagerReceiver, string, error) {
+func (c *Client) PutAlertmanagerReceiver(ctx context.Context, name, etag string, recv AlertmanagerReceiver) (AlertmanagerReceiver, string, error) {
 	var out AlertmanagerReceiver
 	newETag, err := c.requestWithETag(ctx, http.MethodPut, c.tenantPath("alertmanager", "receivers", name), etag, recv, &out)
 	if err != nil {

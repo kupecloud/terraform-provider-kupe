@@ -83,8 +83,8 @@ func (c *Client) requestWithETag(ctx context.Context, method, path, etag string,
 		bodyReader = bytes.NewReader(data)
 	}
 
-	url := c.baseURL + path
-	req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
+	reqURL := c.baseURL + path
+	req, err := http.NewRequestWithContext(ctx, method, reqURL, bodyReader)
 	if err != nil {
 		return "", fmt.Errorf("creating request: %w", err)
 	}

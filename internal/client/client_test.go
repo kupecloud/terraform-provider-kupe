@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -171,8 +172,8 @@ func TestClientErrorHandling(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error")
 		}
-		apiErr, ok := err.(*APIError)
-		if !ok {
+		var apiErr *APIError
+		if !errors.As(err, &apiErr) {
 			t.Fatalf("expected APIError, got %T", err)
 		}
 		if apiErr.StatusCode != http.StatusForbidden {

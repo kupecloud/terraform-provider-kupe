@@ -79,7 +79,7 @@ func (c *Client) CreateCluster(ctx context.Context, req CreateClusterRequest) (*
 }
 
 // UpdateCluster patches a cluster with optimistic locking.
-func (c *Client) UpdateCluster(ctx context.Context, name string, etag string, req PatchClusterRequest) (*Cluster, string, error) {
+func (c *Client) UpdateCluster(ctx context.Context, name, etag string, req PatchClusterRequest) (*Cluster, string, error) {
 	var cluster Cluster
 	newETag, err := c.requestWithETag(ctx, http.MethodPatch, c.tenantPath("clusters", name), etag, req, &cluster)
 	if err != nil {

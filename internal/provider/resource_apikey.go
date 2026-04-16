@@ -161,18 +161,19 @@ func (r *APIKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 
 	id := state.ID.ValueString()
 	for _, k := range keys {
-		if k.ID == id {
-			state.DisplayName = types.StringValue(k.DisplayName)
-			state.Role = types.StringValue(k.Role)
-			state.CreatedBy = types.StringValue(k.CreatedBy)
-			state.CreatedAt = types.StringValue(k.CreatedAt)
-			if k.ExpiresAt != "" {
-				state.ExpiresAt = types.StringValue(k.ExpiresAt)
-			}
-			// Key is only available on creation — preserve from state
-			resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
-			return
+		if k.ID != id {
+			continue
 		}
+		state.DisplayName = types.StringValue(k.DisplayName)
+		state.Role = types.StringValue(k.Role)
+		state.CreatedBy = types.StringValue(k.CreatedBy)
+		state.CreatedAt = types.StringValue(k.CreatedAt)
+		if k.ExpiresAt != "" {
+			state.ExpiresAt = types.StringValue(k.ExpiresAt)
+		}
+		// Key is only available on creation — preserve from state
+		resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+		return
 	}
 
 	// Key not found — deleted externally
