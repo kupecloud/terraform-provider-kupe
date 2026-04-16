@@ -210,7 +210,10 @@ func extractSyncTargets(list types.List) []client.SyncTarget {
 	if list.IsNull() || list.IsUnknown() {
 		return nil
 	}
-	var targets []client.SyncTarget
+	// Return a non-nil empty slice for sync = [] so the API receives
+	// "sync": [] rather than omitting the field — this lets the user
+	// explicitly clear all sync targets.
+	targets := make([]client.SyncTarget, 0, len(list.Elements()))
 	for _, elem := range list.Elements() {
 		obj, ok := elem.(types.Object)
 		if !ok {
@@ -243,7 +246,13 @@ func mapSecretToState(s *client.Secret, etag string, state *SecretResourceModel,
 		state.Phase = types.StringValue("")
 	}
 
-	if len(s.Sync) > 0 {
+	// Distinguish null (field absent from API) from empty (user explicitly
+	// set sync = []). The API returns nil/absent when no sync has ever been
+	// set, but returns an empty array when the user cleared it. Mapping both
+	// to ListNull would cause perpetual diffs for sync = [] configs.
+	if s.Sync == nil {
+		state.Sync = types.ListNull(types.ObjectType{AttrTypes: syncTargetAttrTypes})
+	} else {
 		syncElements := make([]attr.Value, 0, len(s.Sync))
 		for _, t := range s.Sync {
 			secretName := types.StringNull()
@@ -262,7 +271,5 @@ func mapSecretToState(s *client.Secret, etag string, state *SecretResourceModel,
 		listVal, d := types.ListValue(types.ObjectType{AttrTypes: syncTargetAttrTypes}, syncElements)
 		diags.Append(d...)
 		state.Sync = listVal
-	} else {
-		state.Sync = types.ListNull(types.ObjectType{AttrTypes: syncTargetAttrTypes})
 	}
 }
