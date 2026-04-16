@@ -118,25 +118,26 @@ func (r *AlertmanagerRoutesResource) Configure(_ context.Context, req resource.C
 	r.client = c
 }
 
-// parseRoutes decodes the routes_json string into a slice of AlertmanagerRoute.
-// JSON unmarshalling into typed structs sorts unknown fields out, so any
-// extras the user adds will be silently dropped — the kupe-api validator
-// rejects malformed routes before they reach Mimir.
-func parseRoutes(raw string) ([]*client.AlertmanagerRoute, error) {
+// parseRoutes validates that routes_json is a JSON array and returns it as
+// raw messages. We deliberately do NOT unmarshal into a typed struct — that
+// would silently drop any Alertmanager route fields the provider doesn't
+// know about yet, erasing them on apply. Instead, the JSON is passed
+// through opaquely; kupe-api's validator rejects malformed routes
+// server-side, so the provider stays forward-compatible with new
+// Alertmanager fields without a provider release.
+func parseRoutes(raw string) ([]json.RawMessage, error) {
 	if raw == "" {
 		return nil, nil
 	}
-	var out []*client.AlertmanagerRoute
+	var out []json.RawMessage
 	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		return nil, fmt.Errorf("invalid routes_json: %w", err)
+		return nil, fmt.Errorf("invalid routes_json: must be a JSON array: %w", err)
 	}
 	return out, nil
 }
 
-// renderRoutes serialises the typed slice back to JSON. encoding/json
-// sorts struct fields by declaration order, which produces stable output
-// across reads.
-func renderRoutes(routes []*client.AlertmanagerRoute) (string, error) {
+// renderRoutes serialises the raw-message slice back to a JSON array string.
+func renderRoutes(routes []json.RawMessage) (string, error) {
 	if len(routes) == 0 {
 		return "[]", nil
 	}
@@ -235,7 +236,7 @@ func (r *AlertmanagerRoutesResource) ImportState(ctx context.Context, req resour
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }
 
-func mapRoutesToState(routes []*client.AlertmanagerRoute, etag string, state *AlertmanagerRoutesResourceModel) error {
+func mapRoutesToState(routes []json.RawMessage, etag string, state *AlertmanagerRoutesResourceModel) error {
 	state.ID = types.StringValue("alertmanager-routes")
 	state.ETag = types.StringValue(etag)
 	body, err := renderRoutes(routes)

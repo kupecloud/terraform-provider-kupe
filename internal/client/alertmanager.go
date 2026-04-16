@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 )
 
@@ -68,16 +69,17 @@ func (c *Client) DeleteAlertmanagerReceiver(ctx context.Context, name string) er
 
 // --- Routes (whole-list resource) ---
 
-// alertmanagerRouteList is the list-shaped wire envelope. Kept private —
-// callers see plain slices on the public API.
-type alertmanagerRouteList struct {
-	Items []*AlertmanagerRoute `json:"items"`
+// rawRouteList is the wire envelope used for routes. Items are kept as
+// json.RawMessage so unknown fields survive the round-trip through the
+// provider without being dropped — the provider is forward-compatible
+// with new Alertmanager route fields without a release.
+type rawRouteList struct {
+	Items []json.RawMessage `json:"items"`
 }
 
-// GetAlertmanagerRoutes returns the full child route list of the root
-// route.
-func (c *Client) GetAlertmanagerRoutes(ctx context.Context) ([]*AlertmanagerRoute, string, error) {
-	var list alertmanagerRouteList
+// GetAlertmanagerRoutes returns the full child route list of the root route.
+func (c *Client) GetAlertmanagerRoutes(ctx context.Context) ([]json.RawMessage, string, error) {
+	var list rawRouteList
 	etag, err := c.request(ctx, http.MethodGet, c.tenantPath("alertmanager", "routes"), nil, &list)
 	if err != nil {
 		return nil, "", err
@@ -85,11 +87,10 @@ func (c *Client) GetAlertmanagerRoutes(ctx context.Context) ([]*AlertmanagerRout
 	return list.Items, etag, nil
 }
 
-// PutAlertmanagerRoutes replaces the entire child route list. Empty
-// `routes` clears all child routes (the root remains).
-func (c *Client) PutAlertmanagerRoutes(ctx context.Context, etag string, routes []*AlertmanagerRoute) ([]*AlertmanagerRoute, string, error) {
-	var out alertmanagerRouteList
-	newETag, err := c.requestWithETag(ctx, http.MethodPut, c.tenantPath("alertmanager", "routes"), etag, alertmanagerRouteList{Items: routes}, &out)
+// PutAlertmanagerRoutes replaces the entire child route list.
+func (c *Client) PutAlertmanagerRoutes(ctx context.Context, etag string, routes []json.RawMessage) ([]json.RawMessage, string, error) {
+	var out rawRouteList
+	newETag, err := c.requestWithETag(ctx, http.MethodPut, c.tenantPath("alertmanager", "routes"), etag, rawRouteList{Items: routes}, &out)
 	if err != nil {
 		return nil, "", err
 	}

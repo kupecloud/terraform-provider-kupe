@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -156,8 +157,9 @@ func TestGetAlertmanagerRoutes(t *testing.T) {
 	if len(routes) != 2 {
 		t.Fatalf("expected 2 routes, got %d", len(routes))
 	}
-	if routes[0].Receiver != "slack" {
-		t.Errorf("expected receiver=slack, got %q", routes[0].Receiver)
+	// Routes are opaque json.RawMessage — verify the first contains "slack"
+	if !bytes.Contains(routes[0], []byte(`"slack"`)) {
+		t.Errorf("expected first route to contain slack, got %s", routes[0])
 	}
 	if etag != `"rv1"` {
 		t.Errorf("expected ETag, got %q", etag)
@@ -182,8 +184,8 @@ func TestPutAlertmanagerRoutes(t *testing.T) {
 	})
 
 	c := mock.client("acme")
-	routes := []*AlertmanagerRoute{
-		{Receiver: "slack", Matchers: []string{`severity="warning"`}},
+	routes := []json.RawMessage{
+		json.RawMessage(`{"receiver":"slack","matchers":["severity=\"warning\""]}`),
 	}
 	out, etag, err := c.PutAlertmanagerRoutes(context.Background(), `"rv1"`, routes)
 	if err != nil {
@@ -192,8 +194,8 @@ func TestPutAlertmanagerRoutes(t *testing.T) {
 	if len(out) != 1 {
 		t.Fatalf("expected 1 route, got %d", len(out))
 	}
-	if out[0].Receiver != "slack" {
-		t.Errorf("expected receiver=slack, got %q", out[0].Receiver)
+	if !bytes.Contains(out[0], []byte(`"slack"`)) {
+		t.Errorf("expected route to contain slack, got %s", out[0])
 	}
 	if etag != `"rv2"` {
 		t.Errorf("expected new ETag, got %q", etag)
