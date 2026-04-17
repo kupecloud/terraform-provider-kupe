@@ -80,7 +80,7 @@ func (r *TenantMemberResource) Create(ctx context.Context, req resource.CreateRe
 		return
 	}
 
-	// Lowercase the email before sending — the API normalizes to lowercase
+	// Lowercase the email before sending — the API normalises to lowercase
 	// anyway, and storing the lowered form from the start prevents a
 	// RequiresReplace diff between "User@Example.com" (config) and
 	// "user@example.com" (API response).

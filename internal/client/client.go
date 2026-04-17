@@ -78,7 +78,7 @@ func (c *Client) requestWithETag(ctx context.Context, method, path, etag string,
 	if body != nil {
 		data, err := json.Marshal(body)
 		if err != nil {
-			return "", fmt.Errorf("marshaling request body: %w", err)
+			return "", fmt.Errorf("marshalling request body: %w", err)
 		}
 		bodyReader = bytes.NewReader(data)
 	}
