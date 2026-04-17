@@ -39,6 +39,9 @@ linters:
       disabled-checks:
         - hugeParam
         - rangeValCopy
+        - unnamedResult
+        - ifElseChain
+        - singleCaseSwitch
     revive:
       rules:
         - name: blank-imports

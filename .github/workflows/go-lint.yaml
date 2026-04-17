@@ -5,4 +5,4 @@ on:
 
 jobs:
   go-lint:
-    uses: kupecloud/github-workflows/.github/workflows/go-lint.yaml@1db2d585bff13a2fedb9a186e276954020348832
+    uses: kupecloud/github-workflows/.github/workflows/go-lint.yaml@e05fad825e84a745823178c518efbd40b0f2bd87
