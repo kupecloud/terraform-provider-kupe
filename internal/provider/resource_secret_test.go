@@ -35,6 +35,14 @@ func TestAccSecretResource(t *testing.T) {
 					resource.TestCheckResourceAttr("kupe_secret.test", "sync.0.secret_name", "database-credentials"),
 				),
 			},
+			// Import roundtrip — secret imports by `name`.
+			{
+				ResourceName:                         "kupe_secret.test",
+				ImportState:                          true,
+				ImportStateVerify:                    true,
+				ImportStateId:                        "db-password",
+				ImportStateVerifyIdentifierAttribute: "name",
+			},
 		},
 	})
 }

@@ -31,6 +31,14 @@ func TestAccClusterResource(t *testing.T) {
 					resource.TestCheckResourceAttr("kupe_cluster.test", "version", "1.32"),
 				),
 			},
+			// Import roundtrip — cluster imports by `name`.
+			{
+				ResourceName:                         "kupe_cluster.test",
+				ImportState:                          true,
+				ImportStateVerify:                    true,
+				ImportStateId:                        "test-cluster",
+				ImportStateVerifyIdentifierAttribute: "name",
+			},
 		},
 	})
 }

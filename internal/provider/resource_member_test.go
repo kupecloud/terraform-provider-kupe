@@ -29,6 +29,14 @@ func TestAccTenantMemberResource(t *testing.T) {
 					resource.TestCheckResourceAttr("kupe_tenant_member.test", "role", "admin"),
 				),
 			},
+			// Import roundtrip — member imports by `email`.
+			{
+				ResourceName:                         "kupe_tenant_member.test",
+				ImportState:                          true,
+				ImportStateVerify:                    true,
+				ImportStateId:                        "dev@acme.com",
+				ImportStateVerifyIdentifierAttribute: "email",
+			},
 		},
 	})
 }

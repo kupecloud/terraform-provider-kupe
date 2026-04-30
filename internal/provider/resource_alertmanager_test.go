@@ -29,6 +29,22 @@ func TestAccAlertmanagerReceiverResource(t *testing.T) {
 					resource.TestCheckResourceAttr("kupe_alertmanager_receiver.slack", "name", "slack"),
 				),
 			},
+			// Import roundtrip — receiver imports by `name`.
+			//
+			// `body_json` is excluded from verify: the framework's
+			// ImportStateVerify byte-compares state attrs, but the JSON
+			// comes back from the API with alphabetised keys vs the
+			// user's original key ordering. The provider's JSONStringType
+			// custom semantic-equality fixes this at plan time, just not
+			// at import-verify time.
+			{
+				ResourceName:                         "kupe_alertmanager_receiver.slack",
+				ImportState:                          true,
+				ImportStateVerify:                    true,
+				ImportStateId:                        "slack",
+				ImportStateVerifyIdentifierAttribute: "name",
+				ImportStateVerifyIgnore:              []string{"body_json"},
+			},
 		},
 	})
 }
@@ -73,6 +89,16 @@ func TestAccAlertmanagerRoutesResource(t *testing.T) {
 					resource.TestCheckResourceAttrSet("kupe_alertmanager_routes.main", "etag"),
 				),
 			},
+			// Import roundtrip — routes is a singleton, imported by the
+			// fixed id "routes". routes_json excluded from verify for the
+			// same JSON-key-ordering reason as receiver above.
+			{
+				ResourceName:            "kupe_alertmanager_routes.main",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateId:           "routes",
+				ImportStateVerifyIgnore: []string{"routes_json"},
+			},
 		},
 	})
 }
@@ -113,6 +139,16 @@ func TestAccAlertmanagerGlobalResource(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("kupe_alertmanager_global.main", "etag"),
 				),
+			},
+			// Import roundtrip — global is a singleton, imported by the
+			// fixed id "global". body_json excluded from verify for the
+			// same JSON-key-ordering reason as receiver above.
+			{
+				ResourceName:            "kupe_alertmanager_global.main",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateId:           "global",
+				ImportStateVerifyIgnore: []string{"body_json"},
 			},
 		},
 	})
