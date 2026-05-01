@@ -12,7 +12,7 @@ The provider has two test layers — one runs every PR, one runs once before eac
 | Layer | Lives in | Backed by | Speed | What it catches |
 |---|---|---|---|---|
 | Mock-backed acceptance | `internal/provider/*_test.go` | In-process stateful mock kupe API ([testutil_test.go](../internal/provider/testutil_test.go)) | ~seconds | Provider code: HCL→API translation, plan diffs, drift detection, ETag handling, schema, validators, import roundtrip |
-| Manual smoke | `examples/manual/` | Real deployed dev API + kupe-test tenant | ~10-15 min, human-driven | Mock drift from live contract, real auth/ratelimit, operator reconcile, the human-eye "this UX is weird" check |
+| Manual smoke | `test/manual/` | Real deployed dev API + kupe-test tenant | ~10-15 min, human-driven | Mock drift from live contract, real auth/ratelimit, operator reconcile, the human-eye "this UX is weird" check |
 
 ```
                    confidence ↑
@@ -72,12 +72,12 @@ Test resource names should be `<resource>.test` (e.g. `kupe_cluster.test`) to ma
 
 ## Layer 2 — manual smoke against dev
 
-`examples/manual/` is a single tofu workspace with one HCL file per resource and per data source, all sharing a `provider.tf`. Apply against your kupe-test tenant on dev. Watch real resources spin up. Destroy. Done.
+`test/manual/` is a single tofu workspace with one HCL file per resource and per data source, all sharing a `provider.tf`. Apply against your kupe-test tenant on dev. Watch real resources spin up. Destroy. Done.
 
 Layout:
 
 ```
-examples/manual/
+test/manual/
 ├── provider.tf                   # provider config — host, tenant, KUPE_API_KEY env
 ├── variables.tf                  # placeholder sensitive vars
 ├── kupe_cluster.tf               # resource + data-source smoke
@@ -117,7 +117,7 @@ Single workspace, single state — one `tofu apply` exercises every public surfa
 ### Run
 
 ```bash
-cd examples/manual
+cd test/manual
 
 # Smoke everything in one go (the canonical run before a release)
 tofu init
@@ -143,7 +143,7 @@ A natural third layer would be `*_live_test.go` — automated `TF_ACC=1` accepta
 
 - The mock-backed Layer 1 already covers provider-side correctness (plan diff, schema, ETag, validators, drift, import).
 - The kupe-api repo has its own [live test suite](https://github.com/kupecloud/kupe-api/blob/main/docs/testing.md) (`make live`) that proves the API contract end-to-end. If those pass, the contract is real.
-- A 10-minute manual smoke from `examples/manual/` before each provider release catches mock drift against current reality — at a fraction of the engineering cost of a third automated layer.
+- A 10-minute manual smoke from `test/manual/` before each provider release catches mock drift against current reality — at a fraction of the engineering cost of a third automated layer.
 
 Adopt live acceptance tests later if one of these triggers:
 
