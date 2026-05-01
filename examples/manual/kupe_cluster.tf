@@ -23,3 +23,15 @@ output "smoke_cluster_endpoint" {
   description = "API endpoint reported by the operator once the cluster is Ready."
   value       = kupe_cluster.smoke.endpoint
 }
+
+# Data source smoke — reads back the cluster we just created. The implicit
+# dependency on kupe_cluster.smoke.name forces tofu to evaluate this after
+# the resource exists, not at plan time.
+data "kupe_cluster" "smoke_read" {
+  name = kupe_cluster.smoke.name
+}
+
+output "smoke_cluster_phase" {
+  description = "status.phase reported by the data source — should be Ready after operator reconcile."
+  value       = data.kupe_cluster.smoke_read.phase
+}
