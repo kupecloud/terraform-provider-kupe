@@ -72,7 +72,26 @@ Test resource names should be `<resource>.test` (e.g. `kupe_cluster.test`) to ma
 
 ## Layer 2 — manual smoke against dev
 
-`examples/manual/` contains one HCL file per resource, all sharing a `provider.tf`. Apply against your kupe-test tenant on dev. Watch real resources spin up. Destroy. Done.
+`examples/manual/` is a single tofu workspace with one HCL file per resource and per data source, all sharing a `provider.tf`. Apply against your kupe-test tenant on dev. Watch real resources spin up. Destroy. Done.
+
+Layout:
+
+```
+examples/manual/
+├── provider.tf                   # provider config — host, tenant, KUPE_API_KEY env
+├── variables.tf                  # placeholder sensitive vars
+├── kupe_cluster.tf               # resource + data-source smoke
+├── kupe_secret.tf                # resource
+├── kupe_api_key.tf               # resource
+├── kupe_tenant_member.tf         # resource
+├── kupe_alertmanager_receiver.tf # resource
+├── kupe_alertmanager_routes.tf   # resource (depends_on receiver)
+├── kupe_alertmanager_global.tf   # resource
+├── kupe_tenant.tf                # data source
+└── kupe_plan.tf                  # data source
+```
+
+Single workspace, single state — one `tofu apply` exercises every public surface of the provider against real dev infrastructure.
 
 ### When to run
 
@@ -100,18 +119,16 @@ Test resource names should be `<resource>.test` (e.g. `kupe_cluster.test`) to ma
 ```bash
 cd examples/manual
 
-# Smoke everything
+# Smoke everything in one go (the canonical run before a release)
 tofu init
 tofu apply -auto-approve
 
-# Smoke one resource at a time (preferred — keeps state focused)
+# Or narrow to one resource — the `.smoke` label is consistent across every file
 tofu apply -target=kupe_cluster.smoke -auto-approve
 
 # When done
 tofu destroy -auto-approve
 ```
-
-Each `examples/manual/<resource>.tf` defines a single resource with the suffix `.smoke`, e.g. `kupe_cluster.smoke`. So the `-target` flag works on `<type>.smoke` for any resource.
 
 ### What to verify visually
 
