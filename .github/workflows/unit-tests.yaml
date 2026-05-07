@@ -5,4 +5,4 @@ on:
 
 jobs:
   unit-tests:
-    uses: kupecloud/github-workflows/.github/workflows/go-unit-tests.yaml@5f8c2a0126ce233053c56c04ca9a4d50f7f879b7
+    uses: kupecloud/github-workflows/.github/workflows/go-unit-tests.yaml@689a05f5764fb1960bb7e127b27987acc9129dd4 # v1.12.1
