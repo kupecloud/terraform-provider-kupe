@@ -3,12 +3,12 @@
 page_title: "kupe_cluster Resource - kupe"
 subcategory: ""
 description: |-
-  Manages a Kupe Cloud cluster for a tenant.
+  Manages a Kupe cluster for a tenant.
 ---
 
 # kupe_cluster (Resource)
 
-Manages a Kupe Cloud cluster for a tenant.
+Manages a Kupe cluster for a tenant.
 
 ## Example Usage
 

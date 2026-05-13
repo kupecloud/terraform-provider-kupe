@@ -53,7 +53,7 @@ func (r *ClusterResource) Metadata(_ context.Context, req resource.MetadataReque
 
 func (r *ClusterResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages a Kupe Cloud cluster for a tenant.",
+		Description: "Manages a Kupe cluster for a tenant.",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
 				Description: "Cluster name (immutable after creation).",

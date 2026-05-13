@@ -3,12 +3,12 @@
 page_title: "kupe_cluster Data Source - kupe"
 subcategory: ""
 description: |-
-  Reads an existing Kupe Cloud cluster by name.
+  Reads an existing Kupe cluster by name.
 ---
 
 # kupe_cluster (Data Source)
 
-Reads an existing Kupe Cloud cluster by name.
+Reads an existing Kupe cluster by name.
 
 ## Example Usage
 

@@ -36,7 +36,7 @@ func (d *ClusterDataSource) Metadata(_ context.Context, req datasource.MetadataR
 
 func (d *ClusterDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Reads an existing Kupe Cloud cluster by name.",
+		Description: "Reads an existing Kupe cluster by name.",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
 				Description: "Cluster name to look up.",
