@@ -13,7 +13,10 @@ the rest of your infrastructure code.
 * [Quick start](#quick-start)
 * [Example resource](#example-resource)
 * [Development](#development)
-* [Local testing](#local-testing)
+* [Running tests](#running-tests)
+* [Testing the provider against a live API](#testing-the-provider-against-a-live-api)
+  * [Smoke testing against the `kupe-test` tenant](#smoke-testing-against-the-kupe-test-tenant)
+  * [Testing against another tenant or a local API](#testing-against-another-tenant-or-a-local-api)
 * [Registry docs](#registry-docs)
 * [Release workflow](#release-workflow)
 * [Repo layout](#repo-layout)
@@ -89,33 +92,124 @@ Useful targets:
 * `make build` builds the provider binary
 * `make local-provider` builds a local provider binary and writes a dev
   override config under `.tmp/`
-* `make test` runs unit tests
+* `make test` runs unit and acceptance tests against the in-process mock
+  API (see [Running tests](#running-tests))
 * `make vet` runs `go vet`
 * `make tofu-validate` validates the local provider against the example
   configurations
 * `make docs` installs `tfplugindocs`, generates registry docs, and
   validates them
 
-## Local testing
+## Running tests
 
-Terraform and OpenTofu providers are plugin binaries. For local CLI
-testing, you do need a compiled binary. There is no source-only mode
-where Terraform or OpenTofu runs the provider directly from Go files.
+`make test` runs both the plain unit tests under `internal/client/` and
+the acceptance tests under `internal/provider/`. The acceptance tests
+use `terraform-plugin-testing`, which spins up the provider in-process
+and drives it through a real Terraform or OpenTofu CLI against a stateful
+mock Kupe API defined in `internal/provider/testutil_test.go`. No live
+Kupe API or external network access is needed.
 
-You do not need to run `make build` before `make tofu-validate`. That
-validation flow already builds a temporary local binary and wires it in
-through a dev override automatically.
+A local CLI is required. `make test` auto-detects one in this order:
 
-Use the following commands when you want to test the provider against a
-local Kupe API:
+1. `tofu` from your `PATH`
+2. `terraform` from your `PATH`
+
+Install OpenTofu (recommended) or Terraform first if neither is on your
+`PATH`. On macOS:
 
 ```bash
-make local-provider
-export TF_CLI_CONFIG_FILE="$PWD/.tmp/tfdevrc"
+brew install opentofu
 ```
 
-Then use a scratch Terraform or OpenTofu configuration that points at
-your local API, for example:
+Then:
+
+```bash
+make test
+```
+
+If the detected binary is `tofu`, the Makefile sets
+`TF_ACC_PROVIDER_HOST=registry.opentofu.org` so the framework uses the
+OpenTofu namespace instead of the legacy `-` namespace, which OpenTofu
+rejects. You can override the auto-detected values:
+
+```bash
+make test TF_ACC_TERRAFORM_PATH=/usr/local/bin/terraform
+```
+
+To run a single test:
+
+```bash
+TF_ACC_TERRAFORM_PATH="$(command -v tofu)" \
+TF_ACC_PROVIDER_HOST=registry.opentofu.org \
+TF_ACC_PROVIDER_NAMESPACE=kupecloud \
+  go test -run TestAccClusterResource -v ./internal/provider/...
+```
+
+> Setting `TF_ACC_TERRAFORM_PATH` is what tells the framework to use the
+> locally installed CLI. Without it, `terraform-plugin-testing` falls
+> back to downloading Terraform via `hc-install` and verifying its GPG
+> signature — that path breaks when the embedded HashiCorp key expires.
+
+## Testing the provider against a live API
+
+Terraform and OpenTofu providers are plugin binaries — there is no
+source-only mode where Terraform/OpenTofu runs the provider directly
+from Go files. The local flow is:
+
+1. Build the provider with `make local-provider`. This compiles the
+   provider into `.tmp/plugins/...` and writes a dev-override CLI config
+   at `.tmp/tfdevrc`.
+2. Point your shell at that CLI config so Terraform/OpenTofu uses your
+   local binary instead of the registry:
+
+   ```bash
+   export TF_CLI_CONFIG_FILE="$PWD/.tmp/tfdevrc"
+   ```
+
+3. Export an API key for the tenant you're testing against:
+
+   ```bash
+   export KUPE_API_KEY=kupe_...
+   ```
+
+4. Run `tofu init`, `tofu plan`, `tofu apply` against a workspace that
+   points at the Kupe API.
+
+You do **not** need `make build` first. `make local-provider` builds the
+binary itself, and `make tofu-validate` builds its own temporary binary.
+
+### Smoke testing against the `kupe-test` tenant
+
+The repo ships a manual smoke workspace at [`test/manual/`](test/manual)
+that already targets `https://api.dev.int.kupe.cloud` with
+`tenant = "kupe-test"`. Each `<resource_type>.tf` defines a single
+resource labelled `smoke`, so you can apply them one at a time:
+
+```bash
+# from the repo root
+make local-provider
+export TF_CLI_CONFIG_FILE="$PWD/.tmp/tfdevrc"
+export KUPE_API_KEY=kupe_...   # admin key on the kupe-test tenant
+
+cd test/manual
+tofu init
+tofu apply -target=kupe_cluster.smoke -auto-approve
+# ... exercise reads / updates ...
+tofu destroy -auto-approve
+```
+
+Requirements:
+
+* WireGuard tunnel up — `api.dev.int.kupe.cloud` is private.
+* The `kupe-test` tenant fixture applied to the cluster (see the header
+  comment in `test/manual/provider.tf` for the one-time setup).
+
+This is the same workspace used as the pre-release smoke step.
+
+### Testing against another tenant or a local API
+
+For a different tenant or a local `kupe-api`, write a scratch workspace
+(do not commit it) and point the provider at it:
 
 ```hcl
 terraform {
@@ -127,21 +221,18 @@ terraform {
 }
 
 provider "kupe" {
-  host   = "http://localhost:8080"
-  tenant = "example-tenant"
+  host   = "http://localhost:8080"   # or https://api.dev.int.kupe.cloud
+  tenant = "your-test-tenant"
   # api_key is read from KUPE_API_KEY
 }
 ```
 
-```bash
-export KUPE_API_KEY="kupe_..."
-tofu init
-tofu plan
-```
+Then `tofu init && tofu plan` from that directory with
+`TF_CLI_CONFIG_FILE` and `KUPE_API_KEY` exported as above.
 
-Use `make build` when you want the standalone binary in the repo root.
-Use `make local-provider` when you want Terraform or OpenTofu to run the
-provider locally through a dev override.
+`make build` produces a standalone binary in the repo root and is only
+useful for `make install` or for shipping a binary out of band. For
+local dev iteration, `make local-provider` is what you want.
 
 ## Registry docs
 

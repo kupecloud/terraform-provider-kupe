@@ -8,6 +8,15 @@ GO := go
 GOBIN ?= $(PWD)/bin
 GOCACHE ?= $(PWD)/.tmp/go-build
 
+# Acceptance tests run a real Terraform/OpenTofu CLI through
+# terraform-plugin-testing. When TF_ACC_TERRAFORM_PATH is unset, the framework
+# falls back to downloading Terraform via hc-install and verifying its GPG
+# signature — that download breaks when HashiCorp's embedded signing key
+# expires, so always point the framework at a locally installed binary.
+TF_ACC_TERRAFORM_PATH ?= $(shell command -v tofu 2>/dev/null || command -v terraform 2>/dev/null)
+TF_ACC_PROVIDER_HOST ?= $(if $(findstring tofu,$(TF_ACC_TERRAFORM_PATH)),registry.opentofu.org,registry.terraform.io)
+TF_ACC_PROVIDER_NAMESPACE ?= kupecloud
+
 .PHONY: all build build-terraform build-opentofu test gosec govulncheck install local-provider tidy fmt vet tofu-validate docs-install docs-generate docs-validate docs clean help
 
 all: build
@@ -21,8 +30,17 @@ build-terraform: ## Build the provider binary for Terraform registry identity
 build-opentofu: ## Build the provider binary for OpenTofu registry identity
 	$(MAKE) build PROVIDER_ADDRESS=registry.opentofu.org/kupecloud/kupe
 
-test: ## Run unit tests
-	GOCACHE=$(GOCACHE) $(GO) test -v ./...
+test: ## Run unit and acceptance tests (auto-detects tofu/terraform)
+	@if [ -z "$(TF_ACC_TERRAFORM_PATH)" ]; then \
+		echo "error: no tofu or terraform binary found in PATH"; \
+		echo "install OpenTofu (https://opentofu.org/docs/intro/install/) or Terraform first"; \
+		exit 1; \
+	fi
+	GOCACHE=$(GOCACHE) \
+	TF_ACC_TERRAFORM_PATH=$(TF_ACC_TERRAFORM_PATH) \
+	TF_ACC_PROVIDER_HOST=$(TF_ACC_PROVIDER_HOST) \
+	TF_ACC_PROVIDER_NAMESPACE=$(TF_ACC_PROVIDER_NAMESPACE) \
+	$(GO) test -v ./...
 
 gosec: ## Run gosec against the provider codebase
 	GOCACHE=$(GOCACHE) GOWORK=off $(GO) run github.com/securego/gosec/v2/cmd/gosec@v2.25.0 -exclude-generated ./...
