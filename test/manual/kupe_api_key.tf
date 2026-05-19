@@ -5,8 +5,8 @@
 #   - the returned `key` field starts with "kupe_" and is sensitive in state
 #   - GET /apikeys lists this key (without the raw value)
 #   - destroy invalidates the key (try `curl -H "Authorization: Bearer
-#     <output>" https://api.dev.int.kupe.cloud/api/v1/tenants/kupe-test`
-#     after destroy and expect 401)
+#     <output>" "$KUPE_HOST/api/v1/tenants/$KUPE_TENANT"` after destroy
+#     and expect 401)
 
 resource "kupe_api_key" "smoke" {
   display_name = "smoke-test-key"

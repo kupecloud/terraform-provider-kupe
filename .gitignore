@@ -12,6 +12,8 @@ cover.review.out
 *.tfstate
 *.tfstate.*
 *.tfplan
+*.tfvars
+*.auto.tfvars
 crash.log
 
 # IDE

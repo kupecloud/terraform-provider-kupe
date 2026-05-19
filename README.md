@@ -15,7 +15,7 @@ the rest of your infrastructure code.
 * [Development](#development)
 * [Running tests](#running-tests)
 * [Testing the provider against a live API](#testing-the-provider-against-a-live-api)
-  * [Smoke testing against the `kupe-test` tenant](#smoke-testing-against-the-kupe-test-tenant)
+  * [Smoke testing against a real tenant](#smoke-testing-against-a-real-tenant)
   * [Testing against another tenant or a local API](#testing-against-another-tenant-or-a-local-api)
 * [Registry docs](#registry-docs)
 * [Release workflow](#release-workflow)
@@ -178,18 +178,23 @@ from Go files. The local flow is:
 You do **not** need `make build` first. `make local-provider` builds the
 binary itself, and `make tofu-validate` builds its own temporary binary.
 
-### Smoke testing against the `kupe-test` tenant
+### Smoke testing against a real tenant
 
-The repo ships a manual smoke workspace at [`test/manual/`](test/manual)
-that already targets `https://api.dev.int.kupe.cloud` with
-`tenant = "kupe-test"`. Each `<resource_type>.tf` defines a single
-resource labelled `smoke`, so you can apply them one at a time:
+The repo ships a manual smoke workspace at [`test/manual/`](test/manual).
+Each `<resource_type>.tf` defines a single resource labelled `smoke`, so
+you can apply them one at a time. The workspace's `provider "kupe"`
+block is intentionally empty — host, tenant, and API key all come from
+environment variables, so no environment-specific URL or tenant name is
+committed to this public repo:
 
 ```bash
 # from the repo root
 make local-provider
 export TF_CLI_CONFIG_FILE="$PWD/.tmp/tfdevrc"
-export KUPE_API_KEY=kupe_...   # admin key on the kupe-test tenant
+
+export KUPE_HOST=https://api.<your-env>.kupe.cloud
+export KUPE_TENANT=<your-test-tenant>
+export KUPE_API_KEY=kupe_...
 
 cd test/manual
 tofu init
@@ -200,9 +205,10 @@ tofu destroy -auto-approve
 
 Requirements:
 
-* WireGuard tunnel up — `api.dev.int.kupe.cloud` is private.
-* The `kupe-test` tenant fixture applied to the cluster (see the header
-  comment in `test/manual/provider.tf` for the one-time setup).
+* Network access to the chosen API. Internal Kupe dev environments
+  require a WireGuard tunnel.
+* A test tenant exists on the target cluster (see the header comment in
+  `test/manual/provider.tf` and `docs/testing.md` for fixture details).
 
 This is the same workspace used as the pre-release smoke step.
 
@@ -220,11 +226,9 @@ terraform {
   }
 }
 
-provider "kupe" {
-  host   = "http://localhost:8080"   # or https://api.dev.int.kupe.cloud
-  tenant = "your-test-tenant"
-  # api_key is read from KUPE_API_KEY
-}
+# host / tenant / api_key all read from KUPE_HOST, KUPE_TENANT,
+# KUPE_API_KEY when omitted here.
+provider "kupe" {}
 ```
 
 Then `tofu init && tofu plan` from that directory with

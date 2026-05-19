@@ -101,16 +101,18 @@ Single workspace, single state — one `tofu apply` exercises every public surfa
 
 ### Prerequisites
 
-1. WireGuard tunnel up (the dev API at `api.dev.int.kupe.cloud` is private).
-2. The kupe-test tenant exists on the target cluster — apply the fixture from [kupe-tests](https://github.com/kupecloud/kupe-tests):
+1. Network access to your target Kupe API. Internal dev environments require a WireGuard tunnel.
+2. A test tenant exists on the target cluster. Apply the fixture from the kupe-tests repo (internal) before the first run.
+3. `KUPE_HOST`, `KUPE_TENANT`, and `KUPE_API_KEY` exported in your shell. The provider reads all three from the environment, so no environment-specific URL or tenant name is committed to `test/manual/`:
    ```bash
-   kubectl --context=<env> apply -f \
-     https://raw.githubusercontent.com/kupecloud/kupe-tests/main/fixtures/tenants/kupe-test.yaml
+   export KUPE_HOST=https://api.<your-env>.kupe.cloud
+   export KUPE_TENANT=<your-test-tenant>
+   export KUPE_API_KEY=kupe_...
    ```
-3. Admin API key for kupe-test, exported as `KUPE_API_KEY` (the env var the provider's `api_key` field reads).
 4. Provider built and installed locally:
    ```bash
    make local-provider
+   export TF_CLI_CONFIG_FILE="$PWD/.tmp/tfdevrc"
    ```
    This drops a dev override config under `.tmp/` so `tofu init` finds your local build.
 

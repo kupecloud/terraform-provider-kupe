@@ -1,8 +1,7 @@
 # Manual smoke test workspace for the kupe terraform provider.
 #
-# Apply against the kupe-test tenant on dev. Each `<resource_type>.tf`
-# in this directory defines a single resource with the label `smoke`,
-# so any of them can be targeted individually:
+# Each `<resource_type>.tf` in this directory defines a single resource
+# with the label `smoke`, so any of them can be targeted individually:
 #
 #   tofu apply -target=kupe_cluster.smoke
 #
@@ -11,15 +10,17 @@
 #   1. Build and dev-override the local provider:
 #        cd ../..               # repo root
 #        make local-provider
+#        export TF_CLI_CONFIG_FILE="$PWD/.tmp/tfdevrc"
 #
-#   2. Apply the kupe-test tenant fixture once per cluster:
-#        kubectl --context=<env> apply -f \
-#          https://raw.githubusercontent.com/kupecloud/kupe-tests/main/fixtures/tenants/kupe-test.yaml
-#
-#   3. Mint an admin API key on kupe-test (one-time), export it:
+#   2. Point the provider at the target API + tenant. The kupe provider
+#      reads these from the environment, so nothing host- or tenant-
+#      specific is committed here:
+#        export KUPE_HOST=https://api.<your-env>.kupe.cloud
+#        export KUPE_TENANT=<your-test-tenant>
 #        export KUPE_API_KEY=kupe_...
 #
-#   4. WireGuard tunnel up — api.dev.int.kupe.cloud is private.
+#      For Kupe internal dev, see the runbook in the kupe-tests repo
+#      for the dev host and the test-tenant fixture.
 #
 # Run
 #
@@ -38,8 +39,7 @@ terraform {
   }
 }
 
-provider "kupe" {
-  host   = "https://api.dev.int.kupe.cloud"
-  tenant = "kupe-test"
-  # api_key reads from KUPE_API_KEY env var.
-}
+# host, tenant, and api_key all read from KUPE_HOST / KUPE_TENANT /
+# KUPE_API_KEY. Keep this block empty so no environment-specific URL or
+# tenant name is committed to a public repo.
+provider "kupe" {}
