@@ -277,6 +277,87 @@ func TestPutAlertmanagerGlobal(t *testing.T) {
 	}
 }
 
+// TestPutAlertmanagerReceiver_RefreshesOnPreconditionFailed asserts that a
+// 412 from the server triggers a single refresh (GET) + retry under the
+// alertmanager mutex. This is the race-recovery path used when another
+// alertmanager resource in the same plan has mutated the shared wrapper
+// between the caller's last read and its write.
+func TestPutAlertmanagerReceiver_RefreshesOnPreconditionFailed(t *testing.T) {
+	mock := newMockAPI()
+	defer mock.close()
+
+	putCalls := 0
+	mock.on("PUT", "/api/v1/tenants/acme/alertmanager/receivers/slack", func(w http.ResponseWriter, r *http.Request) {
+		putCalls++
+		w.Header().Set("Content-Type", "application/json")
+		switch putCalls {
+		case 1:
+			// First PUT: caller's If-Match is stale.
+			if got := r.Header.Get("If-Match"); got != `"stale"` {
+				t.Errorf("first PUT: expected If-Match=stale, got %q", got)
+			}
+			w.Header().Set("ETag", `"fresh"`)
+			w.WriteHeader(http.StatusPreconditionFailed)
+			mustEncode(w, ErrorResponse{Error: "etag mismatch"})
+		case 2:
+			// Retry must use the etag we returned from the refresh GET.
+			if got := r.Header.Get("If-Match"); got != `"fresh"` {
+				t.Errorf("retry PUT: expected If-Match=fresh, got %q", got)
+			}
+			w.Header().Set("ETag", `"after-retry"`)
+			mustEncode(w, map[string]any{"name": "slack"})
+		default:
+			t.Errorf("unexpected PUT call %d", putCalls)
+		}
+	})
+	mock.on("GET", "/api/v1/tenants/acme/alertmanager/receivers/slack", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("ETag", `"fresh"`)
+		mustEncode(w, map[string]any{"name": "slack"})
+	})
+
+	c := mock.client("acme")
+	out, etag, err := c.PutAlertmanagerReceiver(context.Background(), "slack", `"stale"`, AlertmanagerReceiver{"name": "slack"})
+	if err != nil {
+		t.Fatalf("expected refresh+retry to succeed, got %v", err)
+	}
+	if etag != `"after-retry"` {
+		t.Errorf("expected etag from retry, got %q", etag)
+	}
+	if out["name"] != "slack" {
+		t.Errorf("expected name=slack, got %v", out["name"])
+	}
+	if putCalls != 2 {
+		t.Errorf("expected exactly 2 PUT calls (initial + retry), got %d", putCalls)
+	}
+}
+
+// TestPutAlertmanagerReceiver_NoRetryWithoutEtag asserts that a PUT made
+// without an If-Match (the create path) does NOT retry on 412 — the
+// retry exists only to converge a stale state-stored ETag, not to paper
+// over server-side issues.
+func TestPutAlertmanagerReceiver_NoRetryWithoutEtag(t *testing.T) {
+	mock := newMockAPI()
+	defer mock.close()
+
+	putCalls := 0
+	mock.on("PUT", "/api/v1/tenants/acme/alertmanager/receivers/slack", func(w http.ResponseWriter, _ *http.Request) {
+		putCalls++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusPreconditionFailed)
+		mustEncode(w, ErrorResponse{Error: "etag mismatch"})
+	})
+
+	c := mock.client("acme")
+	_, _, err := c.PutAlertmanagerReceiver(context.Background(), "slack", "", AlertmanagerReceiver{"name": "slack"})
+	if err == nil {
+		t.Fatal("expected error on 412 without etag (no retry path)")
+	}
+	if putCalls != 1 {
+		t.Errorf("expected exactly 1 PUT (no retry without etag), got %d", putCalls)
+	}
+}
+
 func TestPutAlertmanagerGlobal_Clear(t *testing.T) {
 	mock := newMockAPI()
 	defer mock.close()

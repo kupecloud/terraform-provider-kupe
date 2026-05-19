@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 )
 
@@ -19,6 +20,15 @@ type Client struct {
 	tenant     string
 	httpClient *http.Client
 	token      string // Bearer token (API key or OIDC)
+	// alertmanagerMu serialises mutating alertmanager operations from
+	// this client. The three alertmanager resources (global, receivers,
+	// routes) back the same Mimir wrapper object, so a write from one
+	// resource invalidates the wrapper ETag stored by another in the
+	// same plan. Without this mutex two parallel CRUD goroutines from
+	// terraform race their read-modify-write cycles and the loser gets
+	// a 412 from the server. See PutAlertmanager* for the refresh+retry
+	// inside the lock.
+	alertmanagerMu sync.Mutex
 }
 
 // New creates a new kupe API client.
@@ -62,6 +72,17 @@ func IsConflict(err error) bool {
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
 		return apiErr.StatusCode == http.StatusConflict
+	}
+	return false
+}
+
+// IsPreconditionFailed returns true if the error is a 412 (stale If-Match).
+// The alertmanager Put paths use this to detect a stale wrapper ETag and
+// refresh+retry once under the alertmanager mutex.
+func IsPreconditionFailed(err error) bool {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode == http.StatusPreconditionFailed
 	}
 	return false
 }
