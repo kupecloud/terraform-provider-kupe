@@ -30,6 +30,9 @@ Thumbs.db
 # Local tooling
 .tmp/
 
+# Goreleaser snapshot output (used by `make local-publish-dryrun`)
+dist/
+
 # Env files
 *.env
 .env.*

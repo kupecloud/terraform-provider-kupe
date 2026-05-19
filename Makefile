@@ -17,7 +17,7 @@ TF_ACC_TERRAFORM_PATH ?= $(shell command -v tofu 2>/dev/null || command -v terra
 TF_ACC_PROVIDER_HOST ?= $(if $(findstring tofu,$(TF_ACC_TERRAFORM_PATH)),registry.opentofu.org,registry.terraform.io)
 TF_ACC_PROVIDER_NAMESPACE ?= kupecloud
 
-.PHONY: all build build-terraform build-opentofu test gosec govulncheck install local-provider tidy fmt vet tofu-validate docs-install docs-generate docs-validate docs clean help
+.PHONY: all build build-terraform build-opentofu test gosec govulncheck install local-provider tidy fmt vet tofu-validate docs-install docs-generate docs-validate docs publish-dryrun clean help
 
 all: build
 
@@ -80,8 +80,20 @@ docs-validate: ## Validate generated registry docs
 
 docs: docs-install docs-generate docs-validate ## Install tfplugindocs, generate docs, and validate them
 
+publish-dryrun: ## Dry-run goreleaser for both registry variants (see PUBLISHING.md)
+	@command -v goreleaser >/dev/null || { echo "error: goreleaser not installed; run 'go install github.com/goreleaser/goreleaser/v2@v2.15.2'"; exit 1; }
+	goreleaser release --snapshot --clean --skip=publish --config .goreleaser.terraform.yaml
+	goreleaser release --snapshot --clean --skip=publish --config .goreleaser.opentofu.yaml
+	@echo
+	@echo "Artifacts:"
+	@ls dist/terraform/*.zip dist/terraform/*SHA256SUMS* dist/opentofu/*.zip dist/opentofu/*SHA256SUMS* 2>/dev/null
+	@echo
+	@echo "Signature requires GPG_PASSPHRASE (or an unprotected key in your GnuPG keyring)."
+	@echo "Skip signing with: goreleaser release --snapshot --clean --skip=sign,publish --config <config>"
+
 clean: ## Clean build artifacts
 	rm -f $(BINARY_NAME)
+	rm -rf dist/
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'

@@ -255,20 +255,14 @@ The main CI flow is defined in `.github/workflows/main.yaml`.
 * lint, unit test, security, and build jobs run on every push to `main`
 * the semantic release step uses the reusable workflow from
   `kupecloud/github-workflows` pinned to a commit SHA
-* a separate local `publish` workflow exists in
-  `.github/workflows/publish.yaml`
+* a `publish` job (currently commented out) builds and signs both the
+  Terraform and OpenTofu registry artifacts and attaches them to the
+  GitHub release for the cut tag
 
-The `publish` job in `main.yaml` is intentionally commented out right
-now. That means the repo can cut a semantic release version, but it does
-not yet automatically attach signed Terraform and OpenTofu registry
-artifacts to the GitHub release.
-
-When you are ready to publish registry artifacts from CI, enable the
-commented `publish` job in `.github/workflows/main.yaml` and make sure
-the required `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE` secrets are
-configured. The publish workflow builds both registry variants with
-GoReleaser and uploads the signed artifacts to the matching GitHub
-release tag.
+See [PUBLISHING.md](PUBLISHING.md) for the dual-registry model, the
+one-time GPG/secrets setup, registry submission steps for both
+`registry.terraform.io` and `registry.opentofu.org`, and the local
+dry-run procedure.
 
 ## Repo layout
 
