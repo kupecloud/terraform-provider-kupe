@@ -24,7 +24,7 @@
 #
 # Run
 #
-#   tofu init
+#   # No `tofu init` — the dev override loads the local binary directly.
 #   tofu apply -target=<resource_type>.smoke -auto-approve
 #   tofu destroy -auto-approve
 #

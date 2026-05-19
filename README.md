@@ -172,8 +172,10 @@ from Go files. The local flow is:
    export KUPE_API_KEY=kupe_...
    ```
 
-4. Run `tofu init`, `tofu plan`, `tofu apply` against a workspace that
-   points at the Kupe API.
+4. Run `tofu plan` / `tofu apply` against a workspace that points at the
+   Kupe API. **Skip `tofu init`** — with a dev override active, tofu
+   uses your local binary directly and `init` only adds a doomed
+   registry lookup.
 
 You do **not** need `make build` first. `make local-provider` builds the
 binary itself, and `make tofu-validate` builds its own temporary binary.
@@ -197,7 +199,7 @@ export KUPE_TENANT=<your-test-tenant>
 export KUPE_API_KEY=kupe_...
 
 cd test/manual
-tofu init
+# No `tofu init` — the dev override loads your local binary directly.
 tofu apply -target=kupe_cluster.smoke -auto-approve
 # ... exercise reads / updates ...
 tofu destroy -auto-approve
@@ -231,8 +233,9 @@ terraform {
 provider "kupe" {}
 ```
 
-Then `tofu init && tofu plan` from that directory with
-`TF_CLI_CONFIG_FILE` and `KUPE_API_KEY` exported as above.
+Then `tofu plan` from that directory with `TF_CLI_CONFIG_FILE` and
+`KUPE_API_KEY` exported as above. Skip `tofu init` when the dev override
+is active.
 
 `make build` produces a standalone binary in the repo root and is only
 useful for `make install` or for shipping a binary out of band. For

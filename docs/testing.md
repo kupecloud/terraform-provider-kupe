@@ -101,20 +101,21 @@ Single workspace, single state — one `tofu apply` exercises every public surfa
 
 ### Prerequisites
 
-1. Network access to your target Kupe API. Internal dev environments require a WireGuard tunnel.
-2. A test tenant exists on the target cluster. Apply the fixture from the kupe-tests repo (internal) before the first run.
-3. `KUPE_HOST`, `KUPE_TENANT`, and `KUPE_API_KEY` exported in your shell. The provider reads all three from the environment, so no environment-specific URL or tenant name is committed to `test/manual/`:
+1. Network access to your target Kupe API.
+2. A test tenant.
+3. An API key with sufficient permissions
+4. `KUPE_HOST`, `KUPE_TENANT`, and `KUPE_API_KEY` exported in your shell. The provider reads all three from the environment, so no environment-specific URL or tenant name is committed to `test/manual/`:
    ```bash
    export KUPE_HOST=https://api.<your-env>.kupe.cloud
    export KUPE_TENANT=<your-test-tenant>
    export KUPE_API_KEY=kupe_...
    ```
-4. Provider built and installed locally:
+5. Provider built and installed locally:
    ```bash
    make local-provider
    export TF_CLI_CONFIG_FILE="$PWD/.tmp/tfdevrc"
    ```
-   This drops a dev override config under `.tmp/` so `tofu init` finds your local build.
+   This drops a dev override config under `.tmp/` so tofu loads the local binary directly. **Skip `tofu init`** when the dev override is active — it does a registry lookup that fails on `registry.opentofu.org`, and the override means init is unnecessary anyway.
 
 ### Run
 
@@ -122,7 +123,6 @@ Single workspace, single state — one `tofu apply` exercises every public surfa
 cd test/manual
 
 # Smoke everything in one go (the canonical run before a release)
-tofu init
 tofu apply -auto-approve
 
 # Or narrow to one resource — the `.smoke` label is consistent across every file
