@@ -5,4 +5,6 @@ on:
 
 jobs:
   go-security:
-    uses: kupecloud/github-workflows/.github/workflows/go-security.yaml@11b5503fe90f8de8fa6c7ceb32ef693f32524722 # v1.0.0
+    uses: kupecloud/github-workflows/.github/workflows/go-security.yaml@75f2bc349709d9fec6630dbd937301d1a32708e0 # v1.1.0
+    with:
+      runs-on: kupe-small
