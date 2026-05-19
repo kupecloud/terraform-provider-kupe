@@ -86,9 +86,17 @@ Choose:
 * Expiry: **2 years or longer**, or no expiry. The Terraform registry
   caches the public key; if it expires, releases stop signing-verifying
   even though the registry side does not auto-refresh.
-* Real name + email: use a role identity (`Kupe Cloud Releases
-  <releases@kupecloud.com>`), not a personal one — the key outlives any
-  individual maintainer.
+* Real name + email: **use exactly**
+  ```
+  Real name: Kupe Cloud Releases
+  Email:     releases@kupe.cloud
+  ```
+  This is the canonical Kupe Cloud release-signing identity — picked
+  once so the public GPG fingerprint is stable across rotations and
+  registry trust survives staff changes. Do not substitute a personal
+  email (`name@coresolutions.ltd`, etc.) — the user ID is baked into
+  the key at generation time, displayed on the registry pages, and
+  shown by `gpg --verify` to every downloader.
 
 Capture the long key ID and fingerprint:
 
