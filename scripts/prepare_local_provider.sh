@@ -25,5 +25,19 @@ provider_installation {
 }
 EOF
 
-printf 'Built local provider binary: %s\n' "$PROVIDER_BIN"
-printf 'Use TF_CLI_CONFIG_FILE=%s for local Terraform or OpenTofu testing.\n' "$CLI_CONFIG"
+printf 'Built local provider binary: %s\n\n' "$PROVIDER_BIN"
+
+cat <<EOF
+Run this in your shell to point Terraform/OpenTofu at the local binary:
+
+  export TF_CLI_CONFIG_FILE=$CLI_CONFIG
+
+The path above is absolute, so it works from any cwd. With the dev override
+active you should NOT run \`tofu init\` — apply directly. If you ever see
+"Inconsistent dependency lock file" or "provider not found in registry"
+errors, an earlier \`tofu init\` left a stale lock; clean it with:
+
+  rm -f .terraform.lock.hcl
+  rm -rf .terraform
+
+EOF
