@@ -41,6 +41,30 @@ func TestAccTenantMemberResource(t *testing.T) {
 	})
 }
 
+// TestAccTenantMemberResource_MixedCaseEmail guards against a previous
+// regression: Create used to lowercase the email server-side and write the
+// lowercased value back into state, which the framework rejected as a
+// "Provider produced inconsistent result after apply" error whenever the
+// user's HCL had any uppercase letter. Read matches case-insensitively, so
+// state should keep the user's original casing.
+func TestAccTenantMemberResource_MixedCaseEmail(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccMemberConfig(mock.url(), "User@Acme.com", "readonly"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("kupe_tenant_member.test", "email", "User@Acme.com"),
+					resource.TestCheckResourceAttr("kupe_tenant_member.test", "role", "readonly"),
+				),
+			},
+		},
+	})
+}
+
 func testAccMemberConfig(host, email, role string) string {
 	return fmt.Sprintf(`
 provider "kupe" {

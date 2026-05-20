@@ -80,13 +80,16 @@ func (r *TenantMemberResource) Create(ctx context.Context, req resource.CreateRe
 		return
 	}
 
-	// Lowercase the email before sending — the API normalises to lowercase
-	// anyway, and storing the lowered form from the start prevents a
-	// RequiresReplace diff between "User@Example.com" (config) and
-	// "user@example.com" (API response).
-	email := strings.ToLower(plan.Email.ValueString())
+	// Lowercase before sending: the API normalises emails to lowercase, so
+	// we send the canonical form. Crucially we do NOT write the lowered
+	// form back into state — Plugin Framework requires that the value of a
+	// Required (non-Computed) attribute in state after Create matches what
+	// the user wrote in plan, so mixed-case input like "User@Example.com"
+	// would otherwise fail with "Provider produced inconsistent result
+	// after apply". Read (and Update lookups) match case-insensitively via
+	// strings.EqualFold so the casing stored in state stays the user's.
 	member, err := r.client.AddMember(ctx, client.AddMemberRequest{
-		Email: email,
+		Email: strings.ToLower(plan.Email.ValueString()),
 		Role:  plan.Role.ValueString(),
 	})
 	if err != nil {
@@ -94,7 +97,6 @@ func (r *TenantMemberResource) Create(ctx context.Context, req resource.CreateRe
 		return
 	}
 
-	plan.Email = types.StringValue(member.Email)
 	plan.Role = types.StringValue(member.Role)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
