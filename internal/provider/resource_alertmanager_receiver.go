@@ -102,8 +102,13 @@ func (r *AlertmanagerReceiverResource) Schema(_ context.Context, _ resource.Sche
 			"body_json": schema.StringAttribute{
 				Description: "Alertmanager receiver body as a JSON document. Use HCL's `jsonencode()` " +
 					"to author the value. The `name` field is set automatically from the resource " +
-					"`name` attribute and any value embedded in the body is overridden.",
+					"`name` attribute and any value embedded in the body is overridden. Marked " +
+					"sensitive because receiver bodies routinely embed credentials (Slack webhook " +
+					"URLs, PagerDuty service keys, SMTP passwords); the value is still stored in " +
+					"plaintext in your Terraform state — back the state with an encrypted remote " +
+					"backend.",
 				Required:   true,
+				Sensitive:  true,
 				CustomType: JSONStringTypeInstance,
 			},
 			"etag": schema.StringAttribute{

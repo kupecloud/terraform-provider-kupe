@@ -63,7 +63,7 @@ variable "pagerduty_service_key" {
 
 ### Required
 
-- `body_json` (String) Alertmanager receiver body as a JSON document. Use HCL's `jsonencode()` to author the value. The `name` field is set automatically from the resource `name` attribute and any value embedded in the body is overridden.
+- `body_json` (String, Sensitive) Alertmanager receiver body as a JSON document. Use HCL's `jsonencode()` to author the value. The `name` field is set automatically from the resource `name` attribute and any value embedded in the body is overridden. Marked sensitive because receiver bodies routinely embed credentials (Slack webhook URLs, PagerDuty service keys, SMTP passwords); the value is still stored in plaintext in your Terraform state — back the state with an encrypted remote backend.
 - `name` (String) Receiver name. Immutable after creation; rename requires destroy + create.
 
 ### Read-Only

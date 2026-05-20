@@ -73,8 +73,12 @@ func (r *AlertmanagerGlobalResource) Schema(_ context.Context, _ resource.Schema
 			},
 			"body_json": schema.StringAttribute{
 				Description: "Alertmanager global section as a JSON document. Use HCL's `jsonencode()` " +
-					"to author. See the upstream Alertmanager docs for the field list.",
+					"to author. See the upstream Alertmanager docs for the field list. Marked " +
+					"sensitive because global config commonly includes SMTP credentials, " +
+					"OAuth secrets, and webhook tokens; the value is still stored in plaintext " +
+					"in your Terraform state — back the state with an encrypted remote backend.",
 				Required:   true,
+				Sensitive:  true,
 				CustomType: JSONStringTypeInstance,
 			},
 			"etag": schema.StringAttribute{
