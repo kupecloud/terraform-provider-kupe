@@ -96,7 +96,7 @@ func TestAccAlertmanagerRoutesResource(t *testing.T) {
 				ResourceName:            "kupe_alertmanager_routes.main",
 				ImportState:             true,
 				ImportStateVerify:       true,
-				ImportStateId:           "routes",
+				ImportStateId:           "alertmanager-routes",
 				ImportStateVerifyIgnore: []string{"routes_json"},
 			},
 		},
@@ -141,13 +141,14 @@ func TestAccAlertmanagerGlobalResource(t *testing.T) {
 				),
 			},
 			// Import roundtrip — global is a singleton, imported by the
-			// fixed id "global". body_json excluded from verify for the
-			// same JSON-key-ordering reason as receiver above.
+			// fixed id "alertmanager-global". body_json excluded from
+			// verify for the same JSON-key-ordering reason as receiver
+			// above.
 			{
 				ResourceName:            "kupe_alertmanager_global.main",
 				ImportState:             true,
 				ImportStateVerify:       true,
-				ImportStateId:           "global",
+				ImportStateId:           "alertmanager-global",
 				ImportStateVerifyIgnore: []string{"body_json"},
 			},
 		},
