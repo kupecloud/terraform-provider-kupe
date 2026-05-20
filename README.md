@@ -32,6 +32,8 @@ the rest of your infrastructure code.
 * tenant secrets and sync targets with `kupe_secret`
 * tenant membership with `kupe_tenant_member`
 * machine-to-machine credentials with `kupe_api_key`
+* per-tenant Alertmanager configuration with `kupe_alertmanager_global`,
+  `kupe_alertmanager_receiver`, and `kupe_alertmanager_routes`
 * tenant, cluster, and plan metadata through data sources
 
 ## Quick start

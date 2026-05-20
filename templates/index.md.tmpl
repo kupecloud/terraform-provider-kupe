@@ -6,7 +6,7 @@ description: |-
 
 # Kupe Provider
 
-The Kupe provider manages tenant-scoped Kupe Cloud resources including clusters, secrets, members, and API keys.
+The Kupe provider manages tenant-scoped Kupe Cloud resources including clusters, secrets, members, API keys, and per-tenant Alertmanager configuration.
 
 Use it when you want:
 
@@ -42,6 +42,9 @@ For normal environments, use an `https://` API host. Plain HTTP is only supporte
 - `kupe_secret`
 - `kupe_tenant_member`
 - `kupe_api_key`
+- `kupe_alertmanager_global`
+- `kupe_alertmanager_receiver`
+- `kupe_alertmanager_routes`
 
 ## Available Data Sources
 
