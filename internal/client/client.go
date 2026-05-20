@@ -78,7 +78,7 @@ func IsConflict(err error) bool {
 
 // IsPreconditionFailed returns true if the error is a 412 (stale If-Match).
 // The alertmanager Put paths use this to detect a stale wrapper ETag and
-// refresh+retry once under the alertmanager mutex.
+// drive the bounded refresh+retry loop in putAlertmanagerWithRetry.
 func IsPreconditionFailed(err error) bool {
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {

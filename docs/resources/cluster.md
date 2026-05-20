@@ -38,7 +38,7 @@ resource "kupe_cluster" "production" {
 
 ### Optional
 
-- `resources` (Attributes) Resource limits for the cluster. (see [below for nested schema](#nestedatt--resources))
+- `resources` (Attributes) Resource limits for the cluster. Updates are sent as a JSON Merge Patch (RFC 7396) — fields you remove from this block are **left unchanged** on the server, not cleared. To clear all resource limits, remove the entire `resources` block. To change an individual field, write it explicitly. (see [below for nested schema](#nestedatt--resources))
 - `version` (String) Kubernetes version (e.g., 1.31).
 
 ### Read-Only

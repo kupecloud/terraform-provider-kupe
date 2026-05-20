@@ -27,14 +27,20 @@ type SecretStatus struct {
 	Phase string `json:"phase"`
 }
 
-// CreateSecretRequest is the body for creating a secret.
+// CreateSecretRequest is the body for creating a secret. `sync` is sent
+// unconditionally (no `omitempty`) so it matches the Patch contract:
+// an empty list explicitly clears sync targets, a null value would mean
+// "no sync configured." Without this, Create with `sync = []` would
+// silently drop the field — confusing when paired with the Update path.
 type CreateSecretRequest struct {
 	Name       string       `json:"name"`
 	SecretPath string       `json:"secretPath"`
-	Sync       []SyncTarget `json:"sync,omitempty"`
+	Sync       []SyncTarget `json:"sync"`
 }
 
 // PatchSecretRequest is the body for updating a secret's sync targets.
+// `sync` is intentionally not `omitempty` — sending an empty array is
+// the documented way to clear all sync targets for the secret.
 type PatchSecretRequest struct {
 	Sync []SyncTarget `json:"sync"`
 }

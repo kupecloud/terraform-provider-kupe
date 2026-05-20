@@ -50,26 +50,14 @@ func (c *Client) GetAlertmanagerReceiver(ctx context.Context, name string) (Aler
 }
 
 // PutAlertmanagerReceiver creates or replaces a receiver by name. Holds
-// the per-client alertmanager mutex and refreshes the wrapper ETag once
-// on 412 — see [Client.alertmanagerMu] for the full rationale.
+// the per-client alertmanager mutex and retries on 412 against the
+// shared wrapper ETag — see [Client.putAlertmanagerWithRetry] for the
+// full optimistic-locking rationale.
 func (c *Client) PutAlertmanagerReceiver(ctx context.Context, name, etag string, recv AlertmanagerReceiver) (AlertmanagerReceiver, string, error) {
 	c.alertmanagerMu.Lock()
 	defer c.alertmanagerMu.Unlock()
-	path := c.tenantPath("alertmanager", "receivers", name)
 	var out AlertmanagerReceiver
-	newETag, err := c.requestWithETag(ctx, http.MethodPut, path, etag, recv, &out)
-	if err != nil && etag != "" && IsPreconditionFailed(err) {
-		// Wrapper changed since the caller's last read. Refresh and retry
-		// once under the same lock so we converge on the current state.
-		// If the receiver itself doesn't exist yet (404 on the refresh),
-		// fall back to a no-If-Match write to let the API create it.
-		freshETag, refreshErr := c.refreshAlertmanagerETag(ctx, http.MethodGet, path)
-		if refreshErr != nil {
-			return nil, "", err
-		}
-		out = nil
-		newETag, err = c.requestWithETag(ctx, http.MethodPut, path, freshETag, recv, &out)
-	}
+	newETag, err := c.putAlertmanagerWithRetry(ctx, c.tenantPath("alertmanager", "receivers", name), etag, recv, &out)
 	if err != nil {
 		return nil, "", err
 	}
@@ -107,22 +95,15 @@ func (c *Client) GetAlertmanagerRoutes(ctx context.Context) ([]json.RawMessage, 
 	return list.Items, etag, nil
 }
 
-// PutAlertmanagerRoutes replaces the entire child route list. See the
-// receiver Put for the mutex + refresh-on-412 rationale.
+// PutAlertmanagerRoutes replaces the entire child route list. Holds the
+// per-client alertmanager mutex and retries on 412 against the shared
+// wrapper ETag — see [Client.putAlertmanagerWithRetry] for the full
+// optimistic-locking rationale.
 func (c *Client) PutAlertmanagerRoutes(ctx context.Context, etag string, routes []json.RawMessage) ([]json.RawMessage, string, error) {
 	c.alertmanagerMu.Lock()
 	defer c.alertmanagerMu.Unlock()
-	path := c.tenantPath("alertmanager", "routes")
 	var out rawRouteList
-	newETag, err := c.requestWithETag(ctx, http.MethodPut, path, etag, rawRouteList{Items: routes}, &out)
-	if err != nil && etag != "" && IsPreconditionFailed(err) {
-		freshETag, refreshErr := c.refreshAlertmanagerETag(ctx, http.MethodGet, path)
-		if refreshErr != nil {
-			return nil, "", err
-		}
-		out = rawRouteList{}
-		newETag, err = c.requestWithETag(ctx, http.MethodPut, path, freshETag, rawRouteList{Items: routes}, &out)
-	}
+	newETag, err := c.putAlertmanagerWithRetry(ctx, c.tenantPath("alertmanager", "routes"), etag, rawRouteList{Items: routes}, &out)
 	if err != nil {
 		return nil, "", err
 	}
@@ -141,22 +122,15 @@ func (c *Client) GetAlertmanagerGlobal(ctx context.Context) (AlertmanagerGlobal,
 	return g, etag, nil
 }
 
-// PutAlertmanagerGlobal replaces the global section. See the receiver
-// Put for the mutex + refresh-on-412 rationale.
+// PutAlertmanagerGlobal replaces the global section. Holds the
+// per-client alertmanager mutex and retries on 412 against the shared
+// wrapper ETag — see [Client.putAlertmanagerWithRetry] for the full
+// optimistic-locking rationale.
 func (c *Client) PutAlertmanagerGlobal(ctx context.Context, etag string, g AlertmanagerGlobal) (AlertmanagerGlobal, string, error) {
 	c.alertmanagerMu.Lock()
 	defer c.alertmanagerMu.Unlock()
-	path := c.tenantPath("alertmanager", "global")
 	var out AlertmanagerGlobal
-	newETag, err := c.requestWithETag(ctx, http.MethodPut, path, etag, g, &out)
-	if err != nil && etag != "" && IsPreconditionFailed(err) {
-		freshETag, refreshErr := c.refreshAlertmanagerETag(ctx, http.MethodGet, path)
-		if refreshErr != nil {
-			return nil, "", err
-		}
-		out = nil
-		newETag, err = c.requestWithETag(ctx, http.MethodPut, path, freshETag, g, &out)
-	}
+	newETag, err := c.putAlertmanagerWithRetry(ctx, c.tenantPath("alertmanager", "global"), etag, g, &out)
 	if err != nil {
 		return nil, "", err
 	}
@@ -177,4 +151,54 @@ func (c *Client) refreshAlertmanagerETag(ctx context.Context, method, path strin
 	// this specific section. The returned etag will be empty in that
 	// case, which causes the retry to PUT without If-Match (a create).
 	return etag, nil
+}
+
+// maxAlertmanagerPutRetries bounds the optimistic-locking retry loop in
+// putAlertmanagerWithRetry. The terraform provider exposes three
+// resources backed by one server-side wrapper ETag (receiver, routes,
+// global), and a parallel apply or destroy can produce up to three
+// concurrent racers. Each successful sibling write bumps the wrapper
+// ETag, so a single retry isn't enough — observed in practice during
+// `tofu destroy` where routes' retry landed too late after global's
+// retry had already incremented the wrapper.
+const maxAlertmanagerPutRetries = 4
+
+// putAlertmanagerWithRetry executes a PUT against an alertmanager
+// subresource (receiver/routes/global), retrying on 412 by refreshing
+// the wrapper ETag between attempts.
+//
+// The wrapper ETag is the optimistic-locking unit shared across all
+// three subresource paths. Within a single provider process, the
+// per-client mutex serialises writes — but the caller's etag (read
+// before acquiring the mutex) can still be stale by the time the write
+// runs if a sibling resource has just incremented the wrapper. We
+// retry up to [maxAlertmanagerPutRetries] times to handle that case.
+//
+// External mutators (console UI, another concurrent provider) still
+// surface as a 412 once retries are exhausted, with the same
+// actionable error message the caller would have seen on the first
+// attempt.
+func (c *Client) putAlertmanagerWithRetry(ctx context.Context, path, etag string, body, out any) (string, error) {
+	currentETag := etag
+	var lastErr error
+	for attempt := 0; attempt < maxAlertmanagerPutRetries; attempt++ {
+		newETag, err := c.requestWithETag(ctx, http.MethodPut, path, currentETag, body, out)
+		if err == nil {
+			return newETag, nil
+		}
+		lastErr = err
+		// Only the 412 path is retryable. Non-412 errors (network, 5xx,
+		// validation 400, etc.) get returned immediately. Same for the
+		// initial empty-etag case — a "create" attempt that fails should
+		// not loop.
+		if currentETag == "" || !IsPreconditionFailed(err) {
+			return "", err
+		}
+		refreshedETag, refreshErr := c.refreshAlertmanagerETag(ctx, http.MethodGet, path)
+		if refreshErr != nil {
+			return "", lastErr
+		}
+		currentETag = refreshedETag
+	}
+	return "", lastErr
 }

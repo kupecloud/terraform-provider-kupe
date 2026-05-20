@@ -85,8 +85,11 @@ func (r *ClusterResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				Computed:    true,
 			},
 			"resources": schema.SingleNestedAttribute{
-				Description: "Resource limits for the cluster.",
-				Optional:    true,
+				Description: "Resource limits for the cluster. Updates are sent as a JSON Merge " +
+					"Patch (RFC 7396) — fields you remove from this block are **left unchanged** " +
+					"on the server, not cleared. To clear all resource limits, remove the entire " +
+					"`resources` block. To change an individual field, write it explicitly.",
+				Optional: true,
 				Attributes: map[string]schema.Attribute{
 					"cpu": schema.StringAttribute{
 						Description: "CPU limit (e.g., 4, 500m).",
