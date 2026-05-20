@@ -141,11 +141,11 @@ func (r *AlertmanagerGlobalResource) Create(ctx context.Context, req resource.Cr
 	}
 	out, etag, err := r.client.PutAlertmanagerGlobal(ctx, "", body)
 	if err != nil {
-		resp.Diagnostics.AddError("failed to create alertmanager global", err.Error())
+		resp.Diagnostics.AddError("failed to create alertmanager global", apiErrorDetail(err))
 		return
 	}
 	if err := mapGlobalToState(out, etag, &plan); err != nil {
-		resp.Diagnostics.AddError("failed to render global state", err.Error())
+		resp.Diagnostics.AddError("failed to render global state", apiErrorDetail(err))
 		return
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
@@ -163,11 +163,11 @@ func (r *AlertmanagerGlobalResource) Read(ctx context.Context, req resource.Read
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		resp.Diagnostics.AddError("failed to read alertmanager global", err.Error())
+		resp.Diagnostics.AddError("failed to read alertmanager global", apiErrorDetail(err))
 		return
 	}
 	if err := mapGlobalToState(out, etag, &state); err != nil {
-		resp.Diagnostics.AddError("failed to render global state", err.Error())
+		resp.Diagnostics.AddError("failed to render global state", apiErrorDetail(err))
 		return
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
@@ -187,11 +187,11 @@ func (r *AlertmanagerGlobalResource) Update(ctx context.Context, req resource.Up
 	}
 	out, etag, err := r.client.PutAlertmanagerGlobal(ctx, state.ETag.ValueString(), body)
 	if err != nil {
-		resp.Diagnostics.AddError("failed to update alertmanager global", err.Error())
+		resp.Diagnostics.AddError("failed to update alertmanager global", apiErrorDetail(err))
 		return
 	}
 	if err := mapGlobalToState(out, etag, &plan); err != nil {
-		resp.Diagnostics.AddError("failed to render global state", err.Error())
+		resp.Diagnostics.AddError("failed to render global state", apiErrorDetail(err))
 		return
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
@@ -206,7 +206,7 @@ func (r *AlertmanagerGlobalResource) Delete(ctx context.Context, req resource.De
 		return
 	}
 	if _, _, err := r.client.PutAlertmanagerGlobal(ctx, state.ETag.ValueString(), client.AlertmanagerGlobal{}); err != nil && !client.IsNotFound(err) {
-		resp.Diagnostics.AddError("failed to clear alertmanager global", err.Error())
+		resp.Diagnostics.AddError("failed to clear alertmanager global", apiErrorDetail(err))
 	}
 }
 

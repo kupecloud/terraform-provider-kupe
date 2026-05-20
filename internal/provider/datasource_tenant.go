@@ -81,7 +81,7 @@ func (d *TenantDataSource) Configure(_ context.Context, req datasource.Configure
 func (d *TenantDataSource) Read(ctx context.Context, _ datasource.ReadRequest, resp *datasource.ReadResponse) {
 	tenant, _, err := d.client.GetTenant(ctx)
 	if err != nil {
-		resp.Diagnostics.AddError("failed to read tenant", err.Error())
+		resp.Diagnostics.AddError("failed to read tenant", apiErrorDetail(err))
 		return
 	}
 

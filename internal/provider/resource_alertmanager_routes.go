@@ -166,11 +166,11 @@ func (r *AlertmanagerRoutesResource) Create(ctx context.Context, req resource.Cr
 	}
 	out, etag, err := r.client.PutAlertmanagerRoutes(ctx, "", routes)
 	if err != nil {
-		resp.Diagnostics.AddError("failed to create alertmanager routes", err.Error())
+		resp.Diagnostics.AddError("failed to create alertmanager routes", apiErrorDetail(err))
 		return
 	}
 	if err := mapRoutesToState(out, etag, &plan); err != nil {
-		resp.Diagnostics.AddError("failed to render routes state", err.Error())
+		resp.Diagnostics.AddError("failed to render routes state", apiErrorDetail(err))
 		return
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
@@ -188,11 +188,11 @@ func (r *AlertmanagerRoutesResource) Read(ctx context.Context, req resource.Read
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		resp.Diagnostics.AddError("failed to read alertmanager routes", err.Error())
+		resp.Diagnostics.AddError("failed to read alertmanager routes", apiErrorDetail(err))
 		return
 	}
 	if err := mapRoutesToState(out, etag, &state); err != nil {
-		resp.Diagnostics.AddError("failed to render routes state", err.Error())
+		resp.Diagnostics.AddError("failed to render routes state", apiErrorDetail(err))
 		return
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
@@ -212,11 +212,11 @@ func (r *AlertmanagerRoutesResource) Update(ctx context.Context, req resource.Up
 	}
 	out, etag, err := r.client.PutAlertmanagerRoutes(ctx, state.ETag.ValueString(), routes)
 	if err != nil {
-		resp.Diagnostics.AddError("failed to update alertmanager routes", err.Error())
+		resp.Diagnostics.AddError("failed to update alertmanager routes", apiErrorDetail(err))
 		return
 	}
 	if err := mapRoutesToState(out, etag, &plan); err != nil {
-		resp.Diagnostics.AddError("failed to render routes state", err.Error())
+		resp.Diagnostics.AddError("failed to render routes state", apiErrorDetail(err))
 		return
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
@@ -233,7 +233,7 @@ func (r *AlertmanagerRoutesResource) Delete(ctx context.Context, req resource.De
 		return
 	}
 	if _, _, err := r.client.PutAlertmanagerRoutes(ctx, state.ETag.ValueString(), nil); err != nil && !client.IsNotFound(err) {
-		resp.Diagnostics.AddError("failed to clear alertmanager routes", err.Error())
+		resp.Diagnostics.AddError("failed to clear alertmanager routes", apiErrorDetail(err))
 	}
 }
 

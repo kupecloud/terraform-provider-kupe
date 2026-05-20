@@ -135,7 +135,7 @@ func (r *SecretResource) Create(ctx context.Context, req resource.CreateRequest,
 
 	secret, etag, err := r.client.CreateSecret(ctx, createReq)
 	if err != nil {
-		resp.Diagnostics.AddError("failed to create secret", err.Error())
+		resp.Diagnostics.AddError("failed to create secret", apiErrorDetail(err))
 		return
 	}
 
@@ -159,7 +159,7 @@ func (r *SecretResource) Read(ctx context.Context, req resource.ReadRequest, res
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		resp.Diagnostics.AddError("failed to read secret", err.Error())
+		resp.Diagnostics.AddError("failed to read secret", apiErrorDetail(err))
 		return
 	}
 
@@ -184,7 +184,7 @@ func (r *SecretResource) Update(ctx context.Context, req resource.UpdateRequest,
 
 	secret, etag, err := r.client.UpdateSecret(ctx, plan.Name.ValueString(), state.ETag.ValueString(), patchReq)
 	if err != nil {
-		resp.Diagnostics.AddError("failed to update secret", err.Error())
+		resp.Diagnostics.AddError("failed to update secret", apiErrorDetail(err))
 		return
 	}
 
@@ -204,7 +204,7 @@ func (r *SecretResource) Delete(ctx context.Context, req resource.DeleteRequest,
 
 	err := r.client.DeleteSecret(ctx, state.Name.ValueString())
 	if err != nil && !client.IsNotFound(err) {
-		resp.Diagnostics.AddError("failed to delete secret", err.Error())
+		resp.Diagnostics.AddError("failed to delete secret", apiErrorDetail(err))
 	}
 }
 

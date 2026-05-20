@@ -133,7 +133,7 @@ func (r *APIKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 
 	apiKey, err := r.client.CreateAPIKey(ctx, createReq)
 	if err != nil {
-		resp.Diagnostics.AddError("failed to create api key", err.Error())
+		resp.Diagnostics.AddError("failed to create api key", apiErrorDetail(err))
 		return
 	}
 
@@ -155,7 +155,7 @@ func (r *APIKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 	// We list and find by ID to verify existence.
 	keys, err := r.client.ListAPIKeys(ctx)
 	if err != nil {
-		resp.Diagnostics.AddError("failed to list api keys", err.Error())
+		resp.Diagnostics.AddError("failed to list api keys", apiErrorDetail(err))
 		return
 	}
 
@@ -194,7 +194,7 @@ func (r *APIKeyResource) Delete(ctx context.Context, req resource.DeleteRequest,
 
 	err := r.client.DeleteAPIKey(ctx, state.ID.ValueString())
 	if err != nil && !client.IsNotFound(err) {
-		resp.Diagnostics.AddError("failed to delete api key", err.Error())
+		resp.Diagnostics.AddError("failed to delete api key", apiErrorDetail(err))
 	}
 }
 

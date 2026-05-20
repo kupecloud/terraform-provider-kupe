@@ -77,7 +77,7 @@ func (d *PlanDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 
 	plan, err := d.client.GetPlan(ctx, state.Name.ValueString())
 	if err != nil {
-		resp.Diagnostics.AddError("failed to read plan", err.Error())
+		resp.Diagnostics.AddError("failed to read plan", apiErrorDetail(err))
 		return
 	}
 

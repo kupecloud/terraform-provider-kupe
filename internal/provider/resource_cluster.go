@@ -163,7 +163,7 @@ func (r *ClusterResource) Create(ctx context.Context, req resource.CreateRequest
 
 	cluster, etag, err := r.client.CreateCluster(ctx, createReq)
 	if err != nil {
-		resp.Diagnostics.AddError("failed to create cluster", err.Error())
+		resp.Diagnostics.AddError("failed to create cluster", apiErrorDetail(err))
 		return
 	}
 
@@ -184,7 +184,7 @@ func (r *ClusterResource) Read(ctx context.Context, req resource.ReadRequest, re
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		resp.Diagnostics.AddError("failed to read cluster", err.Error())
+		resp.Diagnostics.AddError("failed to read cluster", apiErrorDetail(err))
 		return
 	}
 
@@ -226,7 +226,7 @@ func (r *ClusterResource) Update(ctx context.Context, req resource.UpdateRequest
 	if hasChanges {
 		cluster, etag, err := r.client.UpdateCluster(ctx, plan.Name.ValueString(), state.ETag.ValueString(), patchReq)
 		if err != nil {
-			resp.Diagnostics.AddError("failed to update cluster", err.Error())
+			resp.Diagnostics.AddError("failed to update cluster", apiErrorDetail(err))
 			return
 		}
 		mapClusterToState(cluster, etag, &plan)
@@ -234,7 +234,7 @@ func (r *ClusterResource) Update(ctx context.Context, req resource.UpdateRequest
 		// No API changes but always refresh computed fields
 		cluster, etag, err := r.client.GetCluster(ctx, plan.Name.ValueString())
 		if err != nil {
-			resp.Diagnostics.AddError("failed to read cluster", err.Error())
+			resp.Diagnostics.AddError("failed to read cluster", apiErrorDetail(err))
 			return
 		}
 		mapClusterToState(cluster, etag, &plan)
@@ -252,7 +252,7 @@ func (r *ClusterResource) Delete(ctx context.Context, req resource.DeleteRequest
 
 	err := r.client.DeleteCluster(ctx, state.Name.ValueString())
 	if err != nil && !client.IsNotFound(err) {
-		resp.Diagnostics.AddError("failed to delete cluster", err.Error())
+		resp.Diagnostics.AddError("failed to delete cluster", apiErrorDetail(err))
 	}
 }
 

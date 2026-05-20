@@ -184,11 +184,11 @@ func (r *AlertmanagerReceiverResource) Create(ctx context.Context, req resource.
 	}
 	out, etag, err := r.client.PutAlertmanagerReceiver(ctx, plan.Name.ValueString(), "", body)
 	if err != nil {
-		resp.Diagnostics.AddError("failed to create alertmanager receiver", err.Error())
+		resp.Diagnostics.AddError("failed to create alertmanager receiver", apiErrorDetail(err))
 		return
 	}
 	if err := mapReceiverToState(plan.Name.ValueString(), out, etag, &plan); err != nil {
-		resp.Diagnostics.AddError("failed to render receiver state", err.Error())
+		resp.Diagnostics.AddError("failed to render receiver state", apiErrorDetail(err))
 		return
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
@@ -206,11 +206,11 @@ func (r *AlertmanagerReceiverResource) Read(ctx context.Context, req resource.Re
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		resp.Diagnostics.AddError("failed to read alertmanager receiver", err.Error())
+		resp.Diagnostics.AddError("failed to read alertmanager receiver", apiErrorDetail(err))
 		return
 	}
 	if err := mapReceiverToState(state.Name.ValueString(), out, etag, &state); err != nil {
-		resp.Diagnostics.AddError("failed to render receiver state", err.Error())
+		resp.Diagnostics.AddError("failed to render receiver state", apiErrorDetail(err))
 		return
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
@@ -230,11 +230,11 @@ func (r *AlertmanagerReceiverResource) Update(ctx context.Context, req resource.
 	}
 	out, etag, err := r.client.PutAlertmanagerReceiver(ctx, plan.Name.ValueString(), state.ETag.ValueString(), body)
 	if err != nil {
-		resp.Diagnostics.AddError("failed to update alertmanager receiver", err.Error())
+		resp.Diagnostics.AddError("failed to update alertmanager receiver", apiErrorDetail(err))
 		return
 	}
 	if err := mapReceiverToState(plan.Name.ValueString(), out, etag, &plan); err != nil {
-		resp.Diagnostics.AddError("failed to render receiver state", err.Error())
+		resp.Diagnostics.AddError("failed to render receiver state", apiErrorDetail(err))
 		return
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
@@ -247,7 +247,7 @@ func (r *AlertmanagerReceiverResource) Delete(ctx context.Context, req resource.
 		return
 	}
 	if err := r.client.DeleteAlertmanagerReceiver(ctx, state.Name.ValueString()); err != nil && !client.IsNotFound(err) {
-		resp.Diagnostics.AddError("failed to delete alertmanager receiver", err.Error())
+		resp.Diagnostics.AddError("failed to delete alertmanager receiver", apiErrorDetail(err))
 	}
 }
 

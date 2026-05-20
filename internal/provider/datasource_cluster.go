@@ -87,7 +87,7 @@ func (d *ClusterDataSource) Read(ctx context.Context, req datasource.ReadRequest
 
 	cluster, _, err := d.client.GetCluster(ctx, state.Name.ValueString())
 	if err != nil {
-		resp.Diagnostics.AddError("failed to read cluster", err.Error())
+		resp.Diagnostics.AddError("failed to read cluster", apiErrorDetail(err))
 		return
 	}
 

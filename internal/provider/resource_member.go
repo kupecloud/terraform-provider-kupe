@@ -93,7 +93,7 @@ func (r *TenantMemberResource) Create(ctx context.Context, req resource.CreateRe
 		Role:  plan.Role.ValueString(),
 	})
 	if err != nil {
-		resp.Diagnostics.AddError("failed to add member", err.Error())
+		resp.Diagnostics.AddError("failed to add member", apiErrorDetail(err))
 		return
 	}
 
@@ -110,7 +110,7 @@ func (r *TenantMemberResource) Read(ctx context.Context, req resource.ReadReques
 
 	members, err := r.client.ListMembers(ctx)
 	if err != nil {
-		resp.Diagnostics.AddError("failed to list members", err.Error())
+		resp.Diagnostics.AddError("failed to list members", apiErrorDetail(err))
 		return
 	}
 
@@ -138,7 +138,7 @@ func (r *TenantMemberResource) Update(ctx context.Context, req resource.UpdateRe
 		Role: plan.Role.ValueString(),
 	})
 	if err != nil {
-		resp.Diagnostics.AddError("failed to update member", err.Error())
+		resp.Diagnostics.AddError("failed to update member", apiErrorDetail(err))
 		return
 	}
 
@@ -155,7 +155,7 @@ func (r *TenantMemberResource) Delete(ctx context.Context, req resource.DeleteRe
 
 	err := r.client.RemoveMember(ctx, state.Email.ValueString())
 	if err != nil && !client.IsNotFound(err) {
-		resp.Diagnostics.AddError("failed to remove member", err.Error())
+		resp.Diagnostics.AddError("failed to remove member", apiErrorDetail(err))
 	}
 }
 
