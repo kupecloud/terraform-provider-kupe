@@ -114,12 +114,18 @@ func (r *ClusterResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				Computed:    true,
 			},
 			"etag": schema.StringAttribute{
+				// etag intentionally has no UseStateForUnknown: it changes on
+				// every PATCH/PUT and we want the plan to honestly say
+				// "known after apply" on any update.
 				Description: "Resource version used for optimistic locking during updates.",
 				Computed:    true,
 			},
 			"created_at": schema.StringAttribute{
 				Description: "Timestamp when the cluster was created.",
 				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 		},
 	}
