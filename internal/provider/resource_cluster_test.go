@@ -2,10 +2,30 @@ package provider
 
 import (
 	"fmt"
+	"regexp"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
+
+// TestAccClusterResource_TypeValidator guards the stringvalidator.OneOf on
+// the `type` attribute. The validator runs at plan time, so the bad config
+// never reaches the API — ExpectError matches the regex against the plan
+// diagnostic.
+func TestAccClusterResource_TypeValidator(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccClusterConfig(mock.url(), "bad-type", "Bad Type", "bogus"),
+				ExpectError: regexp.MustCompile(`value must be one of: \["shared" "dedicated"\]`),
+			},
+		},
+	})
+}
 
 func TestAccClusterResource(t *testing.T) {
 	mock := newMockKupeAPI()

@@ -2,10 +2,28 @@ package provider
 
 import (
 	"fmt"
+	"regexp"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
+
+// TestAccTenantMemberResource_RoleValidator guards the OneOf validator on
+// the `role` attribute. Plan-time rejection, no API call.
+func TestAccTenantMemberResource_RoleValidator(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccMemberConfig(mock.url(), "user@acme.com", "superuser"),
+				ExpectError: regexp.MustCompile(`value must be one of: \["admin" "readonly"\]`),
+			},
+		},
+	})
+}
 
 func TestAccTenantMemberResource(t *testing.T) {
 	mock := newMockKupeAPI()
