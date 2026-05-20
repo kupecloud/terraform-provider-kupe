@@ -52,9 +52,9 @@ Mechanics:
 * The publish workflow uploads both `dist/` contents plus
   `terraform-registry-manifest.json` to the same GitHub release tag.
 
-Users add **one** provider source in their HCL — Terraform resolves it
-to `registry.terraform.io/kupecloud/kupe`, OpenTofu to
-`registry.opentofu.org/kupecloud/kupe`:
+Users add **one** provider source in their HCL — the short form is
+registry-agnostic and each tool resolves it to its own default
+registry:
 
 ```hcl
 terraform {
@@ -65,6 +65,17 @@ terraform {
   }
 }
 ```
+
+| Tool        | Resolves to                                |
+|-------------|--------------------------------------------|
+| `terraform` | `registry.terraform.io/kupecloud/kupe`     |
+| `tofu`      | `registry.opentofu.org/kupecloud/kupe`     |
+
+This is why dual-publishing matters: the same HCL config works for
+both tools and each user hits a fast registry that serves their CLI.
+Users **can** pin to a specific registry by writing the explicit form
+(`source = "registry.terraform.io/kupecloud/kupe"`), but they rarely
+need to.
 
 ## One-time setup
 
@@ -138,10 +149,10 @@ gh secret list -R kupecloud/terraform-provider-kupe
 # expect: GPG_PASSPHRASE, GPG_PRIVATE_KEY
 ```
 
-### 3. Enable the publish job
+### 3. Verify the publish job is wired in
 
-The publish job in `.github/workflows/main.yaml` is intentionally
-commented out until secrets are in place. Uncomment it:
+The publish job is wired into `.github/workflows/main.yaml`. Confirm
+the block is present and not commented out:
 
 ```yaml
 publish:
@@ -157,8 +168,8 @@ publish:
   secrets: inherit
 ```
 
-Push that change. The next `feat:`/`fix:` commit triggers
-`semantic-release` → it cuts a new tag and GitHub release → the new
+With this in place, the next `feat:` / `fix:` commit triggers
+`semantic-release` → it cuts a new tag and GitHub release → the
 `publish` job runs `goreleaser release` twice (one per config), signs
 the checksum files with the imported GPG key, and uploads the bundles
 to the release.
@@ -288,9 +299,10 @@ compromised release will see verification warnings until they upgrade.
 ## Troubleshooting
 
 * **`gh release view <tag>` shows no assets.** The publish job either
-  did not run (secrets missing, job still commented out) or failed
-  mid-way. Look at the workflow run logs; re-running the publish job
-  is idempotent because of `gh release upload --clobber`.
+  did not run (secrets missing, or the `if:` gate evaluated to false
+  for that commit) or failed mid-way. Look at the workflow run logs;
+  re-running the publish job is idempotent because of `gh release
+  upload --clobber`.
 * **Goreleaser fails with `gpg: signing failed: No such file or
   directory`.** Either `GPG_PRIVATE_KEY` is malformed (must be ASCII-
   armored, including the `-----BEGIN PGP PRIVATE KEY BLOCK-----`
