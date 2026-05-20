@@ -20,37 +20,42 @@ this single repo.
 
 ## Dual-registry model
 
-**One repo, one GitHub release, two sets of artifacts.** Both the
-Terraform registry (`registry.terraform.io`) and the OpenTofu registry
-(`registry.opentofu.org`) index GitHub releases — they don't host the
-binaries themselves. We attach two signed bundles to every release and
-each registry picks up its own.
+**One repo, one GitHub release, one set of artifacts — served to both
+registries.** Both the Terraform Registry (`registry.terraform.io`)
+and the OpenTofu Registry (`registry.opentofu.org`) index GitHub
+releases; they don't host binaries themselves. Both expect the
+identical asset-naming convention
+(`terraform-provider-{name}_{version}_{os}_{arch}.zip` plus a
+`SHA256SUMS` file and detached `.sig`), so a single signed bundle is
+all either registry needs.
 
-Why two bundles instead of one: the provider binary embeds its own
-*registry address* at build time via an `ldflags` `-X` substitution:
+The provider binary embeds its registry address via an `ldflags` `-X`
+substitution:
 
 ```
--X main.providerAddress=registry.terraform.io/kupecloud/kupe   # Terraform variant
--X main.providerAddress=registry.opentofu.org/kupecloud/kupe   # OpenTofu  variant
+-X main.providerAddress=registry.terraform.io/kupecloud/kupe
 ```
 
-The runtime self-identifies as that address, and each registry validates
-the embedded value matches what it expects. Same source code, same
-release tag — two binaries that differ only in that one string.
-
-This pattern is supported by both registries. There is nothing
-exclusive about either — providers like `cloudflare/cloudflare` and
-`vmware/vmware` ship this way today.
+That string is *documentation only* at runtime — it does **not** gate
+which registry can serve the binary. Empirical confirmation: OpenTofu
+pulls the `terraform-provider-kupe_*` zips (verified against the
+lockfile `zh:` hashes), the embedded `registry.terraform.io` address
+is ignored, and `tofu init` runs against `registry.opentofu.org`
+without complaint. The OpenTofu Registry indexer
+([source](https://github.com/opentofu/registry-stable/blob/main/src/internal/provider/version.go))
+hardcodes the `terraform-provider-{name}_*` pattern with no
+`-opentofu` suffix variant — there's nothing for a separate OpenTofu
+build to plug into.
 
 Mechanics:
 
-* Two GoReleaser configs in the repo root:
-  * `.goreleaser.terraform.yaml` → `dist/terraform/` + `terraform-provider-kupe_*` archives
-  * `.goreleaser.opentofu.yaml`  → `dist/opentofu/`  + `terraform-provider-kupe-opentofu_*` archives
-* Each config produces per-OS/arch zips, a `SHA256SUMS` file, and a
-  detached GPG signature `SHA256SUMS.sig` for the checksum file.
-* The publish workflow uploads both `dist/` contents plus
-  `terraform-registry-manifest.json` to the same GitHub release tag.
+* One GoReleaser config: [`.goreleaser.yaml`](.goreleaser.yaml)
+  produces `dist/terraform-provider-kupe_{version}_{os}_{arch}.zip` × 6
+  (darwin/linux/windows × amd64/arm64), a `SHA256SUMS` file, and a
+  detached GPG signature `SHA256SUMS.sig`.
+* The publish workflow uploads the zips + `SHA256SUMS` + `.sig` + the
+  `terraform-registry-manifest.json` metadata file to the GitHub
+  release tag — both registries scan that release.
 
 Users add **one** provider source in their HCL — the short form is
 registry-agnostic and each tool resolves it to its own default
@@ -71,9 +76,9 @@ terraform {
 | `terraform` | `registry.terraform.io/kupecloud/kupe`     |
 | `tofu`      | `registry.opentofu.org/kupecloud/kupe`     |
 
-This is why dual-publishing matters: the same HCL config works for
-both tools and each user hits a fast registry that serves their CLI.
-Users **can** pin to a specific registry by writing the explicit form
+The same HCL config works for both tools and each user hits a fast
+registry that serves their CLI. Users **can** pin to a specific
+registry by writing the explicit form
 (`source = "registry.terraform.io/kupecloud/kupe"`), but they rarely
 need to.
 
@@ -190,9 +195,8 @@ push → main
        ├─ release            (semantic-release: cut vX.Y.Z + GitHub release notes)
        └─ publish            (only if new_release_published == 'true')
             ├─ Import GPG key
-            ├─ goreleaser release --config .goreleaser.terraform.yaml
-            ├─ goreleaser release --config .goreleaser.opentofu.yaml
-            └─ gh release upload v<version> dist/terraform/* dist/opentofu/* terraform-registry-manifest.json
+            ├─ goreleaser release --skip=publish      (build + sign one bundle)
+            └─ gh release upload v<version> dist/*.zip dist/*_SHA256SUMS{,.sig} terraform-registry-manifest.json
 ```
 
 You do nothing per release. If the publish job fails (signing error,
@@ -278,24 +282,20 @@ on CI:
 # 1. Install goreleaser (Go build, no extra deps)
 go install github.com/goreleaser/goreleaser/v2@v2.15.2
 
-# 2. Export your signing passphrase for the GPG key the configs use
+# 2. Export your signing passphrase for the GPG key
 export GPG_PASSPHRASE='...'
 
-# 3. Run both configs in snapshot mode (no tag required)
-goreleaser release --snapshot --clean --config .goreleaser.terraform.yaml
-goreleaser release --snapshot --clean --config .goreleaser.opentofu.yaml
-
-# 4. Inspect what would be uploaded
-ls dist/terraform/ dist/opentofu/
+# 3. Run goreleaser in snapshot mode (no tag required)
+make publish-dryrun
 ```
 
-Each `dist/<variant>/` should contain:
+`dist/` should contain:
 
-* `terraform-provider-kupe[-opentofu]_<version>_<os>_<arch>.zip` — six
-  archives (darwin/linux/windows × amd64/arm64)
-* `terraform-provider-kupe[-opentofu]_<version>_SHA256SUMS`
-* `terraform-provider-kupe[-opentofu]_<version>_SHA256SUMS.sig` — the
-  detached signature from your GPG key
+* `terraform-provider-kupe_<version>_<os>_<arch>.zip` — six archives
+  (darwin/linux/windows × amd64/arm64)
+* `terraform-provider-kupe_<version>_SHA256SUMS`
+* `terraform-provider-kupe_<version>_SHA256SUMS.sig` — the detached
+  signature from your GPG key
 * `artifacts.json`, `metadata.json`, `config.yaml` — GoReleaser
   bookkeeping, not uploaded to the release
 
@@ -303,8 +303,8 @@ You can verify the signature manually:
 
 ```bash
 gpg --verify \
-  dist/terraform/terraform-provider-kupe_*_SHA256SUMS.sig \
-  dist/terraform/terraform-provider-kupe_*_SHA256SUMS
+  dist/terraform-provider-kupe_*_SHA256SUMS.sig \
+  dist/terraform-provider-kupe_*_SHA256SUMS
 ```
 
 ## Rotating the signing key

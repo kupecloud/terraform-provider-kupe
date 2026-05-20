@@ -17,18 +17,16 @@ TF_ACC_TERRAFORM_PATH ?= $(shell command -v tofu 2>/dev/null || command -v terra
 TF_ACC_PROVIDER_HOST ?= $(if $(findstring tofu,$(TF_ACC_TERRAFORM_PATH)),registry.opentofu.org,registry.terraform.io)
 TF_ACC_PROVIDER_NAMESPACE ?= kupecloud
 
-.PHONY: all build build-terraform build-opentofu test gosec govulncheck install local-provider tidy fmt vet tofu-validate docs-install docs-generate docs-validate docs publish-dryrun clean help
+.PHONY: all build test gosec govulncheck install local-provider tidy fmt vet tofu-validate docs-install docs-generate docs-validate docs publish-dryrun clean help
 
 all: build
 
+# The provider's embedded `providerAddress` is set to the Terraform Registry
+# address. Both registries serve the same binary — the embedded value is
+# documentation only and does not gate registry compatibility. See
+# PUBLISHING.md "Dual-registry model" for the rationale.
 build: ## Build the provider binary
 	GOCACHE=$(GOCACHE) $(GO) build -ldflags "-X main.version=$(VERSION) -X main.providerAddress=$(PROVIDER_ADDRESS)" -o $(BINARY_NAME)
-
-build-terraform: ## Build the provider binary for Terraform registry identity
-	$(MAKE) build PROVIDER_ADDRESS=registry.terraform.io/kupecloud/kupe
-
-build-opentofu: ## Build the provider binary for OpenTofu registry identity
-	$(MAKE) build PROVIDER_ADDRESS=registry.opentofu.org/kupecloud/kupe
 
 test: ## Run unit and acceptance tests (auto-detects tofu/terraform)
 	@if [ -z "$(TF_ACC_TERRAFORM_PATH)" ]; then \
@@ -80,16 +78,15 @@ docs-validate: ## Validate generated registry docs
 
 docs: docs-install docs-generate docs-validate ## Install tfplugindocs, generate docs, and validate them
 
-publish-dryrun: ## Dry-run goreleaser for both registry variants (see PUBLISHING.md)
+publish-dryrun: ## Dry-run goreleaser to inspect what publish.yaml would upload (see PUBLISHING.md)
 	@command -v goreleaser >/dev/null || { echo "error: goreleaser not installed; run 'go install github.com/goreleaser/goreleaser/v2@v2.15.2'"; exit 1; }
-	goreleaser release --snapshot --clean --skip=publish --config .goreleaser.terraform.yaml
-	goreleaser release --snapshot --clean --skip=publish --config .goreleaser.opentofu.yaml
+	goreleaser release --snapshot --clean --skip=publish
 	@echo
 	@echo "Artifacts:"
-	@ls dist/terraform/*.zip dist/terraform/*SHA256SUMS* dist/opentofu/*.zip dist/opentofu/*SHA256SUMS* 2>/dev/null
+	@ls dist/*.zip dist/*SHA256SUMS* 2>/dev/null
 	@echo
 	@echo "Signature requires GPG_PASSPHRASE (or an unprotected key in your GnuPG keyring)."
-	@echo "Skip signing with: goreleaser release --snapshot --clean --skip=sign,publish --config <config>"
+	@echo "Skip signing with: goreleaser release --snapshot --clean --skip=sign,publish"
 
 clean: ## Clean build artifacts
 	rm -f $(BINARY_NAME)

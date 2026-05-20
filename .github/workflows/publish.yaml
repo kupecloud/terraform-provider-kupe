@@ -50,32 +50,28 @@ jobs:
           GOBIN="$RUNNER_TEMP/bin" go install "github.com/goreleaser/goreleaser/v2@${GORELEASER_VERSION}"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
 
-      - name: Build Terraform registry artifacts
+      - name: Build registry artifacts
         env:
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-        run: goreleaser release --clean --skip=publish --config .goreleaser.terraform.yaml
-
-      - name: Build OpenTofu registry artifacts
-        env:
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-        run: goreleaser release --clean --skip=publish --config .goreleaser.opentofu.yaml
+        # One signed artifact set serves both registry.terraform.io and
+        # registry.opentofu.org — both use the same naming convention
+        # (terraform-provider-{name}_{version}_*). See PUBLISHING.md.
+        run: goreleaser release --clean --skip=publish
 
       - name: Upload release artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # Narrow the glob to the registry-consumed artifacts. `dist/<variant>/*`
-        # also matches GoReleaser's per-platform build directories (e.g.
-        # `terraform_darwin_amd64_v1/`) and its bookkeeping files
-        # (artifacts.json, metadata.json, config.yaml); `gh release upload`
-        # treats the directories as files and fails. The registries only
-        # need the platform zips, the SHA256SUMS file, and its signature.
+        # Narrow the glob to the registry-consumed artifacts. `dist/*` would
+        # also match GoReleaser's per-platform build directories (e.g.
+        # `terraform-provider-kupe_darwin_amd64_v1/`) and its bookkeeping
+        # files (artifacts.json, metadata.json, config.yaml); `gh release
+        # upload` treats the directories as files and fails. The registries
+        # only need the platform zips, the SHA256SUMS file, and its
+        # signature.
         run: |
           gh release upload "v${{ inputs.version }}" \
-            dist/terraform/*.zip \
-            dist/terraform/*_SHA256SUMS \
-            dist/terraform/*_SHA256SUMS.sig \
-            dist/opentofu/*.zip \
-            dist/opentofu/*_SHA256SUMS \
-            dist/opentofu/*_SHA256SUMS.sig \
+            dist/*.zip \
+            dist/*_SHA256SUMS \
+            dist/*_SHA256SUMS.sig \
             terraform-registry-manifest.json \
             --clobber

@@ -1,11 +1,17 @@
 version: 2
 
+# Single set of signed artifacts serves both the Terraform Registry and the
+# OpenTofu Registry — both use the `terraform-provider-{name}_{version}_*`
+# naming convention and scan the same GitHub release. The binary's embedded
+# `providerAddress` (set via ldflags below) is documentation only; it does
+# not gate which registry can serve the binary at runtime. See PUBLISHING.md
+# for the dual-registry model.
+
 project_name: terraform-provider-kupe
-dist: dist/terraform
+dist: dist
 
 builds:
-  - id: terraform
-    main: .
+  - main: .
     binary: terraform-provider-kupe_v{{ .Version }}
     env:
       - CGO_ENABLED=0
@@ -20,10 +26,7 @@ builds:
       - -s -w -X main.version={{ .Version }} -X main.providerAddress=registry.terraform.io/kupecloud/kupe
 
 archives:
-  - id: terraform
-    ids:
-      - terraform
-    formats:
+  - formats:
       - zip
     name_template: terraform-provider-kupe_{{ .Version }}_{{ .Os }}_{{ .Arch }}
     files:

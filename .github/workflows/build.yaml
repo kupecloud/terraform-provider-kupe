@@ -30,8 +30,8 @@ jobs:
       - name: Install tfplugindocs
         run: make docs-install
 
-      - name: Build provider variants
-        run: make build-terraform build-opentofu
+      - name: Build provider
+        run: make build
 
       - name: Validate OpenTofu examples
         run: make tofu-validate
