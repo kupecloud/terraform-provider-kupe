@@ -219,22 +219,51 @@ The provider will appear at
 
 ### OpenTofu Registry
 
-The OpenTofu registry is git-backed — submission is a PR to the
-`opentofu/registry` repo.
+Submission is done via **GitHub issue forms** in `opentofu/registry`
+— **not** by opening a PR. The repo's bot reads the structured issue
+fields, validates them, and raises the actual PR adding the provider
+JSON file (under `providers/k/kupecloud/`) automatically. Two separate
+issue submissions are required: one for the signing key, one for the
+provider itself.
 
-1. Fork <https://github.com/opentofu/registry>.
-2. Create `providers/k/kupecloud/kupe.json`:
-   ```json
-   {
-     "repository": "https://github.com/kupecloud/terraform-provider-kupe"
-   }
-   ```
-   The registry derives everything else from the GitHub releases and
-   the embedded GPG signature.
-3. Open a PR. The registry team auto-validates the latest signed
-   release before merging. On merge, OpenTofu starts serving the
-   provider at `registry.opentofu.org/kupecloud/kupe` within a few
-   minutes.
+> Both submissions **must** go through the GitHub issue form UI in a
+> browser. The automation depends on the form's structured fields, so
+> submitting via `gh issue create`, the API, or a manually composed
+> issue body will silently fail validation. See the OpenTofu registry
+> [PROCEDURES.md](https://github.com/opentofu/registry/blob/main/PROCEDURES.md)
+> for the maintainer-side workflow.
+
+1. **Make your `kupecloud` org membership public.** The bot rejects
+   key submissions from users whose org membership is hidden. Visit
+   <https://github.com/orgs/kupecloud/people>, find yourself, and
+   switch visibility to **Public**. (You can revert after the
+   registration lands.)
+
+2. **Submit the GPG public key** via the
+   [Provider Key issue form](https://github.com/opentofu/registry/issues/new?template=provider_key.yml):
+
+   | Field | Value |
+   |---|---|
+   | Provider Namespace | `kupecloud` |
+   | Provider Name | _leave blank_ — registers at the namespace level so the same key signs every future kupecloud provider |
+   | Public Membership | ✅ (after step 1) |
+   | Provider GPG Key | output of `gpg --armor --export 53C867D1AAB3CDDD699DA580FD0217288C53F5F6` (the full block including `-----BEGIN PGP PUBLIC KEY BLOCK-----` headers) |
+
+3. **Submit the provider** via the
+   [Provider issue form](https://github.com/opentofu/registry/issues/new?template=provider.yml):
+
+   | Field | Value |
+   |---|---|
+   | Provider Repository | `kupecloud/terraform-provider-kupe` |
+
+4. The bot opens an auto-generated PR for each submission. Core
+   maintainers merge once validation passes (typically within hours).
+   v1.0.0 appears at `registry.opentofu.org/kupecloud/kupe` within
+   ~30 minutes of merge.
+
+If the GPG key check fails ("user verification failed"), the bot is
+saying your org membership is still private — fix that, then comment
+on the issue with a single trailing space to retrigger validation.
 
 After both submissions, the same `kupecloud/kupe` source in HCL
 resolves to the correct registry depending on whether the user is
