@@ -64,7 +64,7 @@ resource "kupe_alertmanager_routes" "main" {
 ### Read-Only
 
 - `etag` (String) Wrapper ETag from the most recent read or write. Used for optimistic locking on subsequent updates.
-- `id` (String) Always equal to the tenant name. Singleton-per-tenant resource.
+- `id` (String) Always equal to the singleton constant `alertmanager-routes`. Singleton-per-tenant resource.
 
 ## Import
 

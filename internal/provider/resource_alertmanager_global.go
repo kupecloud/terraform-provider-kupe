@@ -68,7 +68,7 @@ func (r *AlertmanagerGlobalResource) Schema(_ context.Context, _ resource.Schema
 			"Singleton — only one of these resources should exist per tenant.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
-				Description: "Always equal to a singleton constant. Singleton-per-tenant resource.",
+				Description: "Always equal to the singleton constant `alertmanager-global`. Singleton-per-tenant resource.",
 				Computed:    true,
 			},
 			"body_json": schema.StringAttribute{

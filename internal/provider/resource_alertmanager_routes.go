@@ -87,7 +87,7 @@ func (r *AlertmanagerRoutesResource) Schema(_ context.Context, _ resource.Schema
 			"route itself (receiver, group_by defaults) is implicit and managed by kupe-api.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
-				Description: "Always equal to the tenant name. Singleton-per-tenant resource.",
+				Description: "Always equal to the singleton constant `alertmanager-routes`. Singleton-per-tenant resource.",
 				Computed:    true,
 			},
 			"routes_json": schema.StringAttribute{

@@ -45,7 +45,7 @@ variable "smtp_password" {
 ### Read-Only
 
 - `etag` (String) Wrapper ETag from the most recent read or write. Used for optimistic locking.
-- `id` (String) Always equal to a singleton constant. Singleton-per-tenant resource.
+- `id` (String) Always equal to the singleton constant `alertmanager-global`. Singleton-per-tenant resource.
 
 ## Import
 
