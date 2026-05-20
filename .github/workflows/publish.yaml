@@ -63,9 +63,19 @@ jobs:
       - name: Upload release artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Narrow the glob to the registry-consumed artifacts. `dist/<variant>/*`
+        # also matches GoReleaser's per-platform build directories (e.g.
+        # `terraform_darwin_amd64_v1/`) and its bookkeeping files
+        # (artifacts.json, metadata.json, config.yaml); `gh release upload`
+        # treats the directories as files and fails. The registries only
+        # need the platform zips, the SHA256SUMS file, and its signature.
         run: |
           gh release upload "v${{ inputs.version }}" \
-            dist/terraform/* \
-            dist/opentofu/* \
+            dist/terraform/*.zip \
+            dist/terraform/*_SHA256SUMS \
+            dist/terraform/*_SHA256SUMS.sig \
+            dist/opentofu/*.zip \
+            dist/opentofu/*_SHA256SUMS \
+            dist/opentofu/*_SHA256SUMS.sig \
             terraform-registry-manifest.json \
             --clobber
