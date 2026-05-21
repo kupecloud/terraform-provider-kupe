@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -253,9 +254,32 @@ func (r *ClusterResource) Delete(ctx context.Context, req resource.DeleteRequest
 		return
 	}
 
-	err := r.client.DeleteCluster(ctx, state.Name.ValueString())
-	if err != nil && !client.IsNotFound(err) {
+	name := state.Name.ValueString()
+	if err := r.client.DeleteCluster(ctx, name); err != nil && !client.IsNotFound(err) {
 		resp.Diagnostics.AddError("failed to delete cluster", apiErrorDetail(err))
+		return
+	}
+
+	// Poll until the ManagedCluster CR is genuinely gone. kupe-api's
+	// DELETE returns 204 once K8s accepts the request, but the
+	// operator's finalizer drives a multi-minute teardown (vCluster
+	// stop, namespace cleanup). Without this wait, an immediate
+	// re-apply with the same cluster name 409s on the still-
+	// terminating CR. 10-minute timeout matches typical vCluster
+	// teardown headroom; on timeout we add a warning rather than fail
+	// outright so users can re-run destroy or manually intervene.
+	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	if err := waitForDeleteGone(waitCtx, func(c context.Context) error {
+		_, _, err := r.client.GetCluster(c, name)
+		return err
+	}); err != nil {
+		resp.Diagnostics.AddWarning(
+			"cluster still terminating",
+			fmt.Sprintf("DELETE was accepted but cluster %q is still terminating after 10 minutes. "+
+				"The operator may still be cleaning up vCluster resources. "+
+				"Re-running `terraform destroy` will wait again; the same name cannot be reused until termination completes.", name),
+		)
 	}
 }
 

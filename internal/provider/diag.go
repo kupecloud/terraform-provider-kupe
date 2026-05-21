@@ -1,12 +1,67 @@
 package provider
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/kupecloud/terraform-provider-kupe/internal/client"
 )
+
+// deletePollInterval is how often waitForDeleteGone re-checks the server.
+// 2s gives reasonable feedback latency without hammering kupe-api during a
+// multi-minute teardown (vCluster finalizers, namespace cleanup).
+const deletePollInterval = 2 * time.Second
+
+// waitForDeleteGone polls a resource-specific GET until it returns a 404
+// (resource genuinely gone) or the context expires. Used by resource
+// Delete handlers whose backing CR has an operator-managed finalizer
+// (managedcluster, managedsecret): kupe-api's DELETE returns 204 as soon
+// as K8s sets `deletionTimestamp`, but the actual teardown — vCluster
+// stop, synced K8s Secret cleanup, namespace removal — runs
+// asynchronously via finalizers and can take minutes. Without this wait,
+// a `terraform destroy` immediately followed by `terraform apply` with
+// the same name 409s on "already exists" against the still-terminating
+// CR.
+//
+// getFn should be a closure that calls the resource's GetX client method
+// and returns the error verbatim (the value/etag don't matter — we only
+// care whether 404 is reached). Callers pass a context with the timeout
+// they consider acceptable for that resource type (clusters: 10m,
+// secrets: 2m).
+//
+// Returns nil on success (404 reached), or a wrapped context error on
+// timeout. Non-404 errors during polling are tolerated until timeout
+// because a transient 5xx shouldn't fail the destroy — but a persistent
+// error will surface via the eventual timeout.
+func waitForDeleteGone(ctx context.Context, getFn func(context.Context) error) error {
+	ticker := time.NewTicker(deletePollInterval)
+	defer ticker.Stop()
+
+	// First check immediately; many deletes already complete in under
+	// deletePollInterval (small clusters, secrets with no synced
+	// targets), so a 2s wait before the first GET is wasted latency.
+	if err := getFn(ctx); client.IsNotFound(err) {
+		return nil
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timed out waiting for resource to finish terminating: %w", ctx.Err())
+		case <-ticker.C:
+			if err := getFn(ctx); client.IsNotFound(err) {
+				return nil
+			}
+			// Any non-NotFound error (still terminating, transient
+			// 5xx, network) we ignore and keep polling. The ticker
+			// bounds how often we re-check; the parent context
+			// bounds total time.
+		}
+	}
+}
 
 // apiErrorDetail returns a user-actionable detail string for a kupe-api
 // error. The intent is that the user sees not just "kupe api: 401 …" in

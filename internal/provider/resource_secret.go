@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -202,9 +203,32 @@ func (r *SecretResource) Delete(ctx context.Context, req resource.DeleteRequest,
 		return
 	}
 
-	err := r.client.DeleteSecret(ctx, state.Name.ValueString())
-	if err != nil && !client.IsNotFound(err) {
+	name := state.Name.ValueString()
+	if err := r.client.DeleteSecret(ctx, name); err != nil && !client.IsNotFound(err) {
 		resp.Diagnostics.AddError("failed to delete secret", apiErrorDetail(err))
+		return
+	}
+
+	// Poll until the ManagedSecret CR is genuinely gone. kupe-api's
+	// DELETE returns 204 once K8s accepts the request, but the
+	// operator's finalizer cleans up synced K8s Secrets across all
+	// target clusters before allowing the CR to be removed. Without
+	// this wait, an immediate re-apply with the same secret name 409s
+	// on the still-terminating CR. 2-minute timeout is generous for
+	// the worst case (many sync targets); on timeout we add a warning
+	// rather than fail outright.
+	waitCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	if err := waitForDeleteGone(waitCtx, func(c context.Context) error {
+		_, _, err := r.client.GetSecret(c, name)
+		return err
+	}); err != nil {
+		resp.Diagnostics.AddWarning(
+			"secret still terminating",
+			fmt.Sprintf("DELETE was accepted but secret %q is still terminating after 2 minutes. "+
+				"The operator may still be cleaning up synced Secrets in target clusters. "+
+				"Re-running `terraform destroy` will wait again; the same name cannot be reused until termination completes.", name),
+		)
 	}
 }
 
