@@ -16,62 +16,67 @@ func fakeAPIError(status int, msg string) error {
 	return &client.APIError{StatusCode: status, Message: msg}
 }
 
-func TestWaitForDeleteGone_AlreadyGone(t *testing.T) {
-	// 404 on the first call means deletion was already complete by
-	// the time we started polling — the function must return nil
-	// without waiting an entire poll interval.
+// shrinkPollInterval lowers the helper's poll interval so the tests run
+// in millisecond-scale rather than seconds. Tests restore the original
+// in a t.Cleanup.
+func shrinkPollInterval(t *testing.T) {
+	t.Helper()
+	prev := defaultPollInterval
+	defaultPollInterval = 5 * time.Millisecond
+	t.Cleanup(func() { defaultPollInterval = prev })
+}
+
+func TestWaitForCondition_DoneOnFirstCheck(t *testing.T) {
+	// Resource is already in the desired state by the time we poll —
+	// the function must return immediately without waiting an entire
+	// poll interval. Mirrors the "delete that already completed by
+	// the time apply hits the GET" case.
+	shrinkPollInterval(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
 	start := time.Now()
-	err := waitForDeleteGone(ctx, func(context.Context) error {
-		return fakeAPIError(http.StatusNotFound, "not found")
+	err := waitForCondition(ctx, func(context.Context) (bool, error) {
+		return true, nil
 	})
 	if err != nil {
-		t.Fatalf("expected nil on immediate 404, got %v", err)
+		t.Fatalf("expected nil on immediate done, got %v", err)
 	}
-	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
+	if elapsed := time.Since(start); elapsed > 20*time.Millisecond {
 		t.Errorf("expected immediate return, took %v", elapsed)
 	}
 }
 
-func TestWaitForDeleteGone_GoneAfterRetries(t *testing.T) {
-	// Resource exists for a few polls, then disappears. We need to
-	// outlast at least one ticker fire — the helper's interval is 2s
-	// by default which is too slow for unit tests, but the public
-	// constant means we just give the test enough time to see one
-	// tick. The test is mostly verifying the loop converges rather
-	// than the exact timing.
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func TestWaitForCondition_DoneAfterRetries(t *testing.T) {
+	// Resource reaches the target state after several polls. Verifies
+	// the loop converges rather than the exact timing.
+	shrinkPollInterval(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
 	calls := 0
-	err := waitForDeleteGone(ctx, func(context.Context) error {
+	err := waitForCondition(ctx, func(context.Context) (bool, error) {
 		calls++
-		if calls < 3 {
-			// Still terminating
-			return nil
-		}
-		return fakeAPIError(http.StatusNotFound, "not found")
+		return calls >= 3, nil
 	})
 	if err != nil {
-		t.Fatalf("expected nil after the resource disappeared, got %v", err)
+		t.Fatalf("expected nil after convergence, got %v", err)
 	}
 	if calls < 3 {
-		t.Fatalf("expected at least 3 GET calls before success, got %d", calls)
+		t.Fatalf("expected at least 3 calls, got %d", calls)
 	}
 }
 
-func TestWaitForDeleteGone_TimeoutSurfacesContextError(t *testing.T) {
-	// Resource never disappears — context deadline should bound the
-	// wait and surface a wrapped context error so the caller can map
-	// it to a user-facing warning.
+func TestWaitForCondition_TimeoutSurfacesContextError(t *testing.T) {
+	// Predicate never becomes true — context deadline bounds the wait
+	// and the helper returns a wrapped DeadlineExceeded so callers can
+	// map it to a user-facing warning.
+	shrinkPollInterval(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	err := waitForDeleteGone(ctx, func(context.Context) error {
-		// Still here forever — return nil to indicate "exists".
-		return nil
+	err := waitForCondition(ctx, func(context.Context) (bool, error) {
+		return false, nil
 	})
 	if err == nil {
 		t.Fatal("expected a timeout error, got nil")
@@ -81,21 +86,46 @@ func TestWaitForDeleteGone_TimeoutSurfacesContextError(t *testing.T) {
 	}
 }
 
-func TestWaitForDeleteGone_TransientErrorsAreToleratedUntilTimeout(t *testing.T) {
-	// A persistent 5xx during polling shouldn't immediately fail the
-	// destroy — we keep retrying until either the resource disappears
-	// or the timeout elapses. A short timeout here verifies the loop
-	// continues despite non-NotFound errors.
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+func TestWaitForCondition_TerminalErrorSurfaces(t *testing.T) {
+	// done=true with a non-nil err signals a terminal failure (a
+	// future "phase=Degraded with reason" path could use this). The
+	// helper must surface that error rather than returning nil.
+	shrinkPollInterval(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	err := waitForDeleteGone(ctx, func(context.Context) error {
-		return fakeAPIError(http.StatusInternalServerError, "transient")
+	terminalErr := errors.New("resource entered terminal failure state")
+	err := waitForCondition(ctx, func(context.Context) (bool, error) {
+		return true, terminalErr
 	})
-	if err == nil {
-		t.Fatal("expected timeout when polling always sees 5xx")
+	if !errors.Is(err, terminalErr) {
+		t.Fatalf("expected the terminal error to surface, got %v", err)
 	}
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("expected DeadlineExceeded, got %v", err)
+}
+
+func TestWaitForCondition_DeletePredicate(t *testing.T) {
+	// Realistic delete-flavoured usage: closure calls a GET and
+	// reports done=true when the API returns 404. Mirrors what the
+	// cluster/secret Delete handlers do internally.
+	shrinkPollInterval(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	calls := 0
+	err := waitForCondition(ctx, func(context.Context) (bool, error) {
+		calls++
+		// First two polls see the resource still terminating; third
+		// sees the 404. The closure swallows the non-NotFound err
+		// (transient) and returns done=false.
+		if calls < 3 {
+			return false, nil
+		}
+		if !client.IsNotFound(fakeAPIError(http.StatusNotFound, "not found")) {
+			t.Fatal("test setup: IsNotFound predicate broken")
+		}
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("expected nil after the resource disappeared, got %v", err)
 	}
 }

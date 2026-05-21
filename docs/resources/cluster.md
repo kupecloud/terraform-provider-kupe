@@ -3,12 +3,12 @@
 page_title: "kupe_cluster Resource - kupe"
 subcategory: ""
 description: |-
-  Manages a Kupe cluster for a tenant.
+  Manages a Kupe cluster for a tenant. Create and Update wait for the cluster to reach phase=Running before returning; Delete waits for the underlying ManagedCluster CR to finish terminating. Timeouts are configurable via the timeouts block (defaults: create/update 15m, delete 10m).
 ---
 
 # kupe_cluster (Resource)
 
-Manages a Kupe cluster for a tenant.
+Manages a Kupe cluster for a tenant. Create and Update wait for the cluster to reach phase=Running before returning; Delete waits for the underlying ManagedCluster CR to finish terminating. Timeouts are configurable via the `timeouts` block (defaults: create/update 15m, delete 10m).
 
 ## Example Usage
 
@@ -39,6 +39,7 @@ resource "kupe_cluster" "production" {
 ### Optional
 
 - `resources` (Attributes) Resource limits for the cluster. Updates are sent as a JSON Merge Patch (RFC 7396) — fields you remove from this block are **left unchanged** on the server, not cleared. To clear all resource limits, remove the entire `resources` block. To change an individual field, write it explicitly. (see [below for nested schema](#nestedatt--resources))
+- `timeouts` (Attributes) (see [below for nested schema](#nestedatt--timeouts))
 - `version` (String) Kubernetes version (e.g., 1.31).
 
 ### Read-Only
@@ -56,6 +57,16 @@ Optional:
 - `cpu` (String) CPU limit (e.g., 4, 500m).
 - `memory` (String) Memory limit (e.g., 16Gi, 512Mi).
 - `storage` (String) Storage limit (e.g., 100Gi).
+
+
+<a id="nestedatt--timeouts"></a>
+### Nested Schema for `timeouts`
+
+Optional:
+
+- `create` (String) A string that can be [parsed as a duration](https://pkg.go.dev/time#ParseDuration) consisting of numbers and unit suffixes, such as "30s" or "2h45m". Valid time units are "s" (seconds), "m" (minutes), "h" (hours).
+- `delete` (String) A string that can be [parsed as a duration](https://pkg.go.dev/time#ParseDuration) consisting of numbers and unit suffixes, such as "30s" or "2h45m". Valid time units are "s" (seconds), "m" (minutes), "h" (hours). Setting a timeout for a Delete operation is only applicable if changes are saved into state before the destroy operation occurs.
+- `update` (String) A string that can be [parsed as a duration](https://pkg.go.dev/time#ParseDuration) consisting of numbers and unit suffixes, such as "30s" or "2h45m". Valid time units are "s" (seconds), "m" (minutes), "h" (hours).
 
 ## Import
 

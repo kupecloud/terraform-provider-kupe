@@ -3,12 +3,12 @@
 page_title: "kupe_secret Resource - kupe"
 subcategory: ""
 description: |-
-  Manages a Kupe Cloud secret definition and its sync targets.
+  Manages a Kupe Cloud secret definition and its sync targets. Create and Update wait for the secret to reach phase=Active before returning; Delete waits for the underlying ManagedSecret CR to finish terminating. Timeouts are configurable via the timeouts block (defaults: create/update/delete 2m).
 ---
 
 # kupe_secret (Resource)
 
-Manages a Kupe Cloud secret definition and its sync targets.
+Manages a Kupe Cloud secret definition and its sync targets. Create and Update wait for the secret to reach phase=Active before returning; Delete waits for the underlying ManagedSecret CR to finish terminating. Timeouts are configurable via the `timeouts` block (defaults: create/update/delete 2m).
 
 ## Example Usage
 
@@ -41,6 +41,7 @@ resource "kupe_secret" "app_config" {
 ### Optional
 
 - `sync` (Attributes List) Cluster/namespace targets to sync this secret to. (see [below for nested schema](#nestedatt--sync))
+- `timeouts` (Attributes) (see [below for nested schema](#nestedatt--timeouts))
 
 ### Read-Only
 
@@ -59,6 +60,16 @@ Required:
 Optional:
 
 - `secret_name` (String) Override the K8s secret name (defaults to the managed secret name).
+
+
+<a id="nestedatt--timeouts"></a>
+### Nested Schema for `timeouts`
+
+Optional:
+
+- `create` (String) A string that can be [parsed as a duration](https://pkg.go.dev/time#ParseDuration) consisting of numbers and unit suffixes, such as "30s" or "2h45m". Valid time units are "s" (seconds), "m" (minutes), "h" (hours).
+- `delete` (String) A string that can be [parsed as a duration](https://pkg.go.dev/time#ParseDuration) consisting of numbers and unit suffixes, such as "30s" or "2h45m". Valid time units are "s" (seconds), "m" (minutes), "h" (hours). Setting a timeout for a Delete operation is only applicable if changes are saved into state before the destroy operation occurs.
+- `update` (String) A string that can be [parsed as a duration](https://pkg.go.dev/time#ParseDuration) consisting of numbers and unit suffixes, such as "30s" or "2h45m". Valid time units are "s" (seconds), "m" (minutes), "h" (hours).
 
 ## Import
 

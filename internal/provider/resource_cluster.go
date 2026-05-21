@@ -5,16 +5,37 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/kupecloud/terraform-provider-kupe/internal/client"
+)
+
+// Cluster phase the provider considers "ready" — Create and Update wait
+// for this value before returning. All other observed phases (Pending,
+// Provisioning, Upgrading, Degraded) are treated as in-progress and
+// keep the poll going until either Running is reached or the
+// user-configured Create/Update timeout fires.
+const clusterPhaseRunning = "Running"
+
+// Default timeouts for cluster operations. Users can override via the
+// resource's `timeouts` block in HCL; these are the framework defaults
+// applied when the block is omitted. Provisioning typically takes 3-8
+// minutes on dev; 15 min covers worst-case vCluster start-up plus
+// add-on reconcile headroom.
+const (
+	defaultClusterCreateTimeout = 15 * time.Minute
+	defaultClusterUpdateTimeout = 15 * time.Minute
+	defaultClusterDeleteTimeout = 10 * time.Minute
 )
 
 var (
@@ -36,6 +57,7 @@ type ClusterResourceModel struct {
 	Endpoint    types.String           `tfsdk:"endpoint"`
 	ETag        types.String           `tfsdk:"etag"`
 	CreatedAt   types.String           `tfsdk:"created_at"`
+	Timeouts    timeouts.Value         `tfsdk:"timeouts"`
 }
 
 type ClusterResourcesModel struct {
@@ -52,9 +74,12 @@ func (r *ClusterResource) Metadata(_ context.Context, req resource.MetadataReque
 	resp.TypeName = req.ProviderTypeName + "_cluster"
 }
 
-func (r *ClusterResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages a Kupe cluster for a tenant.",
+		Description: "Manages a Kupe cluster for a tenant. Create and Update wait for the " +
+			"cluster to reach phase=Running before returning; Delete waits for the underlying " +
+			"ManagedCluster CR to finish terminating. Timeouts are configurable via the " +
+			"`timeouts` block (defaults: create/update 15m, delete 10m).",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
 				Description: "Cluster name (immutable after creation).",
@@ -131,6 +156,11 @@ func (r *ClusterResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"timeouts": timeouts.Attributes(ctx, timeouts.Opts{
+				Create: true,
+				Update: true,
+				Delete: true,
+			}),
 		},
 	}
 }
@@ -171,8 +201,29 @@ func (r *ClusterResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
+	// Persist the freshly-accepted state immediately so a Ctrl-C
+	// during the wait below leaves Terraform with the resource on
+	// record (with phase=Pending or whatever the API just returned)
+	// rather than orphaning it.
 	mapClusterToState(cluster, etag, &plan)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Block until the operator finishes provisioning. The API
+	// returns 201 the moment the K8s CR is accepted (phase=Pending);
+	// real readiness — kubeconfig endpoint populated, vCluster
+	// reachable — happens asynchronously over a few minutes. Without
+	// this wait, downstream resources that reference
+	// kupe_cluster.foo.endpoint get an empty string at apply time.
+	// User-overridable via the `timeouts.create` block (default 15m).
+	timeout, diags := plan.Timeouts.Create(ctx, defaultClusterCreateTimeout)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	r.waitForClusterReady(ctx, timeout, plan.Name.ValueString(), &plan, &resp.State, &resp.Diagnostics, "create")
 }
 
 func (r *ClusterResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -245,6 +296,21 @@ func (r *ClusterResource) Update(ctx context.Context, req resource.UpdateRequest
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+	if resp.Diagnostics.HasError() || !hasChanges {
+		return
+	}
+
+	// Version bumps and resource changes trigger a rolling upgrade
+	// via the operator (Running → Upgrading → Running). Wait for
+	// the cluster to settle back at Running so downstream resources
+	// see the upgraded version, not the still-rolling intermediate
+	// state. User-overridable via `timeouts.update` (default 15m).
+	timeout, diags := plan.Timeouts.Update(ctx, defaultClusterUpdateTimeout)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	r.waitForClusterReady(ctx, timeout, plan.Name.ValueString(), &plan, &resp.State, &resp.Diagnostics, "update")
 }
 
 func (r *ClusterResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -265,20 +331,74 @@ func (r *ClusterResource) Delete(ctx context.Context, req resource.DeleteRequest
 	// operator's finalizer drives a multi-minute teardown (vCluster
 	// stop, namespace cleanup). Without this wait, an immediate
 	// re-apply with the same cluster name 409s on the still-
-	// terminating CR. 10-minute timeout matches typical vCluster
-	// teardown headroom; on timeout we add a warning rather than fail
-	// outright so users can re-run destroy or manually intervene.
-	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	// terminating CR. User-overridable via `timeouts.delete` (default
+	// 10m). On timeout we surface a warning so users can re-run
+	// destroy or manually intervene without the apply itself failing.
+	timeout, diags := state.Timeouts.Delete(ctx, defaultClusterDeleteTimeout)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	if err := waitForDeleteGone(waitCtx, func(c context.Context) error {
+	err := waitForCondition(waitCtx, func(c context.Context) (bool, error) {
 		_, _, err := r.client.GetCluster(c, name)
-		return err
-	}); err != nil {
+		return client.IsNotFound(err), nil
+	})
+	if err != nil {
 		resp.Diagnostics.AddWarning(
 			"cluster still terminating",
-			fmt.Sprintf("DELETE was accepted but cluster %q is still terminating after 10 minutes. "+
-				"The operator may still be cleaning up vCluster resources. "+
-				"Re-running `terraform destroy` will wait again; the same name cannot be reused until termination completes.", name),
+			fmt.Sprintf("DELETE was accepted but cluster %q is still terminating after the configured "+
+				"delete timeout. The operator may still be cleaning up vCluster resources. Re-running "+
+				"`terraform destroy` will wait again; the same name cannot be reused until termination "+
+				"completes. Override with `timeouts.delete = \"30m\"` for clusters with heavier teardown.", name),
+		)
+	}
+}
+
+// waitForClusterReady polls GetCluster until the observed phase is
+// "Running" or the context expires. Refreshes the resource's framework
+// state on every poll so an interrupted apply leaves Terraform with the
+// latest observed values rather than the initial Create/Update response.
+// kind is "create" or "update", surfaced in the warning so users can
+// distinguish the two paths.
+func (r *ClusterResource) waitForClusterReady(
+	ctx context.Context,
+	timeout time.Duration,
+	name string,
+	plan *ClusterResourceModel,
+	state *tfsdk.State,
+	diags *diag.Diagnostics,
+	kind string,
+) {
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	err := waitForCondition(waitCtx, func(c context.Context) (bool, error) {
+		cluster, etag, err := r.client.GetCluster(c, name)
+		if err != nil {
+			// Transient — keep polling. The eventual deadline will
+			// surface a timeout if the API stays unreachable. We
+			// deliberately discard err here per waitForCondition's
+			// contract; a persistent fault becomes a timeout warning.
+			return false, nil //nolint:nilerr // transient errors keep the poll going
+		}
+		mapClusterToState(cluster, etag, plan)
+		// Persist what we just observed so a Ctrl-C between polls
+		// doesn't lose the most recent phase/endpoint.
+		diags.Append(state.Set(c, plan)...)
+		phase := ""
+		if cluster.Status != nil {
+			phase = cluster.Status.Phase
+		}
+		return phase == clusterPhaseRunning, nil
+	})
+	if err != nil {
+		diags.AddWarning(
+			fmt.Sprintf("cluster %s timed out before reaching Running", kind),
+			fmt.Sprintf("cluster %q reached phase=%q before the %s timeout fired. The operator may still "+
+				"be provisioning; check `kubectl describe managedcluster %s -n tenant-<your-tenant>` and "+
+				"re-run `terraform apply` once Running. Override with `timeouts.%s = \"30m\"` for slow "+
+				"environments.", name, plan.Phase.ValueString(), kind, name, kind),
 		)
 	}
 }

@@ -25,7 +25,10 @@ func TestAccClusterDataSource(t *testing.T) {
 					resource.TestCheckResourceAttr("data.kupe_cluster.read", "display_name", "DataSource Test"),
 					resource.TestCheckResourceAttr("data.kupe_cluster.read", "type", "shared"),
 					resource.TestCheckResourceAttr("data.kupe_cluster.read", "version", "1.32"),
-					resource.TestCheckResourceAttr("data.kupe_cluster.read", "phase", "Pending"),
+					// Create now waits for phase=Running before returning
+					// (matches the operator's lifecycle); by the time the
+					// data source reads back the cluster has settled.
+					resource.TestCheckResourceAttr("data.kupe_cluster.read", "phase", "Running"),
 				),
 			},
 		},

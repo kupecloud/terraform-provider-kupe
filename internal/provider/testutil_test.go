@@ -140,6 +140,19 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 	case r.Method == "GET" && matchPath(r.URL.Path, "/api/v1/tenants/acme/clusters/"):
 		name := lastSegment(r.URL.Path)
 		if c, ok := m.clusters[name]; ok {
+			// Simulate the operator advancing the cluster from Pending
+			// to Running on first observation so the provider's
+			// Create/Update polling loop converges quickly in tests.
+			// Real reconciliation is multi-stage (Pending →
+			// Provisioning → Running); collapsing it to a single tick
+			// keeps acceptance tests fast without changing the
+			// production behaviour we're verifying — that the provider
+			// blocks until phase reaches Running.
+			if status, ok := c["status"].(map[string]any); ok {
+				if status["phase"] == "Pending" {
+					status["phase"] = "Running"
+				}
+			}
 			w.Header().Set("ETag", `"`+c["resourceVersion"].(string)+`"`)
 			mustEncodeJSON(w, c)
 		} else {
@@ -270,6 +283,14 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 	case r.Method == "GET" && matchPath(r.URL.Path, "/api/v1/tenants/acme/secrets/"):
 		name := lastSegment(r.URL.Path)
 		if s, ok := m.secrets[name]; ok {
+			// Same Pending → ready transition as the cluster handler;
+			// see that block for the reasoning. ManagedSecret reaches
+			// Active once ExternalSecrets has synced to every target.
+			if status, ok := s["status"].(map[string]any); ok {
+				if status["phase"] == "Pending" {
+					status["phase"] = "Active"
+				}
+			}
 			w.Header().Set("ETag", `"`+s["resourceVersion"].(string)+`"`)
 			mustEncodeJSON(w, s)
 		} else {

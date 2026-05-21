@@ -10,55 +10,55 @@ import (
 	"github.com/kupecloud/terraform-provider-kupe/internal/client"
 )
 
-// deletePollInterval is how often waitForDeleteGone re-checks the server.
-// 2s gives reasonable feedback latency without hammering kupe-api during a
-// multi-minute teardown (vCluster finalizers, namespace cleanup).
-const deletePollInterval = 2 * time.Second
+// defaultPollInterval is how often waitForCondition re-checks the server.
+// 2s gives reasonable feedback latency without hammering kupe-api during
+// a multi-minute teardown or provisioning operation. Tunable as a var so
+// tests can shrink it without poking the helper itself.
+var defaultPollInterval = 2 * time.Second
 
-// waitForDeleteGone polls a resource-specific GET until it returns a 404
-// (resource genuinely gone) or the context expires. Used by resource
-// Delete handlers whose backing CR has an operator-managed finalizer
-// (managedcluster, managedsecret): kupe-api's DELETE returns 204 as soon
-// as K8s sets `deletionTimestamp`, but the actual teardown — vCluster
-// stop, synced K8s Secret cleanup, namespace removal — runs
-// asynchronously via finalizers and can take minutes. Without this wait,
-// a `terraform destroy` immediately followed by `terraform apply` with
-// the same name 409s on "already exists" against the still-terminating
-// CR.
+// waitForCondition polls fn at defaultPollInterval until it reports the
+// terminal state (done=true) or the context expires.
 //
-// getFn should be a closure that calls the resource's GetX client method
-// and returns the error verbatim (the value/etag don't matter — we only
-// care whether 404 is reached). Callers pass a context with the timeout
-// they consider acceptable for that resource type (clusters: 10m,
-// secrets: 2m).
+//   - fn returns (true, nil): success — caller exits with nil
+//   - fn returns (true, err): terminal failure observed — caller surfaces
+//     err. Not currently used (we treat Degraded as in-progress), but the
+//     signature supports a future hard-failure detection path
+//   - fn returns (false, _): keep polling. Any transient error inside the
+//     closure is the caller's responsibility to swallow; the helper
+//     doesn't inspect it
 //
-// Returns nil on success (404 reached), or a wrapped context error on
-// timeout. Non-404 errors during polling are tolerated until timeout
-// because a transient 5xx shouldn't fail the destroy — but a persistent
-// error will surface via the eventual timeout.
-func waitForDeleteGone(ctx context.Context, getFn func(context.Context) error) error {
-	ticker := time.NewTicker(deletePollInterval)
-	defer ticker.Stop()
-
-	// First check immediately; many deletes already complete in under
-	// deletePollInterval (small clusters, secrets with no synced
-	// targets), so a 2s wait before the first GET is wasted latency.
-	if err := getFn(ctx); client.IsNotFound(err) {
-		return nil
+// On timeout the helper returns a wrapped context error so callers can
+// `errors.Is(err, context.DeadlineExceeded)` and decide whether to fail
+// or warn. The caller passes a context with whatever timeout is
+// appropriate for the resource type (cluster create: 15m via the
+// user-overridable timeouts block; secret create: 2m; etc.).
+//
+// fn is also responsible for capturing observed state — typically by
+// writing into the framework's `resp.State` from the surrounding
+// handler — so an interrupted apply leaves Terraform with the latest
+// values, not stale ones.
+//
+// Used by Create/Update (predicate: phase reached the Ready value) and
+// Delete (predicate: GET returns IsNotFound).
+func waitForCondition(ctx context.Context, fn func(context.Context) (bool, error)) error {
+	// First check immediately; many fast operations complete before the
+	// first ticker fires (creates that go straight to Running on a
+	// warm cluster, deletes with no synced state to clean up).
+	if done, err := fn(ctx); done {
+		return err
 	}
+
+	ticker := time.NewTicker(defaultPollInterval)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("timed out waiting for resource to finish terminating: %w", ctx.Err())
+			return fmt.Errorf("timed out waiting for resource to converge: %w", ctx.Err())
 		case <-ticker.C:
-			if err := getFn(ctx); client.IsNotFound(err) {
-				return nil
+			if done, err := fn(ctx); done {
+				return err
 			}
-			// Any non-NotFound error (still terminating, transient
-			// 5xx, network) we ignore and keep polling. The ticker
-			// bounds how often we re-check; the parent context
-			// bounds total time.
 		}
 	}
 }

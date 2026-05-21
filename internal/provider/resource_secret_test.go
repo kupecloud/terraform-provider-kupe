@@ -19,7 +19,9 @@ func TestAccSecretResource(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("kupe_secret.test", "name", "db-password"),
 					resource.TestCheckResourceAttr("kupe_secret.test", "secret_path", "production/db-password"),
-					resource.TestCheckResourceAttr("kupe_secret.test", "phase", "Pending"),
+					// Create now waits for phase=Active before returning;
+					// the mock advances Pending → Active on first GET.
+					resource.TestCheckResourceAttr("kupe_secret.test", "phase", "Active"),
 					resource.TestCheckResourceAttr("kupe_secret.test", "sync.#", "1"),
 					resource.TestCheckResourceAttr("kupe_secret.test", "sync.0.cluster", "prod"),
 					resource.TestCheckResourceAttr("kupe_secret.test", "sync.0.namespace", "default"),
