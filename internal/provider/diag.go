@@ -96,7 +96,7 @@ func apiErrorDetail(err error) string {
 	case http.StatusTooManyRequests:
 		return base + "\n\nRate limit exceeded. Retry the operation after a short delay; large batch applies may need `-parallelism=1` against the kupe API."
 	case http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
-		return base + "\n\nThe kupe API encountered an internal error or is temporarily unavailable. Retry the operation; if the failure persists, check the kupe-api service status."
+		return base + "\n\nThe Kupe Cloud API encountered an internal error or is temporarily unavailable. Retry the operation after a short delay; if the failure persists, check the status page or contact Kupe Cloud support."
 	default:
 		return base
 	}
