@@ -286,9 +286,11 @@ func (r *SecretResource) Delete(ctx context.Context, req resource.DeleteRequest,
 		resp.Diagnostics.AddWarning(
 			"secret still terminating",
 			fmt.Sprintf("DELETE was accepted but secret %q is still terminating after the configured "+
-				"delete timeout. The operator may still be cleaning up synced Secrets in target "+
-				"clusters. Re-running `terraform destroy` will wait again; the same name cannot be "+
-				"reused until termination completes.", name),
+				"delete timeout. Kupe Cloud is still cleaning up the synced Secrets in your target "+
+				"clusters. Re-running `terraform destroy` will wait again, and the same secret name "+
+				"cannot be reused until termination completes. If the secret stays in this state, "+
+				"check it in the Kupe Console or contact Kupe Cloud support. Override "+
+				"with `timeouts.delete = \"5m\"` for secrets with many sync targets.", name),
 		)
 	}
 }
@@ -332,9 +334,12 @@ func (r *SecretResource) waitForSecretReady(
 	if err != nil {
 		diags.AddWarning(
 			fmt.Sprintf("secret %s timed out before reaching Active", kind),
-			fmt.Sprintf("secret %q reached phase=%q before the %s timeout fired. The operator may "+
-				"still be syncing to target clusters; re-run `terraform apply` once Active. Override "+
-				"with `timeouts.%s = \"5m\"` for slower environments.",
+			fmt.Sprintf("secret %q reached phase=%q before the %s timeout fired. Wait a few moments "+
+				"and re-run `terraform apply` to pick up the Active state — Kupe Cloud is still "+
+				"syncing the value to your target clusters and a subsequent apply will be a no-op "+
+				"once the sync completes. If the secret stays in this phase for longer than expected, "+
+				"check it in the Kupe Console or contact Kupe Cloud support. Override "+
+				"with `timeouts.%s = \"5m\"` for secrets with many sync targets.",
 				name, plan.Phase.ValueString(), kind, kind),
 		)
 	}

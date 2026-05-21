@@ -349,9 +349,11 @@ func (r *ClusterResource) Delete(ctx context.Context, req resource.DeleteRequest
 		resp.Diagnostics.AddWarning(
 			"cluster still terminating",
 			fmt.Sprintf("DELETE was accepted but cluster %q is still terminating after the configured "+
-				"delete timeout. The operator may still be cleaning up vCluster resources. Re-running "+
-				"`terraform destroy` will wait again; the same name cannot be reused until termination "+
-				"completes. Override with `timeouts.delete = \"30m\"` for clusters with heavier teardown.", name),
+				"delete timeout. Kupe Cloud is still cleaning up the underlying resources. Re-running "+
+				"`terraform destroy` will wait again, and the same cluster name cannot be reused until "+
+				"termination completes. If the cluster stays in this state, check it in the Kupe "+
+				"Console or contact Kupe Cloud support. Override with "+
+				"`timeouts.delete = \"30m\"` for clusters with heavier teardown.", name),
 		)
 	}
 }
@@ -395,10 +397,12 @@ func (r *ClusterResource) waitForClusterReady(
 	if err != nil {
 		diags.AddWarning(
 			fmt.Sprintf("cluster %s timed out before reaching Running", kind),
-			fmt.Sprintf("cluster %q reached phase=%q before the %s timeout fired. The operator may still "+
-				"be provisioning; check `kubectl describe managedcluster %s -n tenant-<your-tenant>` and "+
-				"re-run `terraform apply` once Running. Override with `timeouts.%s = \"30m\"` for slow "+
-				"environments.", name, plan.Phase.ValueString(), kind, name, kind),
+			fmt.Sprintf("cluster %q reached phase=%q before the %s timeout fired. Wait a few minutes "+
+				"and re-run `terraform apply` to pick up the Running state — provisioning continues "+
+				"in the background and a subsequent apply will be a no-op once the cluster is ready. "+
+				"If the cluster stays in this phase for longer than expected, check the cluster status "+
+				"in the Kupe Console or contact Kupe Cloud support. Override with "+
+				"`timeouts.%s = \"30m\"` for slow environments.", name, plan.Phase.ValueString(), kind, kind),
 		)
 	}
 }
