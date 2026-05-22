@@ -5,10 +5,20 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/kupecloud/terraform-provider-kupe/internal/client"
 )
+
+// rbacForbiddenMessage is the verbatim message kupe-api returns for true
+// RBAC denials (role lacks permission for this operation). Admission
+// webhook denials surface via a different status code (400) and never
+// match this string, so we use it as a discriminator: if a 403 carries
+// this exact message we add the role-hint, otherwise we don't, so the
+// user is not misled into thinking their API key is wrong when the API
+// is really telling them e.g. "unsupported Kubernetes version".
+const rbacForbiddenMessage = "access denied"
 
 // defaultPollInterval is how often waitForCondition re-checks the server.
 // 2s gives reasonable feedback latency without hammering kupe-api during
@@ -82,11 +92,28 @@ func apiErrorDetail(err error) string {
 	base := fmt.Sprintf("kupe API returned %d: %s", apiErr.StatusCode, apiErr.Message)
 	switch apiErr.StatusCode {
 	case http.StatusBadRequest:
-		return base + "\n\nThe server rejected the request as malformed. Check the schema of the value you supplied (typically a body_json or routes_json document)."
+		// 400 covers two server-side outcomes that surface here:
+		// (a) the request body failed schema decoding (typo in
+		//     body_json / routes_json, missing required field), and
+		// (b) an admission webhook on the platform rejected the
+		//     request as semantically invalid (e.g. unsupported
+		//     Kubernetes version, immutable field changed). In both
+		//     cases the verbatim API message is the actionable signal;
+		//     adding a schema-focused hint here would mislead users
+		//     hitting case (b). Surface the message as-is.
+		return base
 	case http.StatusUnauthorized:
 		return base + "\n\nThe kupe API rejected your credentials. Verify that KUPE_API_KEY (or KUPE_TOKEN) is set and that the value is current for this tenant — API keys can be revoked from the console."
 	case http.StatusForbidden:
-		return base + "\n\nYour credentials authenticated but lack the role required for this operation. Most mutating operations require the `admin` role on the tenant; reads accept `readonly` as well."
+		// Only show the role hint for true RBAC denials. The kupe-api
+		// returns "access denied" as the verbatim message for those;
+		// any other 403 message we receive is from an older API that
+		// still routed webhook denials through 403 (newer API uses
+		// 400). For non-RBAC bodies the role hint is misleading.
+		if strings.EqualFold(strings.TrimSpace(apiErr.Message), rbacForbiddenMessage) {
+			return base + "\n\nYour credentials authenticated but lack the role required for this operation. Most mutating operations require the `admin` role on the tenant; reads accept `readonly` as well."
+		}
+		return base
 	case http.StatusNotFound:
 		return base + "\n\nThe resource does not exist on the server. If you expected it to exist it may have been deleted out-of-band; run `terraform refresh` to reconcile or `terraform import` to re-attach."
 	case http.StatusConflict:

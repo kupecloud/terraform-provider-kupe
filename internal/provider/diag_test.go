@@ -3,12 +3,131 @@ package provider
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/kupecloud/terraform-provider-kupe/internal/client"
 )
+
+func TestAPIErrorDetail(t *testing.T) {
+	// Sentinels picked deliberately:
+	//   - roleHint is the substring uniquely produced by the 403/RBAC
+	//     branch; presence/absence asserts whether we tagged on a
+	//     credentials-focused hint.
+	//   - schemaHint was the old 400 wording that mislead users hitting
+	//     admission-webhook denials. After the rework the 400 branch
+	//     emits only the verbatim API message, so any 400 case must
+	//     NOT contain this sentinel.
+	const (
+		roleHint   = "lack the role required"
+		schemaHint = "Check the schema"
+	)
+
+	tests := []struct {
+		name         string
+		err          error
+		wantSubstr   []string // every entry must appear in the detail
+		wantNoSubstr []string // none of these may appear
+	}{
+		{
+			name:         "non-api errors pass through unchanged",
+			err:          errors.New("network: connection refused"),
+			wantSubstr:   []string{"network: connection refused"},
+			wantNoSubstr: []string{"kupe API returned", roleHint},
+		},
+		{
+			// Webhook denial that now arrives as 400. The base line must
+			// surface the verbatim message; no schema hint, no role hint.
+			name: "400 webhook denial shows verbatim message only",
+			err: &client.APIError{
+				StatusCode: http.StatusBadRequest,
+				Message:    `unsupported Kubernetes version "1.32", supported versions: [1.35.5 1.34.8 1.33.12]`,
+			},
+			wantSubstr: []string{
+				"kupe API returned 400",
+				`unsupported Kubernetes version "1.32"`,
+			},
+			wantNoSubstr: []string{schemaHint, roleHint},
+		},
+		{
+			// True RBAC denial: bare "access denied" message from kupe-api.
+			// The role hint is the actionable signal — keep it.
+			name: "403 access denied shows role hint",
+			err: &client.APIError{
+				StatusCode: http.StatusForbidden,
+				Message:    "access denied",
+			},
+			wantSubstr:   []string{"kupe API returned 403", roleHint},
+			wantNoSubstr: nil,
+		},
+		{
+			// Defensive: an older kupe-api that still routes webhook
+			// denials through 403 returns a non-"access denied" message.
+			// We must NOT show the role hint in that case — that's the
+			// exact misleading behaviour this rework is fixing.
+			name: "403 non-RBAC body suppresses role hint",
+			err: &client.APIError{
+				StatusCode: http.StatusForbidden,
+				Message:    `unsupported Kubernetes version "1.32"`,
+			},
+			wantSubstr:   []string{"kupe API returned 403", `unsupported Kubernetes version`},
+			wantNoSubstr: []string{roleHint},
+		},
+		{
+			// Whitespace/case variations of the RBAC sentinel still count
+			// as RBAC — the constant is normalised before comparison.
+			name: "403 access denied with surrounding whitespace still tagged",
+			err: &client.APIError{
+				StatusCode: http.StatusForbidden,
+				Message:    "  Access Denied  ",
+			},
+			wantSubstr: []string{roleHint},
+		},
+		{
+			name: "401 carries credentials hint",
+			err: &client.APIError{
+				StatusCode: http.StatusUnauthorized,
+				Message:    "invalid token",
+			},
+			wantSubstr: []string{"kupe API returned 401", "KUPE_API_KEY"},
+		},
+		{
+			name: "404 carries refresh hint",
+			err: &client.APIError{
+				StatusCode: http.StatusNotFound,
+				Message:    `cluster "smoke" not found`,
+			},
+			wantSubstr: []string{"kupe API returned 404", "terraform refresh"},
+		},
+		{
+			name: "wrapped api error is unwrapped",
+			err: fmt.Errorf("client: %w", &client.APIError{
+				StatusCode: http.StatusForbidden,
+				Message:    "access denied",
+			}),
+			wantSubstr: []string{"kupe API returned 403", roleHint},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := apiErrorDetail(tt.err)
+			for _, want := range tt.wantSubstr {
+				if !strings.Contains(got, want) {
+					t.Errorf("missing substring %q in:\n%s", want, got)
+				}
+			}
+			for _, unwanted := range tt.wantNoSubstr {
+				if strings.Contains(got, unwanted) {
+					t.Errorf("unexpected substring %q in:\n%s", unwanted, got)
+				}
+			}
+		})
+	}
+}
 
 // fakeAPIError returns a client.APIError shaped to match what the real
 // client surfaces from a server response with the given status code.
