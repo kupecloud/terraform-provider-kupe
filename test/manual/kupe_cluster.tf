@@ -10,7 +10,7 @@ resource "kupe_cluster" "smoke" {
   name         = "smoke-cluster"
   display_name = "Smoke Test Cluster"
   type         = "shared"
-  version      = "1.32"
+  version      = "1.35"
 
   resources = {
     cpu     = "2"
