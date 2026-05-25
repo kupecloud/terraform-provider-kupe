@@ -18,12 +18,15 @@ type ClusterDataSource struct {
 }
 
 type ClusterDataSourceModel struct {
-	Name        types.String `tfsdk:"name"`
-	DisplayName types.String `tfsdk:"display_name"`
-	Type        types.String `tfsdk:"type"`
-	Version     types.String `tfsdk:"version"`
-	Phase       types.String `tfsdk:"phase"`
-	Endpoint    types.String `tfsdk:"endpoint"`
+	Name             types.String `tfsdk:"name"`
+	DisplayName      types.String `tfsdk:"display_name"`
+	Type             types.String `tfsdk:"type"`
+	Version          types.String `tfsdk:"version"`
+	HighAvailability types.Bool   `tfsdk:"high_availability"`
+	Phase            types.String `tfsdk:"phase"`
+	Endpoint         types.String `tfsdk:"endpoint"`
+	HAConfigured     types.Bool   `tfsdk:"ha_configured"`
+	HAEnabledAt      types.String `tfsdk:"ha_enabled_at"`
 }
 
 func NewClusterDataSource() datasource.DataSource {
@@ -54,12 +57,24 @@ func (d *ClusterDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 				Description: "Current Kubernetes version for the cluster.",
 				Computed:    true,
 			},
+			"high_availability": schema.BoolAttribute{
+				Description: "Whether the cluster is configured with HA (3-replica control plane). Reflects spec, not operational state — see `ha_configured`.",
+				Computed:    true,
+			},
 			"phase": schema.StringAttribute{
-				Description: "Current cluster phase.",
+				Description: "Current cluster phase, for example Pending, Provisioning, Running, Migrating, or Degraded.",
 				Computed:    true,
 			},
 			"endpoint": schema.StringAttribute{
 				Description: "Cluster API server endpoint.",
+				Computed:    true,
+			},
+			"ha_configured": schema.BoolAttribute{
+				Description: "True once the operator has confirmed 3/3 HA control-plane replicas ready.",
+				Computed:    true,
+			},
+			"ha_enabled_at": schema.StringAttribute{
+				Description: "Timestamp when `ha_configured` first became true (billing anchor).",
 				Computed:    true,
 			},
 		},
@@ -94,12 +109,17 @@ func (d *ClusterDataSource) Read(ctx context.Context, req datasource.ReadRequest
 	state.DisplayName = types.StringValue(cluster.DisplayName)
 	state.Type = types.StringValue(cluster.Type)
 	state.Version = types.StringValue(cluster.Version)
+	state.HighAvailability = types.BoolValue(cluster.HighAvailability)
 	if cluster.Status != nil {
 		state.Phase = types.StringValue(cluster.Status.Phase)
 		state.Endpoint = types.StringValue(cluster.Status.Endpoint)
+		state.HAConfigured = types.BoolValue(cluster.Status.HAConfigured)
+		state.HAEnabledAt = types.StringValue(cluster.Status.HAEnabledAt)
 	} else {
 		state.Phase = types.StringValue("")
 		state.Endpoint = types.StringValue("")
+		state.HAConfigured = types.BoolValue(false)
+		state.HAEnabledAt = types.StringValue("")
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }

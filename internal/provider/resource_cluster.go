@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -48,16 +49,19 @@ type ClusterResource struct {
 }
 
 type ClusterResourceModel struct {
-	Name        types.String           `tfsdk:"name"`
-	DisplayName types.String           `tfsdk:"display_name"`
-	Type        types.String           `tfsdk:"type"`
-	Version     types.String           `tfsdk:"version"`
-	Resources   *ClusterResourcesModel `tfsdk:"resources"`
-	Phase       types.String           `tfsdk:"phase"`
-	Endpoint    types.String           `tfsdk:"endpoint"`
-	ETag        types.String           `tfsdk:"etag"`
-	CreatedAt   types.String           `tfsdk:"created_at"`
-	Timeouts    timeouts.Value         `tfsdk:"timeouts"`
+	Name             types.String           `tfsdk:"name"`
+	DisplayName      types.String           `tfsdk:"display_name"`
+	Type             types.String           `tfsdk:"type"`
+	Version          types.String           `tfsdk:"version"`
+	Resources        *ClusterResourcesModel `tfsdk:"resources"`
+	HighAvailability types.Bool             `tfsdk:"high_availability"`
+	Phase            types.String           `tfsdk:"phase"`
+	Endpoint         types.String           `tfsdk:"endpoint"`
+	HAConfigured     types.Bool             `tfsdk:"ha_configured"`
+	HAEnabledAt      types.String           `tfsdk:"ha_enabled_at"`
+	ETag             types.String           `tfsdk:"etag"`
+	CreatedAt        types.String           `tfsdk:"created_at"`
+	Timeouts         timeouts.Value         `tfsdk:"timeouts"`
 }
 
 type ClusterResourcesModel struct {
@@ -141,13 +145,35 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 					},
 				},
 			},
+			"high_availability": schema.BoolAttribute{
+				Description: "Enable a 3-replica HA control plane with HA etcd, hard anti-affinity, and encrypted-at-rest etcd snapshots. " +
+					"Adds an hourly charge — see `data.kupe_plan` for the rate. Default `false`.\n\n" +
+					"**Enabling on an existing cluster** triggers an in-place kine→etcd migration with ~10 minutes of API downtime — " +
+					"plan for it.\n\n" +
+					"**Disabling** (`high_availability = false` on a cluster that has it enabled) is **not supported in v1** — the " +
+					"operator will reject the change with code `HA_DISABLE_UNSUPPORTED`. Recreate the cluster as single-replica if needed.",
+				Optional: true,
+				Computed: true,
+				Default:  booldefault.StaticBool(false),
+			},
 			"phase": schema.StringAttribute{
-				Description: "Current cluster phase, for example Pending, Provisioning, or Running.",
+				Description: "Current cluster phase, for example Pending, Provisioning, Running, Migrating, or Degraded.",
 				Computed:    true,
 			},
 			"endpoint": schema.StringAttribute{
 				Description: "Cluster API server endpoint.",
 				Computed:    true,
+			},
+			"ha_configured": schema.BoolAttribute{
+				Description: "True once the operator has confirmed 3/3 HA control-plane replicas ready. " +
+					"Distinct from `high_availability` (the requested state) — read this attribute when downstream " +
+					"automation needs to wait for HA to be operationally available, not just toggled on.",
+				Computed: true,
+			},
+			"ha_enabled_at": schema.StringAttribute{
+				Description: "Timestamp when `ha_configured` first became true. This is the billing anchor — HA hours " +
+					"accrue from this moment. Stamped once, never updated, never cleared.",
+				Computed: true,
 			},
 			"etag": schema.StringAttribute{
 				// etag intentionally has no UseStateForUnknown: it changes on
@@ -192,10 +218,11 @@ func (r *ClusterResource) Create(ctx context.Context, req resource.CreateRequest
 	}
 
 	createReq := client.CreateClusterRequest{
-		Name:        plan.Name.ValueString(),
-		DisplayName: plan.DisplayName.ValueString(),
-		Type:        plan.Type.ValueString(),
-		Version:     plan.Version.ValueString(),
+		Name:             plan.Name.ValueString(),
+		DisplayName:      plan.DisplayName.ValueString(),
+		Type:             plan.Type.ValueString(),
+		Version:          plan.Version.ValueString(),
+		HighAvailability: plan.HighAvailability.ValueBool(),
 	}
 
 	if plan.Resources != nil {
@@ -282,6 +309,17 @@ func (r *ClusterResource) Update(ctx context.Context, req resource.UpdateRequest
 	case plan.Resources == nil && state.Resources != nil:
 		// User removed the resources block — send empty to clear.
 		patchReq.Resources = &client.ClusterResource{}
+		hasChanges = true
+	}
+
+	if !plan.HighAvailability.Equal(state.HighAvailability) {
+		// Send through to the operator even when the transition is the
+		// rejected true → false direction. The operator owns the canonical
+		// rejection (HA_DISABLE_UNSUPPORTED) and we want it to surface here
+		// in apiErrorDetail's message rather than masking it with a
+		// provider-side preflight that could drift from operator policy.
+		v := plan.HighAvailability.ValueBool()
+		patchReq.HighAvailability = &v
 		hasChanges = true
 	}
 
@@ -423,15 +461,20 @@ func mapClusterToState(c *client.Cluster, etag string, state *ClusterResourceMod
 	state.DisplayName = types.StringValue(c.DisplayName)
 	state.Type = types.StringValue(c.Type)
 	state.Version = types.StringValue(c.Version)
+	state.HighAvailability = types.BoolValue(c.HighAvailability)
 	state.ETag = types.StringValue(etag)
 	state.CreatedAt = types.StringValue(c.CreatedAt)
 
 	if c.Status != nil {
 		state.Phase = types.StringValue(c.Status.Phase)
 		state.Endpoint = types.StringValue(c.Status.Endpoint)
+		state.HAConfigured = types.BoolValue(c.Status.HAConfigured)
+		state.HAEnabledAt = types.StringValue(c.Status.HAEnabledAt)
 	} else {
 		state.Phase = types.StringValue("")
 		state.Endpoint = types.StringValue("")
+		state.HAConfigured = types.BoolValue(false)
+		state.HAEnabledAt = types.StringValue("")
 	}
 
 	if c.Resources != nil && (c.Resources.CPU != "" || c.Resources.Memory != "" || c.Resources.Storage != "") {

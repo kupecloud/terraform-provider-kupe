@@ -7,15 +7,16 @@ import (
 
 // Cluster represents a managed cluster in the API response.
 type Cluster struct {
-	Name            string           `json:"name"`
-	DisplayName     string           `json:"displayName"`
-	Type            string           `json:"type"`
-	Version         string           `json:"version"`
-	Resources       *ClusterResource `json:"resources,omitempty"`
-	Alerts          any              `json:"alerts,omitempty"`
-	Status          *ClusterStatus   `json:"status,omitempty"`
-	ResourceVersion string           `json:"resourceVersion"`
-	CreatedAt       string           `json:"createdAt"`
+	Name             string           `json:"name"`
+	DisplayName      string           `json:"displayName"`
+	Type             string           `json:"type"`
+	Version          string           `json:"version"`
+	Resources        *ClusterResource `json:"resources,omitempty"`
+	Alerts           any              `json:"alerts,omitempty"`
+	HighAvailability bool             `json:"highAvailability,omitempty"`
+	Status           *ClusterStatus   `json:"status,omitempty"`
+	ResourceVersion  string           `json:"resourceVersion"`
+	CreatedAt        string           `json:"createdAt"`
 }
 
 // ClusterResource defines resource limits.
@@ -30,23 +31,31 @@ type ClusterStatus struct {
 	Phase             string `json:"phase"`
 	KubernetesVersion string `json:"kubernetesVersion"`
 	Endpoint          string `json:"endpoint"`
+	// HAConfigured flips true once the operator confirms 3/3 HA control-plane
+	// replicas ready. HAEnabledAt is the billing anchor (stamped once, never updated).
+	HAConfigured bool   `json:"haConfigured,omitempty"`
+	HAEnabledAt  string `json:"haEnabledAt,omitempty"`
 }
 
 // CreateClusterRequest is the body for creating a cluster.
 type CreateClusterRequest struct {
-	Name        string           `json:"name"`
-	DisplayName string           `json:"displayName"`
-	Type        string           `json:"type"`
-	Version     string           `json:"version,omitempty"`
-	Resources   *ClusterResource `json:"resources,omitempty"`
-	Alerts      any              `json:"alerts,omitempty"`
+	Name             string           `json:"name"`
+	DisplayName      string           `json:"displayName"`
+	Type             string           `json:"type"`
+	Version          string           `json:"version,omitempty"`
+	Resources        *ClusterResource `json:"resources,omitempty"`
+	Alerts           any              `json:"alerts,omitempty"`
+	HighAvailability bool             `json:"highAvailability,omitempty"`
 }
 
-// PatchClusterRequest is the body for updating a cluster.
+// PatchClusterRequest is the body for updating a cluster. HighAvailability
+// uses *bool so the provider can distinguish "no change" (nil) from "set to
+// false" (the operator rejects true → false in v1).
 type PatchClusterRequest struct {
-	Version   *string          `json:"version,omitempty"`
-	Resources *ClusterResource `json:"resources,omitempty"`
-	Alerts    any              `json:"alerts,omitempty"`
+	Version          *string          `json:"version,omitempty"`
+	Resources        *ClusterResource `json:"resources,omitempty"`
+	Alerts           any              `json:"alerts,omitempty"`
+	HighAvailability *bool            `json:"highAvailability,omitempty"`
 }
 
 // ListClusters lists all clusters for the tenant.
