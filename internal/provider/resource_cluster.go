@@ -83,14 +83,8 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 			"### Destroy semantics\n\n" +
 			"`terraform destroy` (or removing this resource from configuration) is **non-recoverable**. " +
 			"When the cluster is deleted, the Kupe platform will:\n\n" +
-			"- Stop and permanently remove every workload running inside the cluster, along with its storage.\n" +
-			"- Delete every Argo Application, alerting rule, and Grafana dashboard this cluster " +
-			"published to the platform — **including any workloads those Applications deployed to " +
-			"your other Kupe clusters**.\n" +
+			"- Permanently remove every workload running inside the cluster, along with its storage.\n" +
 			"- Remove the cluster's public DNS endpoint.\n\n" +
-			"Anything you provisioned in third-party systems from inside this cluster (cloud " +
-			"providers, SaaS, DNS zones you own) will **not** be cleaned up — drain those before " +
-			"running destroy if you want them removed.\n\n" +
 			"The same contract applies whether you delete via Terraform, the `kupe` CLI, or the " +
 			"Kupe Console.",
 		Attributes: map[string]schema.Attribute{

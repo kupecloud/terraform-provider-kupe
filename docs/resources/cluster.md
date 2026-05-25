@@ -6,8 +6,7 @@ description: |-
   Manages a Kupe cluster for a tenant. Create and Update wait for the cluster to reach phase=Running before returning; Delete waits for the underlying ManagedCluster CR to finish terminating. Timeouts are configurable via the timeouts block (defaults: create/update 15m, delete 10m).
   Destroy semantics
   terraform destroy (or removing this resource from configuration) is non-recoverable. When the cluster is deleted, the Kupe platform will:
-  Stop and permanently remove every workload running inside the cluster, along with its storage.Delete every Argo Application, alerting rule, and Grafana dashboard this cluster published to the platform — including any workloads those Applications deployed to your other Kupe clusters.Remove the cluster's public DNS endpoint.
-  Anything you provisioned in third-party systems from inside this cluster (cloud providers, SaaS, DNS zones you own) will not be cleaned up — drain those before running destroy if you want them removed.
+  Permanently remove every workload running inside the cluster, along with its storage.Remove the cluster's public DNS endpoint.
   The same contract applies whether you delete via Terraform, the kupe CLI, or the Kupe Console.
 ---
 
@@ -19,11 +18,8 @@ Manages a Kupe cluster for a tenant. Create and Update wait for the cluster to r
 
 `terraform destroy` (or removing this resource from configuration) is **non-recoverable**. When the cluster is deleted, the Kupe platform will:
 
-- Stop and permanently remove every workload running inside the cluster, along with its storage.
-- Delete every Argo Application, alerting rule, and Grafana dashboard this cluster published to the platform — **including any workloads those Applications deployed to your other Kupe clusters**.
+- Permanently remove every workload running inside the cluster, along with its storage.
 - Remove the cluster's public DNS endpoint.
-
-Anything you provisioned in third-party systems from inside this cluster (cloud providers, SaaS, DNS zones you own) will **not** be cleaned up — drain those before running destroy if you want them removed.
 
 The same contract applies whether you delete via Terraform, the `kupe` CLI, or the Kupe Console.
 
