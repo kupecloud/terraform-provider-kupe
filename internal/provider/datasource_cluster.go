@@ -18,15 +18,18 @@ type ClusterDataSource struct {
 }
 
 type ClusterDataSourceModel struct {
-	Name             types.String `tfsdk:"name"`
-	DisplayName      types.String `tfsdk:"display_name"`
-	Type             types.String `tfsdk:"type"`
-	Version          types.String `tfsdk:"version"`
-	HighAvailability types.Bool   `tfsdk:"high_availability"`
-	Phase            types.String `tfsdk:"phase"`
-	Endpoint         types.String `tfsdk:"endpoint"`
-	HAConfigured     types.Bool   `tfsdk:"ha_configured"`
-	HAEnabledAt      types.String `tfsdk:"ha_enabled_at"`
+	Name              types.String `tfsdk:"name"`
+	DisplayName       types.String `tfsdk:"display_name"`
+	Type              types.String `tfsdk:"type"`
+	Version           types.String `tfsdk:"version"`
+	HighAvailability  types.Bool   `tfsdk:"high_availability"`
+	Phase             types.String `tfsdk:"phase"`
+	Endpoint          types.String `tfsdk:"endpoint"`
+	HAConfigured      types.Bool   `tfsdk:"ha_configured"`
+	HAEnabledAt       types.String `tfsdk:"ha_enabled_at"`
+	HAPhase           types.String `tfsdk:"ha_phase"`
+	HAReplicasReady   types.Int64  `tfsdk:"ha_replicas_ready"`
+	HAReplicasDesired types.Int64  `tfsdk:"ha_replicas_desired"`
 }
 
 func NewClusterDataSource() datasource.DataSource {
@@ -77,6 +80,18 @@ func (d *ClusterDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 				Description: "Timestamp when `ha_configured` first became true (billing anchor).",
 				Computed:    true,
 			},
+			"ha_phase": schema.StringAttribute{
+				Description: "Consumer-friendly HA rollup. One of `pending`, `migrating`, `ha-healthy`, `ha-degraded`, `ha-unavailable`. Empty for non-HA clusters.",
+				Computed:    true,
+			},
+			"ha_replicas_ready": schema.Int64Attribute{
+				Description: "Count of HA control-plane replicas currently `Ready`.",
+				Computed:    true,
+			},
+			"ha_replicas_desired": schema.Int64Attribute{
+				Description: "Target HA replica count (3 when `high_availability = true`, 0 otherwise).",
+				Computed:    true,
+			},
 		},
 	}
 }
@@ -115,11 +130,17 @@ func (d *ClusterDataSource) Read(ctx context.Context, req datasource.ReadRequest
 		state.Endpoint = types.StringValue(cluster.Status.Endpoint)
 		state.HAConfigured = types.BoolValue(cluster.Status.HAConfigured)
 		state.HAEnabledAt = types.StringValue(cluster.Status.HAEnabledAt)
+		state.HAPhase = types.StringValue(cluster.Status.HAPhase)
+		state.HAReplicasReady = types.Int64Value(int64(cluster.Status.HAReplicasReady))
+		state.HAReplicasDesired = types.Int64Value(int64(cluster.Status.HAReplicasDesired))
 	} else {
 		state.Phase = types.StringValue("")
 		state.Endpoint = types.StringValue("")
 		state.HAConfigured = types.BoolValue(false)
 		state.HAEnabledAt = types.StringValue("")
+		state.HAPhase = types.StringValue("")
+		state.HAReplicasReady = types.Int64Value(0)
+		state.HAReplicasDesired = types.Int64Value(0)
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }

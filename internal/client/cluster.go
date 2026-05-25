@@ -35,6 +35,13 @@ type ClusterStatus struct {
 	// replicas ready. HAEnabledAt is the billing anchor (stamped once, never updated).
 	HAConfigured bool   `json:"haConfigured,omitempty"`
 	HAEnabledAt  string `json:"haEnabledAt,omitempty"`
+	// HAPhase is the consumer-friendly HA rollup (pending, migrating,
+	// ha-healthy, ha-degraded, ha-unavailable). Empty for non-HA clusters.
+	HAPhase string `json:"haPhase,omitempty"`
+	// HAReplicasReady / HAReplicasDesired surface the "N of M" pair so
+	// downstream HCL can render meaningful status without parsing conditions.
+	HAReplicasReady   int32 `json:"haReplicasReady,omitempty"`
+	HAReplicasDesired int32 `json:"haReplicasDesired,omitempty"`
 }
 
 // CreateClusterRequest is the body for creating a cluster.

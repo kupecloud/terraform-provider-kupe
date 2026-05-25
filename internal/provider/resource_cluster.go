@@ -49,19 +49,22 @@ type ClusterResource struct {
 }
 
 type ClusterResourceModel struct {
-	Name             types.String           `tfsdk:"name"`
-	DisplayName      types.String           `tfsdk:"display_name"`
-	Type             types.String           `tfsdk:"type"`
-	Version          types.String           `tfsdk:"version"`
-	Resources        *ClusterResourcesModel `tfsdk:"resources"`
-	HighAvailability types.Bool             `tfsdk:"high_availability"`
-	Phase            types.String           `tfsdk:"phase"`
-	Endpoint         types.String           `tfsdk:"endpoint"`
-	HAConfigured     types.Bool             `tfsdk:"ha_configured"`
-	HAEnabledAt      types.String           `tfsdk:"ha_enabled_at"`
-	ETag             types.String           `tfsdk:"etag"`
-	CreatedAt        types.String           `tfsdk:"created_at"`
-	Timeouts         timeouts.Value         `tfsdk:"timeouts"`
+	Name              types.String           `tfsdk:"name"`
+	DisplayName       types.String           `tfsdk:"display_name"`
+	Type              types.String           `tfsdk:"type"`
+	Version           types.String           `tfsdk:"version"`
+	Resources         *ClusterResourcesModel `tfsdk:"resources"`
+	HighAvailability  types.Bool             `tfsdk:"high_availability"`
+	Phase             types.String           `tfsdk:"phase"`
+	Endpoint          types.String           `tfsdk:"endpoint"`
+	HAConfigured      types.Bool             `tfsdk:"ha_configured"`
+	HAEnabledAt       types.String           `tfsdk:"ha_enabled_at"`
+	HAPhase           types.String           `tfsdk:"ha_phase"`
+	HAReplicasReady   types.Int64            `tfsdk:"ha_replicas_ready"`
+	HAReplicasDesired types.Int64            `tfsdk:"ha_replicas_desired"`
+	ETag              types.String           `tfsdk:"etag"`
+	CreatedAt         types.String           `tfsdk:"created_at"`
+	Timeouts          timeouts.Value         `tfsdk:"timeouts"`
 }
 
 type ClusterResourcesModel struct {
@@ -174,6 +177,20 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				Description: "Timestamp when `ha_configured` first became true. This is the billing anchor — HA hours " +
 					"accrue from this moment. Stamped once, never updated, never cleared.",
 				Computed: true,
+			},
+			"ha_phase": schema.StringAttribute{
+				Description: "Consumer-friendly HA rollup. One of `pending`, `migrating`, `ha-healthy`, `ha-degraded`, `ha-unavailable`. " +
+					"Empty for non-HA clusters. Use this in downstream automation to branch on operational state without " +
+					"inspecting individual conditions.",
+				Computed: true,
+			},
+			"ha_replicas_ready": schema.Int64Attribute{
+				Description: "Count of HA control-plane replicas currently `Ready`. Zero for non-HA clusters.",
+				Computed:    true,
+			},
+			"ha_replicas_desired": schema.Int64Attribute{
+				Description: "Target HA replica count (3 when `high_availability = true`, 0 otherwise).",
+				Computed:    true,
 			},
 			"etag": schema.StringAttribute{
 				// etag intentionally has no UseStateForUnknown: it changes on
@@ -470,11 +487,17 @@ func mapClusterToState(c *client.Cluster, etag string, state *ClusterResourceMod
 		state.Endpoint = types.StringValue(c.Status.Endpoint)
 		state.HAConfigured = types.BoolValue(c.Status.HAConfigured)
 		state.HAEnabledAt = types.StringValue(c.Status.HAEnabledAt)
+		state.HAPhase = types.StringValue(c.Status.HAPhase)
+		state.HAReplicasReady = types.Int64Value(int64(c.Status.HAReplicasReady))
+		state.HAReplicasDesired = types.Int64Value(int64(c.Status.HAReplicasDesired))
 	} else {
 		state.Phase = types.StringValue("")
 		state.Endpoint = types.StringValue("")
 		state.HAConfigured = types.BoolValue(false)
 		state.HAEnabledAt = types.StringValue("")
+		state.HAPhase = types.StringValue("")
+		state.HAReplicasReady = types.Int64Value(0)
+		state.HAReplicasDesired = types.Int64Value(0)
 	}
 
 	if c.Resources != nil && (c.Resources.CPU != "" || c.Resources.Memory != "" || c.Resources.Storage != "") {
