@@ -75,8 +75,10 @@ func (d *ClusterDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 				Computed:    true,
 			},
 			"ha_configured": schema.BoolAttribute{
-				Description: "True once the operator has confirmed 3/3 HA control-plane replicas ready.",
-				Computed:    true,
+				Description: "True once the operator has confirmed both 3/3 apiserver replicas AND 3/3 deployed-etcd " +
+					"replicas are `Ready` for the first time. Etcd readiness is required because the OSS deployed-etcd " +
+					"path runs etcd in its own StatefulSet — quorum loss with healthy apiserver pods still blocks writes.",
+				Computed: true,
 			},
 			"ha_enabled_at": schema.StringAttribute{
 				Description: "Timestamp when `ha_configured` first became true (billing anchor).",

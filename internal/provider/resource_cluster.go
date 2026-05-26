@@ -177,9 +177,11 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				Computed:    true,
 			},
 			"ha_configured": schema.BoolAttribute{
-				Description: "True once the operator has confirmed 3/3 HA control-plane replicas ready. " +
-					"Distinct from `high_availability` (the requested state) — read this attribute when downstream " +
-					"automation needs to wait for HA to be operationally available, not just toggled on.",
+				Description: "True once the operator has confirmed both 3/3 apiserver replicas AND 3/3 deployed-etcd " +
+					"replicas are `Ready` for the first time. Etcd readiness is required because the OSS deployed-etcd " +
+					"path runs etcd in its own StatefulSet — quorum loss with healthy apiserver pods still blocks " +
+					"writes. Distinct from `high_availability` (the requested state) — read this attribute when " +
+					"downstream automation needs to wait for HA to be operationally available, not just toggled on.",
 				Computed: true,
 			},
 			"ha_enabled_at": schema.StringAttribute{

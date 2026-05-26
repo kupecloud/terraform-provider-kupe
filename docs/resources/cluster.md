@@ -97,7 +97,7 @@ output "prod_eu1_ha_ready" {
 - `created_at` (String) Timestamp when the cluster was created.
 - `endpoint` (String) Cluster API server endpoint.
 - `etag` (String) Resource version used for optimistic locking during updates.
-- `ha_configured` (Boolean) True once the operator has confirmed 3/3 HA control-plane replicas ready. Distinct from `high_availability` (the requested state) — read this attribute when downstream automation needs to wait for HA to be operationally available, not just toggled on.
+- `ha_configured` (Boolean) True once the operator has confirmed both 3/3 apiserver replicas AND 3/3 deployed-etcd replicas are `Ready` for the first time. Etcd readiness is required because the OSS deployed-etcd path runs etcd in its own StatefulSet — quorum loss with healthy apiserver pods still blocks writes. Distinct from `high_availability` (the requested state) — read this attribute when downstream automation needs to wait for HA to be operationally available, not just toggled on.
 - `ha_enabled_at` (String) Timestamp when `ha_configured` first became true. This is the billing anchor — HA hours accrue from this moment. Stamped once, never updated, never cleared.
 - `ha_phase` (String) Consumer-friendly HA rollup. One of `pending`, `ha-healthy`, `ha-degraded`, `ha-unavailable`. Empty for non-HA clusters. Use this in downstream automation to branch on operational state without inspecting individual conditions.
 - `ha_etcd_replicas_desired` (Number) Target HA etcd replica count (3 when `high_availability = true`, 0 otherwise).
