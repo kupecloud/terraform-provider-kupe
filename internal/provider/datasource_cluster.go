@@ -81,7 +81,7 @@ func (d *ClusterDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 				Computed:    true,
 			},
 			"ha_phase": schema.StringAttribute{
-				Description: "Consumer-friendly HA rollup. One of `pending`, `migrating`, `ha-healthy`, `ha-degraded`, `ha-unavailable`. Empty for non-HA clusters.",
+				Description: "Consumer-friendly HA rollup. One of `pending`, `ha-healthy`, `ha-degraded`, `ha-unavailable`. Empty for non-HA clusters.",
 				Computed:    true,
 			},
 			"ha_replicas_ready": schema.Int64Attribute{

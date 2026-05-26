@@ -31,7 +31,7 @@ data "kupe_cluster" "production" {
 - `endpoint` (String) Cluster API server endpoint.
 - `ha_configured` (Boolean) True once the operator has confirmed 3/3 HA control-plane replicas ready.
 - `ha_enabled_at` (String) Timestamp when `ha_configured` first became true (billing anchor).
-- `ha_phase` (String) Consumer-friendly HA rollup. One of `pending`, `migrating`, `ha-healthy`, `ha-degraded`, `ha-unavailable`. Empty for non-HA clusters.
+- `ha_phase` (String) Consumer-friendly HA rollup. One of `pending`, `ha-healthy`, `ha-degraded`, `ha-unavailable`. Empty for non-HA clusters.
 - `ha_replicas_desired` (Number) Target HA replica count (3 when `high_availability = true`, 0 otherwise).
 - `ha_replicas_ready` (Number) Count of HA control-plane replicas currently `Ready`.
 - `high_availability` (Boolean) Whether the cluster is configured with HA (3-replica control plane). Reflects spec, not operational state — see `ha_configured`.

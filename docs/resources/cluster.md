@@ -99,7 +99,7 @@ output "prod_eu1_ha_ready" {
 - `etag` (String) Resource version used for optimistic locking during updates.
 - `ha_configured` (Boolean) True once the operator has confirmed 3/3 HA control-plane replicas ready. Distinct from `high_availability` (the requested state) — read this attribute when downstream automation needs to wait for HA to be operationally available, not just toggled on.
 - `ha_enabled_at` (String) Timestamp when `ha_configured` first became true. This is the billing anchor — HA hours accrue from this moment. Stamped once, never updated, never cleared.
-- `ha_phase` (String) Consumer-friendly HA rollup. One of `pending`, `migrating`, `ha-healthy`, `ha-degraded`, `ha-unavailable`. Empty for non-HA clusters. Use this in downstream automation to branch on operational state without inspecting individual conditions.
+- `ha_phase` (String) Consumer-friendly HA rollup. One of `pending`, `ha-healthy`, `ha-degraded`, `ha-unavailable`. Empty for non-HA clusters. Use this in downstream automation to branch on operational state without inspecting individual conditions.
 - `ha_replicas_desired` (Number) Target HA replica count (3 when `high_availability = true`, 0 otherwise).
 - `ha_replicas_ready` (Number) Count of HA control-plane replicas currently `Ready`. Zero for non-HA clusters.
 - `phase` (String) Current cluster phase, for example Pending, Provisioning, Running, Migrating, or Degraded.

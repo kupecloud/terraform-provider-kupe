@@ -186,7 +186,7 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				Computed: true,
 			},
 			"ha_phase": schema.StringAttribute{
-				Description: "Consumer-friendly HA rollup. One of `pending`, `migrating`, `ha-healthy`, `ha-degraded`, `ha-unavailable`. " +
+				Description: "Consumer-friendly HA rollup. One of `pending`, `ha-healthy`, `ha-degraded`, `ha-unavailable`. " +
 					"Empty for non-HA clusters. Use this in downstream automation to branch on operational state without " +
 					"inspecting individual conditions.",
 				Computed: true,
