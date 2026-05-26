@@ -36,7 +36,7 @@ resource "kupe_cluster" "prod_eu1" {
 # Expose the consumer-friendly rollup so downstream automation can branch
 # on operational state without inspecting individual conditions.
 output "prod_eu1_ha_phase" {
-  description = "One of pending | migrating | ha-healthy | ha-degraded | ha-unavailable"
+  description = "One of pending | ha-healthy | ha-degraded | ha-unavailable"
   value       = kupe_cluster.prod_eu1.ha_phase
 }
 
