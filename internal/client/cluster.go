@@ -35,13 +35,20 @@ type ClusterStatus struct {
 	// replicas ready. HAEnabledAt is the billing anchor (stamped once, never updated).
 	HAConfigured bool   `json:"haConfigured,omitempty"`
 	HAEnabledAt  string `json:"haEnabledAt,omitempty"`
-	// HAPhase is the consumer-friendly HA rollup (pending, migrating,
-	// ha-healthy, ha-degraded, ha-unavailable). Empty for non-HA clusters.
+	// HAPhase is the consumer-friendly HA rollup (pending, ha-healthy,
+	// ha-degraded, ha-unavailable). Empty for non-HA clusters.
 	HAPhase string `json:"haPhase,omitempty"`
-	// HAReplicasReady / HAReplicasDesired surface the "N of M" pair so
-	// downstream HCL can render meaningful status without parsing conditions.
+	// HAReplicasReady / HAReplicasDesired surface the apiserver "N of M"
+	// pair so downstream HCL can render meaningful status without parsing
+	// conditions.
 	HAReplicasReady   int32 `json:"haReplicasReady,omitempty"`
 	HAReplicasDesired int32 `json:"haReplicasDesired,omitempty"`
+	// HAEtcdReplicasReady / HAEtcdReplicasDesired surface the deployed-etcd
+	// "N of M" pair separately. In the OSS deployed-etcd path etcd is its
+	// own StatefulSet — a 3/3 CP with a 2/3 etcd is still degraded because
+	// etcd quorum loss blocks writes.
+	HAEtcdReplicasReady   int32 `json:"haEtcdReplicasReady,omitempty"`
+	HAEtcdReplicasDesired int32 `json:"haEtcdReplicasDesired,omitempty"`
 }
 
 // CreateClusterRequest is the body for creating a cluster.

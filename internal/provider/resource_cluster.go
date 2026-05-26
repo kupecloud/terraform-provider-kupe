@@ -50,22 +50,24 @@ type ClusterResource struct {
 }
 
 type ClusterResourceModel struct {
-	Name              types.String           `tfsdk:"name"`
-	DisplayName       types.String           `tfsdk:"display_name"`
-	Type              types.String           `tfsdk:"type"`
-	Version           types.String           `tfsdk:"version"`
-	Resources         *ClusterResourcesModel `tfsdk:"resources"`
-	HighAvailability  types.Bool             `tfsdk:"high_availability"`
-	Phase             types.String           `tfsdk:"phase"`
-	Endpoint          types.String           `tfsdk:"endpoint"`
-	HAConfigured      types.Bool             `tfsdk:"ha_configured"`
-	HAEnabledAt       types.String           `tfsdk:"ha_enabled_at"`
-	HAPhase           types.String           `tfsdk:"ha_phase"`
-	HAReplicasReady   types.Int64            `tfsdk:"ha_replicas_ready"`
-	HAReplicasDesired types.Int64            `tfsdk:"ha_replicas_desired"`
-	ETag              types.String           `tfsdk:"etag"`
-	CreatedAt         types.String           `tfsdk:"created_at"`
-	Timeouts          timeouts.Value         `tfsdk:"timeouts"`
+	Name                  types.String           `tfsdk:"name"`
+	DisplayName           types.String           `tfsdk:"display_name"`
+	Type                  types.String           `tfsdk:"type"`
+	Version               types.String           `tfsdk:"version"`
+	Resources             *ClusterResourcesModel `tfsdk:"resources"`
+	HighAvailability      types.Bool             `tfsdk:"high_availability"`
+	Phase                 types.String           `tfsdk:"phase"`
+	Endpoint              types.String           `tfsdk:"endpoint"`
+	HAConfigured          types.Bool             `tfsdk:"ha_configured"`
+	HAEnabledAt           types.String           `tfsdk:"ha_enabled_at"`
+	HAPhase               types.String           `tfsdk:"ha_phase"`
+	HAReplicasReady       types.Int64            `tfsdk:"ha_replicas_ready"`
+	HAReplicasDesired     types.Int64            `tfsdk:"ha_replicas_desired"`
+	HAEtcdReplicasReady   types.Int64            `tfsdk:"ha_etcd_replicas_ready"`
+	HAEtcdReplicasDesired types.Int64            `tfsdk:"ha_etcd_replicas_desired"`
+	ETag                  types.String           `tfsdk:"etag"`
+	CreatedAt             types.String           `tfsdk:"created_at"`
+	Timeouts              timeouts.Value         `tfsdk:"timeouts"`
 }
 
 type ClusterResourcesModel struct {
@@ -167,7 +169,7 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				},
 			},
 			"phase": schema.StringAttribute{
-				Description: "Current cluster phase, for example Pending, Provisioning, Running, Migrating, or Degraded.",
+				Description: "Current cluster phase, for example Pending, Provisioning, Running, Upgrading, or Degraded.",
 				Computed:    true,
 			},
 			"endpoint": schema.StringAttribute{
@@ -192,11 +194,21 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				Computed: true,
 			},
 			"ha_replicas_ready": schema.Int64Attribute{
-				Description: "Count of HA control-plane replicas currently `Ready`. Zero for non-HA clusters.",
+				Description: "Count of HA control-plane (apiserver) replicas currently `Ready`. Zero for non-HA clusters.",
 				Computed:    true,
 			},
 			"ha_replicas_desired": schema.Int64Attribute{
 				Description: "Target HA replica count (3 when `high_availability = true`, 0 otherwise).",
+				Computed:    true,
+			},
+			"ha_etcd_replicas_ready": schema.Int64Attribute{
+				Description: "Count of deployed-etcd replicas currently `Ready`. Exposed separately because the OSS " +
+					"deployed-etcd path runs etcd in its own StatefulSet — etcd quorum loss leaves the cluster unable " +
+					"to serve writes even when the apiserver replicas are healthy.",
+				Computed: true,
+			},
+			"ha_etcd_replicas_desired": schema.Int64Attribute{
+				Description: "Target HA etcd replica count (3 when `high_availability = true`, 0 otherwise).",
 				Computed:    true,
 			},
 			"etag": schema.StringAttribute{
@@ -490,6 +502,8 @@ func mapClusterToState(c *client.Cluster, etag string, state *ClusterResourceMod
 		state.HAPhase = types.StringValue(c.Status.HAPhase)
 		state.HAReplicasReady = types.Int64Value(int64(c.Status.HAReplicasReady))
 		state.HAReplicasDesired = types.Int64Value(int64(c.Status.HAReplicasDesired))
+		state.HAEtcdReplicasReady = types.Int64Value(int64(c.Status.HAEtcdReplicasReady))
+		state.HAEtcdReplicasDesired = types.Int64Value(int64(c.Status.HAEtcdReplicasDesired))
 	} else {
 		state.Phase = types.StringValue("")
 		state.Endpoint = types.StringValue("")
@@ -498,6 +512,8 @@ func mapClusterToState(c *client.Cluster, etag string, state *ClusterResourceMod
 		state.HAPhase = types.StringValue("")
 		state.HAReplicasReady = types.Int64Value(0)
 		state.HAReplicasDesired = types.Int64Value(0)
+		state.HAEtcdReplicasReady = types.Int64Value(0)
+		state.HAEtcdReplicasDesired = types.Int64Value(0)
 	}
 
 	if c.Resources != nil && (c.Resources.CPU != "" || c.Resources.Memory != "" || c.Resources.Storage != "") {

@@ -18,18 +18,20 @@ type ClusterDataSource struct {
 }
 
 type ClusterDataSourceModel struct {
-	Name              types.String `tfsdk:"name"`
-	DisplayName       types.String `tfsdk:"display_name"`
-	Type              types.String `tfsdk:"type"`
-	Version           types.String `tfsdk:"version"`
-	HighAvailability  types.Bool   `tfsdk:"high_availability"`
-	Phase             types.String `tfsdk:"phase"`
-	Endpoint          types.String `tfsdk:"endpoint"`
-	HAConfigured      types.Bool   `tfsdk:"ha_configured"`
-	HAEnabledAt       types.String `tfsdk:"ha_enabled_at"`
-	HAPhase           types.String `tfsdk:"ha_phase"`
-	HAReplicasReady   types.Int64  `tfsdk:"ha_replicas_ready"`
-	HAReplicasDesired types.Int64  `tfsdk:"ha_replicas_desired"`
+	Name                  types.String `tfsdk:"name"`
+	DisplayName           types.String `tfsdk:"display_name"`
+	Type                  types.String `tfsdk:"type"`
+	Version               types.String `tfsdk:"version"`
+	HighAvailability      types.Bool   `tfsdk:"high_availability"`
+	Phase                 types.String `tfsdk:"phase"`
+	Endpoint              types.String `tfsdk:"endpoint"`
+	HAConfigured          types.Bool   `tfsdk:"ha_configured"`
+	HAEnabledAt           types.String `tfsdk:"ha_enabled_at"`
+	HAPhase               types.String `tfsdk:"ha_phase"`
+	HAReplicasReady       types.Int64  `tfsdk:"ha_replicas_ready"`
+	HAReplicasDesired     types.Int64  `tfsdk:"ha_replicas_desired"`
+	HAEtcdReplicasReady   types.Int64  `tfsdk:"ha_etcd_replicas_ready"`
+	HAEtcdReplicasDesired types.Int64  `tfsdk:"ha_etcd_replicas_desired"`
 }
 
 func NewClusterDataSource() datasource.DataSource {
@@ -65,7 +67,7 @@ func (d *ClusterDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 				Computed:    true,
 			},
 			"phase": schema.StringAttribute{
-				Description: "Current cluster phase, for example Pending, Provisioning, Running, Migrating, or Degraded.",
+				Description: "Current cluster phase, for example Pending, Provisioning, Running, Upgrading, or Degraded.",
 				Computed:    true,
 			},
 			"endpoint": schema.StringAttribute{
@@ -85,11 +87,21 @@ func (d *ClusterDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 				Computed:    true,
 			},
 			"ha_replicas_ready": schema.Int64Attribute{
-				Description: "Count of HA control-plane replicas currently `Ready`.",
+				Description: "Count of HA control-plane (apiserver) replicas currently `Ready`.",
 				Computed:    true,
 			},
 			"ha_replicas_desired": schema.Int64Attribute{
 				Description: "Target HA replica count (3 when `high_availability = true`, 0 otherwise).",
+				Computed:    true,
+			},
+			"ha_etcd_replicas_ready": schema.Int64Attribute{
+				Description: "Count of deployed-etcd replicas currently `Ready`. Exposed separately because the OSS " +
+					"deployed-etcd path runs etcd in its own StatefulSet — quorum loss blocks writes even when the " +
+					"apiserver replicas are healthy.",
+				Computed: true,
+			},
+			"ha_etcd_replicas_desired": schema.Int64Attribute{
+				Description: "Target HA etcd replica count (3 when `high_availability = true`, 0 otherwise).",
 				Computed:    true,
 			},
 		},
@@ -133,6 +145,8 @@ func (d *ClusterDataSource) Read(ctx context.Context, req datasource.ReadRequest
 		state.HAPhase = types.StringValue(cluster.Status.HAPhase)
 		state.HAReplicasReady = types.Int64Value(int64(cluster.Status.HAReplicasReady))
 		state.HAReplicasDesired = types.Int64Value(int64(cluster.Status.HAReplicasDesired))
+		state.HAEtcdReplicasReady = types.Int64Value(int64(cluster.Status.HAEtcdReplicasReady))
+		state.HAEtcdReplicasDesired = types.Int64Value(int64(cluster.Status.HAEtcdReplicasDesired))
 	} else {
 		state.Phase = types.StringValue("")
 		state.Endpoint = types.StringValue("")
@@ -141,6 +155,8 @@ func (d *ClusterDataSource) Read(ctx context.Context, req datasource.ReadRequest
 		state.HAPhase = types.StringValue("")
 		state.HAReplicasReady = types.Int64Value(0)
 		state.HAReplicasDesired = types.Int64Value(0)
+		state.HAEtcdReplicasReady = types.Int64Value(0)
+		state.HAEtcdReplicasDesired = types.Int64Value(0)
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }

@@ -32,9 +32,11 @@ data "kupe_cluster" "production" {
 - `ha_configured` (Boolean) True once the operator has confirmed 3/3 HA control-plane replicas ready.
 - `ha_enabled_at` (String) Timestamp when `ha_configured` first became true (billing anchor).
 - `ha_phase` (String) Consumer-friendly HA rollup. One of `pending`, `ha-healthy`, `ha-degraded`, `ha-unavailable`. Empty for non-HA clusters.
+- `ha_etcd_replicas_desired` (Number) Target HA etcd replica count (3 when `high_availability = true`, 0 otherwise).
+- `ha_etcd_replicas_ready` (Number) Count of deployed-etcd replicas currently `Ready`. Exposed separately because the OSS deployed-etcd path runs etcd in its own StatefulSet — quorum loss blocks writes even when the apiserver replicas are healthy.
 - `ha_replicas_desired` (Number) Target HA replica count (3 when `high_availability = true`, 0 otherwise).
-- `ha_replicas_ready` (Number) Count of HA control-plane replicas currently `Ready`.
+- `ha_replicas_ready` (Number) Count of HA control-plane (apiserver) replicas currently `Ready`.
 - `high_availability` (Boolean) Whether the cluster is configured with HA (3-replica control plane). Reflects spec, not operational state — see `ha_configured`.
-- `phase` (String) Current cluster phase, for example Pending, Provisioning, Running, Migrating, or Degraded.
+- `phase` (String) Current cluster phase, for example Pending, Provisioning, Running, Upgrading, or Degraded.
 - `type` (String) Cluster type, for example shared or dedicated.
 - `version` (String) Current Kubernetes version for the cluster.
