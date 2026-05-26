@@ -39,11 +39,14 @@ resource "kupe_cluster" "production" {
   }
 }
 
-# HA cluster: 3 replicas, embedded etcd, hard anti-affinity. Adds an hourly
-# charge — see your plan's HA rate.
+# HA cluster: 3 replicas, chart-managed external etcd StatefulSet, hard
+# anti-affinity, encrypted etcd at rest. Adds an hourly charge — see
+# your plan's HA rate.
 #
-# Enabling on an existing cluster triggers an in-place kine→etcd migration
-# with ~10 minutes of API downtime. Disabling is not supported in v1.
+# `high_availability` is create-time-only. Changing this attribute on an
+# existing resource forces Terraform to replace (destroy + create) the
+# cluster — there is no in-place migration. Plan a blue-green swap via
+# GitOps if you need HA on an existing cluster.
 resource "kupe_cluster" "prod_eu1" {
   name              = "prod-eu1"
   display_name      = "Production EU1"
@@ -82,11 +85,9 @@ output "prod_eu1_ha_ready" {
 
 ### Optional
 
-- `high_availability` (Boolean) Enable a 3-replica HA control plane with HA etcd, hard anti-affinity, and encrypted-at-rest etcd snapshots. Adds an hourly charge — see `data.kupe_plan` for the rate. Default `false`.
+- `high_availability` (Boolean) Enable a 3-replica HA control plane with HA etcd (chart-managed external etcd StatefulSet), hard anti-affinity, and encrypted-at-rest etcd via a per-cluster AES-CBC key. Adds an hourly charge — see `data.kupe_plan` for the rate. Default `false`.
 
-**Enabling on an existing cluster** triggers an in-place kine→etcd migration with ~10 minutes of API downtime — plan for it.
-
-**Disabling** (`high_availability = false` on a cluster that has it enabled) is **not supported in v1** — the operator will reject the change with code `HA_DISABLE_UNSUPPORTED`. Recreate the cluster as single-replica if needed.
+**Create-time-only.** This attribute is effectively immutable: changing it on an existing resource forces Terraform to **replace** the cluster (destroy + create). The operator rejects both directions of the toggle with canonical error codes (`HA_ENABLE_ON_EXISTING_UNSUPPORTED`, `HA_DISABLE_UNSUPPORTED`) — `RequiresReplace` here makes Terraform's plan reflect that reality up front. Use a blue-green swap workflow if you need HA on an existing cluster: create a new HA cluster, redeploy via GitOps, swap traffic, then destroy the old.
 - `resources` (Attributes) Resource limits for the cluster. Updates are sent as a JSON Merge Patch (RFC 7396) — fields you remove from this block are **left unchanged** on the server, not cleared. To clear all resource limits, remove the entire `resources` block. To change an individual field, write it explicitly. (see [below for nested schema](#nestedatt--resources))
 - `timeouts` (Attributes) (see [below for nested schema](#nestedatt--timeouts))
 - `version` (String) Kubernetes version (e.g., 1.31).

@@ -12,6 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -149,15 +150,21 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				},
 			},
 			"high_availability": schema.BoolAttribute{
-				Description: "Enable a 3-replica HA control plane with HA etcd, hard anti-affinity, and encrypted-at-rest etcd snapshots. " +
+				Description: "Enable a 3-replica HA control plane with HA etcd (chart-managed external etcd StatefulSet), " +
+					"hard anti-affinity, and encrypted-at-rest etcd via a per-cluster AES-CBC key. " +
 					"Adds an hourly charge — see `data.kupe_plan` for the rate. Default `false`.\n\n" +
-					"**Enabling on an existing cluster** triggers an in-place kine→etcd migration with ~10 minutes of API downtime — " +
-					"plan for it.\n\n" +
-					"**Disabling** (`high_availability = false` on a cluster that has it enabled) is **not supported in v1** — the " +
-					"operator will reject the change with code `HA_DISABLE_UNSUPPORTED`. Recreate the cluster as single-replica if needed.",
+					"**Create-time-only.** This attribute is effectively immutable: changing it on an existing resource forces " +
+					"Terraform to **replace** the cluster (destroy + create). The operator rejects both directions of the " +
+					"toggle with canonical error codes (`HA_ENABLE_ON_EXISTING_UNSUPPORTED`, `HA_DISABLE_UNSUPPORTED`) — " +
+					"`RequiresReplace` here makes Terraform's plan reflect that reality up front. Use a blue-green swap " +
+					"workflow if you need HA on an existing cluster: create a new HA cluster, redeploy via GitOps, swap traffic, " +
+					"then destroy the old.",
 				Optional: true,
 				Computed: true,
 				Default:  booldefault.StaticBool(false),
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.RequiresReplace(),
+				},
 			},
 			"phase": schema.StringAttribute{
 				Description: "Current cluster phase, for example Pending, Provisioning, Running, Migrating, or Degraded.",
@@ -329,16 +336,9 @@ func (r *ClusterResource) Update(ctx context.Context, req resource.UpdateRequest
 		hasChanges = true
 	}
 
-	if !plan.HighAvailability.Equal(state.HighAvailability) {
-		// Send through to the operator even when the transition is the
-		// rejected true → false direction. The operator owns the canonical
-		// rejection (HA_DISABLE_UNSUPPORTED) and we want it to surface here
-		// in apiErrorDetail's message rather than masking it with a
-		// provider-side preflight that could drift from operator policy.
-		v := plan.HighAvailability.ValueBool()
-		patchReq.HighAvailability = &v
-		hasChanges = true
-	}
+	// HA changes are handled by RequiresReplace on the high_availability
+	// attribute — Terraform will destroy + recreate the cluster rather
+	// than Update, so this branch never sees an HA diff.
 
 	if hasChanges {
 		cluster, etag, err := r.client.UpdateCluster(ctx, plan.Name.ValueString(), state.ETag.ValueString(), patchReq)

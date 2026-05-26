@@ -11,11 +11,14 @@ resource "kupe_cluster" "production" {
   }
 }
 
-# HA cluster: 3 replicas, embedded etcd, hard anti-affinity. Adds an hourly
-# charge — see your plan's HA rate.
+# HA cluster: 3 replicas, chart-managed external etcd StatefulSet, hard
+# anti-affinity, encrypted etcd at rest. Adds an hourly charge — see
+# your plan's HA rate.
 #
-# Enabling on an existing cluster triggers an in-place kine→etcd migration
-# with ~10 minutes of API downtime. Disabling is not supported in v1.
+# `high_availability` is create-time-only. Changing this attribute on an
+# existing resource forces Terraform to replace (destroy + create) the
+# cluster — there is no in-place migration. Plan a blue-green swap via
+# GitOps if you need HA on an existing cluster.
 resource "kupe_cluster" "prod_eu1" {
   name              = "prod-eu1"
   display_name      = "Production EU1"
