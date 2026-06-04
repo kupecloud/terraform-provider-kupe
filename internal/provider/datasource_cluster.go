@@ -55,8 +55,9 @@ func (d *ClusterDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 				Computed:    true,
 			},
 			"type": schema.StringAttribute{
-				Description: "Cluster type, for example shared or dedicated.",
-				Computed:    true,
+				Description: "Cluster type. Today the operator only supports `shared` — `dedicated` was reserved in " +
+					"the CRD enum but is currently rejected with `CLUSTER_DEDICATED_UNSUPPORTED`.",
+				Computed: true,
 			},
 			"version": schema.StringAttribute{
 				Description: "Current Kubernetes version for the cluster.",

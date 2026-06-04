@@ -81,7 +81,6 @@ output "prod_eu1_ha_ready" {
 
 - `display_name` (String) Human-readable display name (immutable after creation).
 - `name` (String) Cluster name (immutable after creation).
-- `type` (String) Cluster type. Valid values are shared and dedicated. Immutable after creation.
 
 ### Optional
 
@@ -90,6 +89,7 @@ output "prod_eu1_ha_ready" {
 **Create-time-only.** This attribute is effectively immutable: changing it on an existing resource forces Terraform to **replace** the cluster (destroy + create). The operator rejects both directions of the toggle with canonical error codes (`HA_ENABLE_ON_EXISTING_UNSUPPORTED`, `HA_DISABLE_UNSUPPORTED`) — `RequiresReplace` here makes Terraform's plan reflect that reality up front. Use a blue-green swap workflow if you need HA on an existing cluster: create a new HA cluster, redeploy via GitOps, swap traffic, then destroy the old.
 - `resources` (Attributes) Resource limits for the cluster. Updates are sent as a JSON Merge Patch (RFC 7396) — fields you remove from this block are **left unchanged** on the server, not cleared. To clear all resource limits, remove the entire `resources` block. To change an individual field, write it explicitly. (see [below for nested schema](#nestedatt--resources))
 - `timeouts` (Attributes) (see [below for nested schema](#nestedatt--timeouts))
+- `type` (String, Deprecated) **Deprecated.** Cluster type. Only `shared` is supported today — the operator rejects `dedicated` with the canonical `CLUSTER_DEDICATED_UNSUPPORTED` error code. Leave unset (the provider defaults to `shared`) or omit from your configuration entirely. The attribute remains in the schema so that existing state migrates cleanly; future support for dedicated nodes will likely take a different shape (per-cluster node-pool reference) rather than reviving this enum.
 - `version` (String) Kubernetes version (e.g., 1.31).
 
 ### Read-Only

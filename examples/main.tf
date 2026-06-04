@@ -24,7 +24,6 @@ data "kupe_plan" "pro" {
 resource "kupe_cluster" "production" {
   name         = "production"
   display_name = "Production"
-  type         = "shared"
   version      = "1.31"
 
   resources = {
@@ -38,7 +37,6 @@ resource "kupe_cluster" "production" {
 resource "kupe_cluster" "staging" {
   name         = "staging"
   display_name = "Staging"
-  type         = "shared"
   version      = "1.31"
 
   resources = {

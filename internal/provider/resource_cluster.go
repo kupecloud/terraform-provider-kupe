@@ -14,6 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
@@ -113,13 +114,21 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				},
 			},
 			"type": schema.StringAttribute{
-				Description: "Cluster type. Valid values are shared and dedicated. Immutable after creation.",
-				Required:    true,
+				Description: "**Deprecated.** Cluster type. Only `shared` is supported today — the operator rejects " +
+					"`dedicated` with the canonical `CLUSTER_DEDICATED_UNSUPPORTED` error code. Leave unset (the " +
+					"provider defaults to `shared`) or omit from your configuration entirely. The attribute remains " +
+					"in the schema so that existing state migrates cleanly; future support for dedicated nodes will " +
+					"likely take a different shape (per-cluster node-pool reference) rather than reviving this enum.",
+				DeprecationMessage: "`type` is deprecated. Only `shared` is supported and it's now the default — remove " +
+					"this attribute from your configuration. A future provider release may drop the attribute entirely.",
+				Optional: true,
+				Computed: true,
+				Default:  stringdefault.StaticString("shared"),
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
 				Validators: []validator.String{
-					stringvalidator.OneOf("shared", "dedicated"),
+					stringvalidator.OneOf("shared"),
 				},
 			},
 			"version": schema.StringAttribute{

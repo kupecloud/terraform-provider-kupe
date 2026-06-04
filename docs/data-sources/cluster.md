@@ -38,5 +38,5 @@ data "kupe_cluster" "production" {
 - `ha_replicas_ready` (Number) Count of HA control-plane (apiserver) replicas currently `Ready`.
 - `high_availability` (Boolean) Whether the cluster is configured with HA (3-replica control plane). Reflects spec, not operational state — see `ha_configured`.
 - `phase` (String) Current cluster phase, for example Pending, Provisioning, Running, Upgrading, or Degraded.
-- `type` (String) Cluster type, for example shared or dedicated.
+- `type` (String) Cluster type. Today the operator only supports `shared` — `dedicated` was reserved in the CRD enum but is currently rejected with `CLUSTER_DEDICATED_UNSUPPORTED`.
 - `version` (String) Current Kubernetes version for the cluster.

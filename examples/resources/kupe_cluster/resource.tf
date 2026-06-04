@@ -1,7 +1,6 @@
 resource "kupe_cluster" "production" {
   name         = "production"
   display_name = "Production"
-  type         = "shared"
   version      = "1.32"
 
   resources = {
@@ -22,7 +21,6 @@ resource "kupe_cluster" "production" {
 resource "kupe_cluster" "prod_eu1" {
   name              = "prod-eu1"
   display_name      = "Production EU1"
-  type              = "shared"
   version           = "1.35"
   high_availability = true
 
