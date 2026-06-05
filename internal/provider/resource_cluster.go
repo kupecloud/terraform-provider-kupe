@@ -282,6 +282,19 @@ func (r *ClusterResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
+	// Surface server-side advisories (e.g. HA_K8S_VERSION_RETIRING) as
+	// Terraform warnings. Advisory only — never fails the apply. We use
+	// the canonical Code as the summary so users see the code in plan
+	// output and can grep for it; the detail carries the human message
+	// plus the field path if the server attached one.
+	for _, w := range cluster.Warnings {
+		detail := w.Message
+		if w.Field != "" {
+			detail = fmt.Sprintf("%s\n\nField: %s", w.Message, w.Field)
+		}
+		resp.Diagnostics.AddWarning(w.Code, detail)
+	}
+
 	// Persist the freshly-accepted state immediately so a Ctrl-C
 	// during the wait below leaves Terraform with the resource on
 	// record (with phase=Pending or whatever the API just returned)

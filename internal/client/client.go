@@ -48,10 +48,34 @@ type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
+// errorEnvelope decodes both the legacy ({"error":"..."}) and the structured
+// canonical ({"code":"...","severity":"...","message":"...","field":"...",
+// "error":"..."}) shapes from kupe-api in a single pass. The structured
+// shape duplicates `error` for backward compatibility, so legacy-only
+// callers still see a useful Message.
+type errorEnvelope struct {
+	Code     string `json:"code,omitempty"`
+	Severity string `json:"severity,omitempty"`
+	Message  string `json:"message,omitempty"`
+	Field    string `json:"field,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
 // APIError represents an error from the kupe API.
+//
+// Code/Severity/Field are populated only when the response is the
+// structured canonical envelope (HA_DISABLE_UNSUPPORTED,
+// CLUSTER_DEDICATED_UNSUPPORTED, etc.). For legacy {"error":"..."} or
+// unparsable bodies they're empty and only Message is filled.
 type APIError struct {
 	StatusCode int
 	Message    string
+	// Code is the canonical error code (e.g. "HA_DISABLE_UNSUPPORTED").
+	Code string
+	// Severity is "error" or "warning"; empty when Code is empty.
+	Severity string
+	// Field is the dotted spec path the error applies to.
+	Field string
 }
 
 func (e *APIError) Error() string {
@@ -133,11 +157,31 @@ func (c *Client) requestWithETag(ctx context.Context, method, path, etag string,
 	}
 
 	if resp.StatusCode >= 400 {
-		var errResp ErrorResponse
-		if json.Unmarshal(respBody, &errResp) == nil && errResp.Error != "" {
-			return "", &APIError{StatusCode: resp.StatusCode, Message: errResp.Error}
+		apiErr := &APIError{StatusCode: resp.StatusCode, Message: string(respBody)}
+		// Single decode handles both shapes: structured envelopes carry
+		// Code (canonical) while legacy responses only carry Error. If the
+		// body isn't valid JSON we keep the raw string as Message so the
+		// user still sees something useful (e.g. proxy/HTML error pages).
+		var env errorEnvelope
+		if json.Unmarshal(respBody, &env) == nil {
+			switch {
+			case env.Code != "":
+				apiErr.Code = env.Code
+				apiErr.Severity = env.Severity
+				apiErr.Field = env.Field
+				switch {
+				case env.Message != "":
+					apiErr.Message = env.Message
+				case env.Error != "":
+					apiErr.Message = env.Error
+				}
+			case env.Error != "":
+				apiErr.Message = env.Error
+			case env.Message != "":
+				apiErr.Message = env.Message
+			}
 		}
-		return "", &APIError{StatusCode: resp.StatusCode, Message: string(respBody)}
+		return "", apiErr
 	}
 
 	responseETag := resp.Header.Get("ETag")

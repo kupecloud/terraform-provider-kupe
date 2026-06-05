@@ -17,6 +17,20 @@ type Cluster struct {
 	Status           *ClusterStatus   `json:"status,omitempty"`
 	ResourceVersion  string           `json:"resourceVersion"`
 	CreatedAt        string           `json:"createdAt"`
+	// Warnings is advisory; today populated only on POST /clusters
+	// responses (e.g. HA_K8S_VERSION_RETIRING). Receive-only — no
+	// omitempty so the decoder happily accepts the always-present empty
+	// array without dropping the field.
+	Warnings []Warning `json:"warnings"`
+}
+
+// Warning is one advisory entry. Same shape as the structured error
+// envelope minus the duplicated `error` compatibility field.
+type Warning struct {
+	Code     string `json:"code"`
+	Severity string `json:"severity"`
+	Message  string `json:"message"`
+	Field    string `json:"field,omitempty"`
 }
 
 // ClusterResource defines resource limits.
