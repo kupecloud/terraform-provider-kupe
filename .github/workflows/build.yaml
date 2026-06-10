@@ -39,5 +39,13 @@ jobs:
       - name: Generate provider docs
         run: make docs-generate
 
+      - name: Check generated docs are committed
+        run: |
+          if ! git diff --exit-code -- docs/; then
+            echo "::error::Committed docs/ is out of date with the provider schema."
+            echo "Run 'make docs-generate' locally and commit the result."
+            exit 1
+          fi
+
       - name: Validate provider docs
         run: make docs-validate

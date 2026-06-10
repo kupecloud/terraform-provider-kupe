@@ -1,0 +1,40 @@
+name: Rebuild Public Docs
+
+# docs-public imports this provider's docs/{resources,data-sources} at build
+# time. Cloudflare Pages only rebuilds on pushes to its own repo, so a docs
+# change here would otherwise never reach the published site. Ping the Pages
+# deploy hook so the site rebuilds and re-pulls the latest registry docs.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "docs/**"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  trigger:
+    name: Trigger docs-public deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Cloudflare Pages deploy hook
+        env:
+          DEPLOY_HOOK_URL: ${{ secrets.DOCS_PUBLIC_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "${DEPLOY_HOOK_URL}" ]; then
+            echo "::error::DOCS_PUBLIC_DEPLOY_HOOK_URL secret is not set; cannot trigger docs-public rebuild"
+            exit 1
+          fi
+          status=$(curl -sS -X POST -o /dev/null -w "%{http_code}" "${DEPLOY_HOOK_URL}")
+          echo "Deploy hook responded with HTTP ${status}"
+          case "${status}" in
+            2*) echo "Triggered docs-public rebuild" ;;
+            *) echo "::error::Deploy hook returned HTTP ${status}"; exit 1 ;;
+          esac

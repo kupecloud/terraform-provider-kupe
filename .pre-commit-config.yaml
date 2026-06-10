@@ -68,6 +68,12 @@ repos:
         language: system
         types:
           - go
+      - id: tfplugindocs
+        name: regenerate terraform provider docs
+        entry: make docs-install docs-generate
+        language: system
+        pass_filenames: false
+        files: ^(internal/.*\.go|templates/.*|examples/.*|main\.go|go\.mod)$
       - id: govulncheck
         name: govulncheck
         entry: bash -c 'GOWORK=off go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...'

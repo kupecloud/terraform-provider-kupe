@@ -9,6 +9,7 @@ on:
       - "go.sum"
       - "**.go"
       - ".github/workflows/**"
+      - "docs/**"
       - "examples/**"
       - "scripts/**"
       - "templates/**"
@@ -32,3 +33,9 @@ jobs:
       - go-lint
       - action-lint
     uses: ./.github/workflows/unit-tests.yaml
+
+  build:
+    name: Build
+    needs:
+      - unit-tests
+    uses: ./.github/workflows/build.yaml
