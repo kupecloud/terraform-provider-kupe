@@ -29,7 +29,6 @@ The same contract applies whether you delete via Terraform, the `kupe` CLI, or t
 resource "kupe_cluster" "production" {
   name         = "production"
   display_name = "Production"
-  type         = "shared"
   version      = "1.32"
 
   resources = {
@@ -50,7 +49,6 @@ resource "kupe_cluster" "production" {
 resource "kupe_cluster" "prod_eu1" {
   name              = "prod-eu1"
   display_name      = "Production EU1"
-  type              = "shared"
   version           = "1.35"
   high_availability = true
 
@@ -99,9 +97,9 @@ output "prod_eu1_ha_ready" {
 - `etag` (String) Resource version used for optimistic locking during updates.
 - `ha_configured` (Boolean) True once the operator has confirmed both 3/3 apiserver replicas AND 3/3 deployed-etcd replicas are `Ready` for the first time. Etcd readiness is required because the OSS deployed-etcd path runs etcd in its own StatefulSet — quorum loss with healthy apiserver pods still blocks writes. Distinct from `high_availability` (the requested state) — read this attribute when downstream automation needs to wait for HA to be operationally available, not just toggled on.
 - `ha_enabled_at` (String) Timestamp when `ha_configured` first became true. This is the billing anchor — HA hours accrue from this moment. Stamped once, never updated, never cleared.
-- `ha_phase` (String) Consumer-friendly HA rollup. One of `pending`, `ha-healthy`, `ha-degraded`, `ha-unavailable`. Empty for non-HA clusters. Use this in downstream automation to branch on operational state without inspecting individual conditions.
 - `ha_etcd_replicas_desired` (Number) Target HA etcd replica count (3 when `high_availability = true`, 0 otherwise).
 - `ha_etcd_replicas_ready` (Number) Count of deployed-etcd replicas currently `Ready`. Exposed separately because the OSS deployed-etcd path runs etcd in its own StatefulSet — etcd quorum loss leaves the cluster unable to serve writes even when the apiserver replicas are healthy.
+- `ha_phase` (String) Consumer-friendly HA rollup. One of `pending`, `ha-healthy`, `ha-degraded`, `ha-unavailable`. Empty for non-HA clusters. Use this in downstream automation to branch on operational state without inspecting individual conditions.
 - `ha_replicas_desired` (Number) Target HA replica count (3 when `high_availability = true`, 0 otherwise).
 - `ha_replicas_ready` (Number) Count of HA control-plane (apiserver) replicas currently `Ready`. Zero for non-HA clusters.
 - `phase` (String) Current cluster phase, for example Pending, Provisioning, Running, Upgrading, or Degraded.
