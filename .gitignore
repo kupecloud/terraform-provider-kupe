@@ -30,6 +30,12 @@ Thumbs.db
 # Local tooling
 .tmp/
 
+# Go vendor dir (not used for builds; modules are downloaded)
+vendor/
+
+# Manual test scratch
+test/manual/.terraform.lock.hcl
+
 # Goreleaser snapshot output (used by `make local-publish-dryrun`)
 dist/
 
