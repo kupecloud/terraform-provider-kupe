@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"sync"
 	"time"
+
+	"github.com/hashicorp/go-retryablehttp"
 )
 
 // Client is an HTTP client for the kupe API.
@@ -31,15 +33,64 @@ type Client struct {
 	alertmanagerMu sync.Mutex
 }
 
+// retryMax is the number of retry attempts after the initial request for
+// transient failures (connection errors, 429, 5xx). Four attempts with
+// exponential backoff between retryWaitMin and retryWaitMax covers a brief
+// load-balancer/proxy blip or a rolling kupe-api deploy without stalling an
+// apply for long. These are vars (not consts) so tests can shrink the
+// backoff without changing production behaviour.
+var (
+	retryMax     = 4
+	retryWaitMin = 500 * time.Millisecond
+	retryWaitMax = 5 * time.Second
+)
+
 // New creates a new kupe API client.
+//
+// The underlying transport retries transient failures (connection errors,
+// HTTP 429, and 5xx) with bounded exponential backoff, honouring any
+// Retry-After header, via hashicorp/go-retryablehttp's default policy.
+// Non-transient responses (2xx, 4xx other than 429) are returned on the
+// first attempt. Mutations stay safe under retry: PATCH carries an
+// If-Match ETag (a retried stale write 412s rather than double-applying),
+// and create/delete are GET-by-name idempotent or surface a 409 the caller
+// already handles.
 func New(baseURL, tenant, token string) *Client {
+	rc := retryablehttp.NewClient()
+	rc.RetryMax = retryMax
+	rc.RetryWaitMin = retryWaitMin
+	rc.RetryWaitMax = retryWaitMax
+	rc.Logger = nil // don't emit retryablehttp's default stderr logging
+	// On retry exhaustion, pass the final response straight through instead
+	// of wrapping it in retryablehttp's "giving up after N attempts" error.
+	// This keeps our >=400 decoding intact so callers still get a typed
+	// *APIError (with Code/Field) for a persistent 5xx, and IsNotFound /
+	// IsConflict / IsPreconditionFailed keep working after retries.
+	rc.ErrorHandler = retryablehttp.PassthroughErrorHandler
+	// 30s is a per-attempt ceiling on a single HTTP call. It is distinct
+	// from the resource-level `timeouts` blocks (e.g. cluster create 15m),
+	// which bound the readiness POLL loop, not an individual request.
+	// kupe-api returns immediately (201/202) and provisioning is async, so
+	// no single request should approach this. If a future endpoint can
+	// legitimately block longer synchronously, derive that call's context
+	// deadline from the resource timeout instead of relying on this ceiling.
+	rc.HTTPClient.Timeout = 30 * time.Second
+	// Do not follow redirects. The default stdlib policy follows up to 10
+	// redirects and would replay the request body (alertmanager secrets on
+	// PUT) and the Authorization bearer header to whatever host the redirect
+	// points at. We constrain the base host in normalizeHost; refusing
+	// redirects here closes the replay-to-unintended-host surface entirely.
+	// ErrUseLastResponse makes Do return the 3xx response as-is, which our
+	// >=400 / 2xx handling treats as a non-2xx (surfaced to the user).
+	rc.HTTPClient.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+
 	return &Client{
-		baseURL: baseURL,
-		tenant:  tenant,
-		token:   token,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		baseURL:    baseURL,
+		tenant:     tenant,
+		token:      token,
+		httpClient: rc.StandardClient(),
 	}
 }
 

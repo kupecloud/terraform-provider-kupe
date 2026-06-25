@@ -6,8 +6,20 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"sync/atomic"
 	"testing"
+	"time"
 )
+
+// TestMain shrinks the transport retry backoff so tests that exercise the
+// retry path (e.g. a persistent 5xx) don't sleep for real seconds. The
+// retry COUNT is left at its production value so behaviour is unchanged.
+func TestMain(m *testing.M) {
+	retryWaitMin = time.Millisecond
+	retryWaitMax = 5 * time.Millisecond
+	os.Exit(m.Run())
+}
 
 // mockAPI creates a test HTTP server that records requests and returns configured responses.
 type mockAPI struct {
@@ -207,5 +219,61 @@ func TestAPIErrorMessage(t *testing.T) {
 	err := &APIError{StatusCode: 400, Message: "bad request"}
 	if err.Error() != "kupe api: 400 bad request" {
 		t.Errorf("unexpected error message: %q", err.Error())
+	}
+}
+
+// TestRetryOnTransient5xx covers TPK-4: a GET that returns 503 twice then
+// 200 must succeed transparently via the retrying transport rather than
+// failing the first request. sync/atomic keeps the attempt counter safe
+// even though the mock handler runs on the httptest server's goroutine.
+func TestRetryOnTransient5xx(t *testing.T) {
+	mock := newMockAPI()
+	defer mock.close()
+
+	var attempts int32
+	mock.on("GET", "/api/v1/tenants/acme/clusters/prod", func(w http.ResponseWriter, _ *http.Request) {
+		if atomic.AddInt32(&attempts, 1) <= 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("ETag", `"ok"`)
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(Cluster{Name: "prod"})
+	})
+
+	c := mock.client("acme")
+	cluster, _, err := c.GetCluster(context.Background(), "prod")
+	if err != nil {
+		t.Fatalf("expected retry to recover, got error: %v", err)
+	}
+	if cluster.Name != "prod" {
+		t.Errorf("expected prod, got %q", cluster.Name)
+	}
+	if got := atomic.LoadInt32(&attempts); got != 3 {
+		t.Errorf("expected 3 attempts (2 fail + 1 success), got %d", got)
+	}
+}
+
+// TestNoRetryOn4xx confirms client errors are NOT retried (only the first
+// attempt is made) — a 404 should surface immediately as a typed *APIError.
+func TestNoRetryOn4xx(t *testing.T) {
+	mock := newMockAPI()
+	defer mock.close()
+
+	var attempts int32
+	mock.on("GET", "/api/v1/tenants/acme/clusters/prod", func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(ErrorResponse{Error: "not found"})
+	})
+
+	c := mock.client("acme")
+	_, _, err := c.GetCluster(context.Background(), "prod")
+	if !IsNotFound(err) {
+		t.Fatalf("expected not-found, got %v", err)
+	}
+	if got := atomic.LoadInt32(&attempts); got != 1 {
+		t.Errorf("expected exactly 1 attempt (no retry on 4xx), got %d", got)
 	}
 }
