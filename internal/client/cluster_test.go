@@ -131,6 +131,45 @@ func TestUpdateCluster(t *testing.T) {
 	}
 }
 
+// TestUpdateCluster_OmitsVersionWhenNil is the wire-level guard for TPK-1:
+// when PatchClusterRequest.Version is nil the marshalled PATCH body must
+// NOT contain a "version" key. A pointer-to-"" would serialise to
+// {"version":""}, which kupe-api resolves to a default version and could
+// silently change the tenant cluster's Kubernetes minor version on an
+// unrelated edit. The provider Update path only sets Version when the
+// planned value is known and changed; this test pins the serialisation
+// contract the omission relies on.
+func TestUpdateCluster_OmitsVersionWhenNil(t *testing.T) {
+	mock := newMockAPI()
+	defer mock.close()
+
+	mock.on("PATCH", "/api/v1/tenants/acme/clusters/prod", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("ETag", `"new-etag"`)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(Cluster{Name: "prod", Version: "1.31"})
+	})
+
+	c := mock.client("acme")
+	// Only resources changes; Version stays nil (the "version unset, edit
+	// an unrelated field" scenario).
+	_, _, err := c.UpdateCluster(context.Background(), "prod", `"old-etag"`, PatchClusterRequest{
+		Resources: &ClusterResource{CPU: "4"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body := mock.lastRequest().Body
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(body), &raw); err != nil {
+		t.Fatalf("failed to unmarshal request body: %v", err)
+	}
+	if _, present := raw["version"]; present {
+		t.Errorf("PATCH body must omit version when unchanged, got body: %s", body)
+	}
+}
+
 func TestDeleteCluster(t *testing.T) {
 	mock := newMockAPI()
 	defer mock.close()

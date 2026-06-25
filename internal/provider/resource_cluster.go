@@ -135,28 +135,46 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				Description: "Kubernetes version (e.g., 1.31).",
 				Optional:    true,
 				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					// Keep the prior known value when config is null instead of
+					// planning "known after apply" on every unrelated edit. This
+					// suppresses noisy plan churn AND closes the TPK-1 hole where
+					// an unknown version serialised to {"version":""} and could
+					// trigger a silent K8s minor-version change on the server.
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"resources": schema.SingleNestedAttribute{
-				Description: "Resource limits for the cluster. Updates are sent as a JSON Merge " +
-					"Patch (RFC 7396) — fields you remove from this block are **left unchanged** " +
-					"on the server, not cleared. To clear all resource limits, remove the entire " +
-					"`resources` block. To change an individual field, write it explicitly.",
+				Description: "Resource limits for the cluster. Updates send a partial PATCH that " +
+					"includes only the fields present in this block — fields you omit are **left " +
+					"unchanged** on the server. To change an individual field, write it explicitly. " +
+					"Removing the entire `resources` block sends an empty `resources` object to the " +
+					"server to request clearing the limits.",
 				Optional: true,
 				Attributes: map[string]schema.Attribute{
 					"cpu": schema.StringAttribute{
 						Description: "CPU limit (e.g., 4, 500m).",
 						Optional:    true,
 						Computed:    true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.UseStateForUnknown(),
+						},
 					},
 					"memory": schema.StringAttribute{
 						Description: "Memory limit (e.g., 16Gi, 512Mi).",
 						Optional:    true,
 						Computed:    true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.UseStateForUnknown(),
+						},
 					},
 					"storage": schema.StringAttribute{
 						Description: "Storage limit (e.g., 100Gi).",
 						Optional:    true,
 						Computed:    true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.UseStateForUnknown(),
+						},
 					},
 				},
 			},
@@ -353,7 +371,19 @@ func (r *ClusterResource) Update(ctx context.Context, req resource.UpdateRequest
 	patchReq := client.PatchClusterRequest{}
 	hasChanges := false
 
-	if !plan.Version.Equal(state.Version) {
+	// Only send `version` when the planned value is KNOWN and actually
+	// differs from prior state. `version` is Optional+Computed: when the
+	// user leaves it unset and edits an unrelated attribute, the framework
+	// can plan it as unknown ("known after apply"). An unknown value is not
+	// Equal to the known prior state, so without the IsUnknown guard the
+	// branch would fire and ValueString() would yield "" — serialising
+	// `{"version":""}` (omitempty only drops nil pointers, not a pointer to
+	// ""). kupe-api would then resolve "" to a default version and silently
+	// upgrade/downgrade the tenant cluster's Kubernetes minor version on an
+	// edit the user never made to version. The UseStateForUnknown plan
+	// modifier on `version` normally keeps it known, but we guard here too
+	// so the wire body can never carry an unintended version change.
+	if !plan.Version.IsUnknown() && !plan.Version.Equal(state.Version) {
 		v := plan.Version.ValueString()
 		patchReq.Version = &v
 		hasChanges = true
