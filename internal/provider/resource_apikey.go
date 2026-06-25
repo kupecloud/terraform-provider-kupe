@@ -72,9 +72,20 @@ func (r *APIKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"expires_at": schema.StringAttribute{
-				Description: "Expiration time in RFC3339 format. Optional and immutable after creation.",
-				Optional:    true,
+				Description: "Expiration time in RFC3339 format. Optional and immutable after creation. " +
+					"If you omit it the server decides whether the key expires; the resolved value is " +
+					"reflected back into state.",
+				Optional: true,
+				// Computed so a server-assigned expiry (when the user leaves
+				// this null) is recorded in state without Terraform seeing a
+				// null→non-null diff that would otherwise force a perpetual
+				// destroy/recreate of the credential (RequiresReplace). The
+				// value is still immutable post-create: a user-driven change
+				// forces replacement, while UseStateForUnknown keeps the
+				// server-resolved value stable across unrelated re-plans.
+				Computed: true,
 				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
@@ -141,6 +152,11 @@ func (r *APIKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 	plan.Key = types.StringValue(apiKey.Key)
 	plan.CreatedBy = types.StringValue(apiKey.CreatedBy)
 	plan.CreatedAt = types.StringValue(apiKey.CreatedAt)
+	// expires_at is Computed: record the server-resolved value (which may
+	// be empty if the key never expires) so state matches what the server
+	// returned. Without this the framework would error on an unknown
+	// Computed value left unset after apply.
+	plan.ExpiresAt = stringOrNull(apiKey.ExpiresAt)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -168,9 +184,11 @@ func (r *APIKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 		state.Role = types.StringValue(k.Role)
 		state.CreatedBy = types.StringValue(k.CreatedBy)
 		state.CreatedAt = types.StringValue(k.CreatedAt)
-		if k.ExpiresAt != "" {
-			state.ExpiresAt = types.StringValue(k.ExpiresAt)
-		}
+		// Mirror the server's expiry exactly — including clearing to null
+		// when the server reports none — so drift is detected honestly
+		// rather than masked by a stale value. expires_at is Computed, so
+		// writing null here is valid even when config omitted it.
+		state.ExpiresAt = stringOrNull(k.ExpiresAt)
 		// Key is only available on creation — preserve from state
 		resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 		return

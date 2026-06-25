@@ -30,7 +30,7 @@ resource "kupe_api_key" "cicd" {
 
 ### Optional
 
-- `expires_at` (String) Expiration time in RFC3339 format. Optional and immutable after creation.
+- `expires_at` (String) Expiration time in RFC3339 format. Optional and immutable after creation. If you omit it the server decides whether the key expires; the resolved value is reflected back into state.
 
 ### Read-Only
 
