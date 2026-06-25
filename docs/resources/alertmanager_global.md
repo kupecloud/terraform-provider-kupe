@@ -21,11 +21,11 @@ Manages the `global` section of the Alertmanager configuration for a tenant. Sin
 # for the complete field list.
 resource "kupe_alertmanager_global" "main" {
   body_json = jsonencode({
-    smtp_from         = "alerts@example.com"
-    smtp_smarthost    = "smtp.example.com:587"
+    smtp_from          = "alerts@example.com"
+    smtp_smarthost     = "smtp.example.com:587"
     smtp_auth_username = "alerts@example.com"
     smtp_auth_password = var.smtp_password
-    resolve_timeout   = "5m"
+    resolve_timeout    = "5m"
   })
 }
 
