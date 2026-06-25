@@ -93,7 +93,7 @@ resource "kupe_alertmanager_routes" "main" {
 
 ### Required
 
-- `routes_json` (String) Ordered list of routes as a JSON array. Use `jsonencode([...])` to author. Each element follows the Alertmanager Route schema (receiver, matchers, group_by, group_wait, group_interval, repeat_interval, nested routes).
+- `routes_json` (String, Sensitive) Ordered list of routes as a JSON array. Use `jsonencode([...])` to author. Each element follows the Alertmanager Route schema (receiver, matchers, group_by, group_wait, group_interval, repeat_interval, nested routes).
 
 ### Read-Only
 

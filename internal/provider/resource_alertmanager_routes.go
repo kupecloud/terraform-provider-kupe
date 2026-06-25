@@ -99,7 +99,12 @@ func (r *AlertmanagerRoutesResource) Schema(_ context.Context, _ resource.Schema
 				Description: "Ordered list of routes as a JSON array. Use `jsonencode([...])` to " +
 					"author. Each element follows the Alertmanager Route schema (receiver, matchers, " +
 					"group_by, group_wait, group_interval, repeat_interval, nested routes).",
-				Required:   true,
+				Required: true,
+				// Marked Sensitive for parity with the receiver/global body_json
+				// fields: route matchers can carry sensitive label values, so we
+				// keep them out of plan output. (State is still plaintext — see
+				// the body_json descriptions for the same caveat.)
+				Sensitive:  true,
 				CustomType: JSONStringTypeInstance,
 			},
 			"etag": schema.StringAttribute{
