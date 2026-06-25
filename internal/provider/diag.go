@@ -90,6 +90,17 @@ func apiErrorDetail(err error) string {
 	}
 
 	base := fmt.Sprintf("kupe API returned %d: %s", apiErr.StatusCode, apiErr.Message)
+	// Surface the canonical error code (and field path, when present) so
+	// errors carry the same greppable, scriptable signal that warnings do
+	// (cluster Create uses the code as the warning summary). Codes like
+	// HA_DISABLE_UNSUPPORTED / CLUSTER_DEDICATED_UNSUPPORTED are stable
+	// identifiers users can quote to support or branch on.
+	if apiErr.Code != "" {
+		base += "\n\nError code: " + apiErr.Code
+		if apiErr.Field != "" {
+			base += "\nField: " + apiErr.Field
+		}
+	}
 	switch apiErr.StatusCode {
 	case http.StatusBadRequest:
 		// 400 covers two server-side outcomes that surface here:
