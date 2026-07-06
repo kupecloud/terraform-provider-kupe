@@ -284,7 +284,10 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 		rv := m.nextRV()
 		secret := map[string]any{
 			"name": name, "secretPath": body["secretPath"],
-			"sync":            body["sync"],
+			// Mirror kupe-api's transformSecret/sliceField contract: the
+			// response ALWAYS contains "sync": [] when no targets are set,
+			// never null/absent (kupe-api internal/server/handlers.go).
+			"sync":            sliceOrEmpty(body["sync"]),
 			"status":          map[string]any{"phase": "Pending"},
 			"resourceVersion": rv, "createdAt": "2024-01-01T00:00:00Z",
 		}
@@ -322,7 +325,7 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		mustDecodeJSON(r, &body)
 		if v, ok := body["sync"]; ok {
-			s["sync"] = v
+			s["sync"] = sliceOrEmpty(v)
 		}
 		rv := m.nextRV()
 		s["resourceVersion"] = rv
@@ -432,6 +435,15 @@ func strOrEmpty(v any) string {
 		return s
 	}
 	return ""
+}
+
+// sliceOrEmpty mirrors kupe-api's sliceField helper: a missing or null
+// slice field is always rendered as an empty (non-nil) array in responses.
+func sliceOrEmpty(v any) any {
+	if v == nil {
+		return []any{}
+	}
+	return v
 }
 
 // mockSecretKeyFragments mirrors kupe-api's alertmanager mask key matching

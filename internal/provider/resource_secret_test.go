@@ -49,6 +49,49 @@ func TestAccSecretResource(t *testing.T) {
 	})
 }
 
+// TestAccSecretResourceNoSync is the regression test for a kupe_secret
+// declared without a sync block. kupe-api always returns "sync": [] for a
+// secret with no targets (never null/absent — the mock mirrors this), so
+// the provider must preserve the planned null instead of writing an empty
+// list into state; mapping [] verbatim failed every apply with "Provider
+// produced inconsistent result after apply" and showed a perpetual
+// [] -> null diff on refresh. The step's automatic post-apply refresh/plan
+// asserts the no-perpetual-diff half.
+func TestAccSecretResourceNoSync(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccSecretNoSyncConfig(mock.url()),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("kupe_secret.nosync", "name", "api-token"),
+					resource.TestCheckResourceAttr("kupe_secret.nosync", "phase", "Active"),
+					// sync stays null — not an empty list.
+					resource.TestCheckNoResourceAttr("kupe_secret.nosync", "sync.#"),
+				),
+			},
+		},
+	})
+}
+
+func testAccSecretNoSyncConfig(host string) string {
+	return fmt.Sprintf(`
+provider "kupe" {
+  host    = %q
+  tenant  = "acme"
+  api_key = "kupe_test_key"
+}
+
+resource "kupe_secret" "nosync" {
+  name        = "api-token"
+  secret_path = "production/api-token"
+}
+`, host)
+}
+
 func testAccSecretConfig(host, cluster, namespace, secretName string) string {
 	secretNameBlock := ""
 	if secretName != "" {

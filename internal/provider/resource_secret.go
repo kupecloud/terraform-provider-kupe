@@ -385,11 +385,18 @@ func mapSecretToState(s *client.Secret, etag string, state *SecretResourceModel,
 		state.Phase = types.StringValue("")
 	}
 
-	// Distinguish null (field absent from API) from empty (user explicitly
-	// set sync = []). The API returns nil/absent when no sync has ever been
-	// set, but returns an empty array when the user cleared it. Mapping both
-	// to ListNull would cause perpetual diffs for sync = [] configs.
-	if s.Sync == nil {
+	// kupe-api always returns "sync": [] when a secret has no sync targets
+	// (transformSecret builds the field via sliceField, which never emits
+	// null/absent), so the wire response cannot distinguish "sync never
+	// set" from "user cleared sync". Disambiguate from the model instead:
+	// state holds the planned (Create/Update) or prior (Read) value, so
+	// when the server reports no targets and that value is null, keep
+	// null. Otherwise map what the server sent — including an empty list
+	// for explicit sync = [] configs. Without this, a config omitting
+	// sync (planned value: null) fails every apply with "Provider
+	// produced inconsistent result after apply" and shows a perpetual
+	// [] -> null diff on refresh.
+	if len(s.Sync) == 0 && state.Sync.IsNull() {
 		state.Sync = types.ListNull(types.ObjectType{AttrTypes: syncTargetAttrTypes})
 	} else {
 		syncElements := make([]attr.Value, 0, len(s.Sync))
