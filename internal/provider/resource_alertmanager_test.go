@@ -49,6 +49,73 @@ func TestAccAlertmanagerReceiverResource(t *testing.T) {
 	})
 }
 
+// TestAccAlertmanagerReceiverMaskedSecrets is the regression test for the
+// kupe-api KA-1 secret masking: the server replaces credential-bearing
+// values ("api_url", passwords, tokens, …) with the sentinel "<secret>" in
+// both GET and PUT responses. The provider must (a) keep the planned
+// body_json on Create/Update instead of storing the masked echo (apply
+// consistency), (b) unmask Reads against prior state so refresh produces
+// no perpetual diff, and (c) still pick up genuine remote changes to
+// non-secret fields. The mock masks its responses exactly like kupe-api.
+func TestAccAlertmanagerReceiverMaskedSecrets(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+
+	const apiURL = "https://hooks.slack.com/services/T00/B00/secret123"
+	bodyAlerts := fmt.Sprintf(`{"slack_configs":[{"api_url":%q,"channel":"#alerts"}]}`, apiURL)
+	bodyNoisy := fmt.Sprintf(`{"slack_configs":[{"api_url":%q,"channel":"#noisy"}]}`, apiURL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		Steps: []resource.TestStep{
+			// Create: previously failed with "Provider produced
+			// inconsistent result after apply" because the masked PUT echo
+			// was mapped into state. The step's automatic post-apply
+			// refresh/plan also proves the masked GET does not produce a
+			// perpetual diff.
+			{
+				Config: testAccReceiverConfig(mock.url(), bodyAlerts),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("kupe_alertmanager_receiver.slack", "body_json", bodyAlerts),
+					resource.TestCheckResourceAttrSet("kupe_alertmanager_receiver.slack", "etag"),
+				),
+			},
+			// Update of a non-secret field alongside the (still masked)
+			// secret: the real URL must survive in state.
+			{
+				Config: testAccReceiverConfig(mock.url(), bodyNoisy),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("kupe_alertmanager_receiver.slack", "body_json", bodyNoisy),
+				),
+			},
+			// Genuine remote change to a non-secret field must still be
+			// detected: refresh picks up the new channel while restoring
+			// the real api_url from prior state (keys alphabetised by the
+			// Read round-trip through encoding/json).
+			{
+				PreConfig: func() {
+					mock.mutateReceiver("slack", func(r map[string]any) {
+						r["slack_configs"].([]any)[0].(map[string]any)["channel"] = "#ops"
+					})
+				},
+				RefreshState:       true,
+				ExpectNonEmptyPlan: true,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("kupe_alertmanager_receiver.slack", "body_json",
+						fmt.Sprintf(`{"slack_configs":[{"api_url":%q,"channel":"#ops"}]}`, apiURL)),
+				),
+			},
+			// Applying the config again converges the remote drift.
+			{
+				Config: testAccReceiverConfig(mock.url(), bodyNoisy),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("kupe_alertmanager_receiver.slack", "body_json", bodyNoisy),
+				),
+			},
+		},
+	})
+}
+
 func testAccReceiverConfig(host, body string) string {
 	return fmt.Sprintf(`
 provider "kupe" {
@@ -150,6 +217,40 @@ func TestAccAlertmanagerGlobalResource(t *testing.T) {
 				ImportStateVerify:       true,
 				ImportStateId:           "alertmanager-global",
 				ImportStateVerifyIgnore: []string{"body_json"},
+			},
+		},
+	})
+}
+
+// TestAccAlertmanagerGlobalMaskedSecrets is the global-section companion
+// to TestAccAlertmanagerReceiverMaskedSecrets: smtp_auth_password and
+// slack_api_url come back masked from the mock on every response, so
+// apply consistency and refresh stability both depend on the provider
+// keeping planned values on write and unmasking reads against state.
+func TestAccAlertmanagerGlobalMaskedSecrets(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+
+	first := `{"smtp_from":"alerts@example.com","smtp_auth_password":"hunter2","slack_api_url":"https://hooks.slack.com/services/T00/B00/secret123"}`
+	second := `{"smtp_from":"ops@example.com","smtp_auth_password":"hunter2","slack_api_url":"https://hooks.slack.com/services/T00/B00/secret123"}`
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccGlobalConfig(mock.url(), first),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("kupe_alertmanager_global.main", "body_json", first),
+					resource.TestCheckResourceAttrSet("kupe_alertmanager_global.main", "etag"),
+				),
+			},
+			// Update a non-secret field; the credentials must survive both
+			// the masked PUT echo and the post-apply refresh.
+			{
+				Config: testAccGlobalConfig(mock.url(), second),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("kupe_alertmanager_global.main", "body_json", second),
+				),
 			},
 		},
 	})

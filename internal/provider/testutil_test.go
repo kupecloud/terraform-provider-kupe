@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
@@ -64,6 +65,18 @@ func newMockKupeAPI() *mockKupeAPI {
 
 func (m *mockKupeAPI) close()      { m.server.Close() }
 func (m *mockKupeAPI) url() string { return m.server.URL }
+
+// mutateReceiver edits a stored receiver under the mock's lock, simulating
+// an out-of-band change (Console UI, another API client). Bumps the shared
+// alertmanager ETag like any real write would.
+func (m *mockKupeAPI) mutateReceiver(name string, f func(map[string]any)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if r, ok := m.amReceivers[name]; ok {
+		f(r)
+		m.amETag = `"` + m.nextRV() + `"`
+	}
+}
 
 func (m *mockKupeAPI) nextRV() string {
 	m.rvCounter++
@@ -326,7 +339,10 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 			mustEncodeJSON(w, map[string]string{"error": "not found"})
 		}
 
-	// Alertmanager — receivers
+	// Alertmanager — receivers. Both PUT echoes and GETs mask
+	// credential-bearing values with "<secret>", mirroring kupe-api's
+	// KA-1 masking (internal/alertmanager/mask.go); stored state stays
+	// unmasked, exactly like the real server.
 	case r.Method == "PUT" && matchPath(r.URL.Path, "/api/v1/tenants/acme/alertmanager/receivers/"):
 		name := lastSegment(r.URL.Path)
 		var body map[string]any
@@ -335,7 +351,7 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 		m.amReceivers[name] = body
 		m.amETag = `"` + m.nextRV() + `"`
 		w.Header().Set("ETag", m.amETag)
-		mustEncodeJSON(w, body)
+		mustEncodeJSON(w, mockMaskSecrets(body))
 
 	case r.Method == "GET" && matchPath(r.URL.Path, "/api/v1/tenants/acme/alertmanager/receivers/"):
 		name := lastSegment(r.URL.Path)
@@ -346,7 +362,7 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("ETag", m.amETag)
-		mustEncodeJSON(w, recv)
+		mustEncodeJSON(w, mockMaskSecrets(recv))
 
 	case r.Method == "DELETE" && matchPath(r.URL.Path, "/api/v1/tenants/acme/alertmanager/receivers/"):
 		name := lastSegment(r.URL.Path)
@@ -377,10 +393,10 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("ETag", m.amETag)
 		mustEncodeJSON(w, map[string]any{"items": m.amRoutes})
 
-	// Alertmanager — global
+	// Alertmanager — global. Masked in responses like receivers above.
 	case r.Method == "GET" && r.URL.Path == "/api/v1/tenants/acme/alertmanager/global":
 		w.Header().Set("ETag", m.amETag)
-		mustEncodeJSON(w, m.amGlobal)
+		mustEncodeJSON(w, mockMaskSecrets(m.amGlobal))
 
 	case r.Method == "PUT" && r.URL.Path == "/api/v1/tenants/acme/alertmanager/global":
 		var body map[string]any
@@ -388,7 +404,7 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 		m.amGlobal = body
 		m.amETag = `"` + m.nextRV() + `"`
 		w.Header().Set("ETag", m.amETag)
-		mustEncodeJSON(w, m.amGlobal)
+		mustEncodeJSON(w, mockMaskSecrets(m.amGlobal))
 
 	default:
 		w.WriteHeader(404)
@@ -416,6 +432,62 @@ func strOrEmpty(v any) string {
 		return s
 	}
 	return ""
+}
+
+// mockSecretKeyFragments mirrors kupe-api's alertmanager mask key matching
+// closely enough for tests: url / *_url keys plus well-known credential
+// fragments (internal/alertmanager/mask.go isSecretKey).
+var mockSecretKeyFragments = []string{
+	"password", "secret", "token", "credential",
+	"api_key", "apikey", "routing_key", "service_key", "auth_key", "_key",
+}
+
+func mockIsSecretKey(key string) bool {
+	lower := strings.ToLower(key)
+	if lower == "url" || strings.HasSuffix(lower, "_url") {
+		return true
+	}
+	for _, frag := range mockSecretKeyFragments {
+		if strings.Contains(lower, frag) {
+			return true
+		}
+	}
+	return false
+}
+
+// mockMaskSecrets returns a deep-masked copy of an alertmanager body,
+// replacing every credential-bearing value with the "<secret>" sentinel,
+// mirroring kupe-api's KA-1 read/write-echo masking. The input is never
+// mutated — the mock's stored state stays unmasked like the real server's.
+func mockMaskSecrets(body map[string]any) map[string]any {
+	if body == nil {
+		return nil
+	}
+	masked, _ := mockMaskValue(body).(map[string]any)
+	return masked
+}
+
+func mockMaskValue(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, child := range t {
+			if k != "name" && mockIsSecretKey(k) && child != nil {
+				out[k] = "<secret>"
+				continue
+			}
+			out[k] = mockMaskValue(child)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, child := range t {
+			out[i] = mockMaskValue(child)
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 // testAccProtoV6ProviderFactories returns provider factories for acceptance tests.

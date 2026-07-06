@@ -56,10 +56,12 @@ import (
 //
 // # Drift detection
 //
-// State stores the canonical JSON round-tripped through encoding/json.
-// After a successful Read, the stored body_json key order is sorted
-// alphabetically by encoding/json's deterministic marshaller, so plans
-// remain stable across reads.
+// After Create/Update, state stores the planned body_json verbatim:
+// kupe-api masks credential-bearing values with "<secret>" in write
+// echoes (KA-1), so the echo cannot be mapped back. After a successful
+// Read, state stores the fetched body unmasked against the prior state
+// (see alertmanager_unmask.go), round-tripped through encoding/json with
+// keys sorted alphabetically, so plans remain stable across reads.
 type AlertmanagerReceiverResource struct {
 	client *client.Client
 }
@@ -182,15 +184,17 @@ func (r *AlertmanagerReceiverResource) Create(ctx context.Context, req resource.
 		resp.Diagnostics.AddError("invalid receiver body", err.Error())
 		return
 	}
-	out, etag, err := r.client.PutAlertmanagerReceiver(ctx, plan.Name.ValueString(), "", body)
+	// kupe-api masks credential-bearing values with "<secret>" in the PUT
+	// echo (KA-1), so the response body carries no information the plan
+	// does not already have. Keep the planned body_json and take only the
+	// ETag — mapping the masked echo would fail the apply with
+	// "inconsistent result after apply". See alertmanager_unmask.go.
+	_, etag, err := r.client.PutAlertmanagerReceiver(ctx, plan.Name.ValueString(), "", body)
 	if err != nil {
 		resp.Diagnostics.AddError("failed to create alertmanager receiver", apiErrorDetail(err))
 		return
 	}
-	if err := mapReceiverToState(plan.Name.ValueString(), out, etag, &plan); err != nil {
-		resp.Diagnostics.AddError("failed to render receiver state", apiErrorDetail(err))
-		return
-	}
+	plan.ETag = types.StringValue(etag)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -209,6 +213,12 @@ func (r *AlertmanagerReceiverResource) Read(ctx context.Context, req resource.Re
 		resp.Diagnostics.AddError("failed to read alertmanager receiver", apiErrorDetail(err))
 		return
 	}
+	// The fetched body arrives with secrets masked as "<secret>" (KA-1).
+	// Substitute the values recorded in state at the last write so masked
+	// fields cannot produce false drift, while genuine remote changes to
+	// non-secret fields (and secret fields added outside Terraform) still
+	// surface. See alertmanager_unmask.go.
+	out = client.AlertmanagerReceiver(unmaskBodyAgainstState(out, state.BodyJSON.ValueString()))
 	if err := mapReceiverToState(state.Name.ValueString(), out, etag, &state); err != nil {
 		resp.Diagnostics.AddError("failed to render receiver state", apiErrorDetail(err))
 		return
@@ -228,15 +238,14 @@ func (r *AlertmanagerReceiverResource) Update(ctx context.Context, req resource.
 		resp.Diagnostics.AddError("invalid receiver body", err.Error())
 		return
 	}
-	out, etag, err := r.client.PutAlertmanagerReceiver(ctx, plan.Name.ValueString(), state.ETag.ValueString(), body)
+	// As in Create: the PUT echo is masked (KA-1), so keep the planned
+	// body_json and take only the ETag.
+	_, etag, err := r.client.PutAlertmanagerReceiver(ctx, plan.Name.ValueString(), state.ETag.ValueString(), body)
 	if err != nil {
 		resp.Diagnostics.AddError("failed to update alertmanager receiver", apiErrorDetail(err))
 		return
 	}
-	if err := mapReceiverToState(plan.Name.ValueString(), out, etag, &plan); err != nil {
-		resp.Diagnostics.AddError("failed to render receiver state", apiErrorDetail(err))
-		return
-	}
+	plan.ETag = types.StringValue(etag)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 

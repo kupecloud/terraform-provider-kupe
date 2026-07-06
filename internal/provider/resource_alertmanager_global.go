@@ -139,15 +139,18 @@ func (r *AlertmanagerGlobalResource) Create(ctx context.Context, req resource.Cr
 		resp.Diagnostics.AddError("invalid global body", err.Error())
 		return
 	}
-	out, etag, err := r.client.PutAlertmanagerGlobal(ctx, "", body)
+	// kupe-api masks credential-bearing values with "<secret>" in the PUT
+	// echo (KA-1), so the response body carries no information the plan
+	// does not already have. Keep the planned body_json and take only the
+	// ETag — mapping the masked echo would fail the apply with
+	// "inconsistent result after apply". See alertmanager_unmask.go.
+	_, etag, err := r.client.PutAlertmanagerGlobal(ctx, "", body)
 	if err != nil {
 		resp.Diagnostics.AddError("failed to create alertmanager global", apiErrorDetail(err))
 		return
 	}
-	if err := mapGlobalToState(out, etag, &plan); err != nil {
-		resp.Diagnostics.AddError("failed to render global state", apiErrorDetail(err))
-		return
-	}
+	plan.ID = types.StringValue("alertmanager-global")
+	plan.ETag = types.StringValue(etag)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -166,6 +169,12 @@ func (r *AlertmanagerGlobalResource) Read(ctx context.Context, req resource.Read
 		resp.Diagnostics.AddError("failed to read alertmanager global", apiErrorDetail(err))
 		return
 	}
+	// The fetched body arrives with secrets masked as "<secret>" (KA-1).
+	// Substitute the values recorded in state at the last write so masked
+	// fields cannot produce false drift, while genuine remote changes to
+	// non-secret fields (and secret fields added outside Terraform) still
+	// surface. See alertmanager_unmask.go.
+	out = client.AlertmanagerGlobal(unmaskBodyAgainstState(out, state.BodyJSON.ValueString()))
 	if err := mapGlobalToState(out, etag, &state); err != nil {
 		resp.Diagnostics.AddError("failed to render global state", apiErrorDetail(err))
 		return
@@ -185,15 +194,15 @@ func (r *AlertmanagerGlobalResource) Update(ctx context.Context, req resource.Up
 		resp.Diagnostics.AddError("invalid global body", err.Error())
 		return
 	}
-	out, etag, err := r.client.PutAlertmanagerGlobal(ctx, state.ETag.ValueString(), body)
+	// As in Create: the PUT echo is masked (KA-1), so keep the planned
+	// body_json and take only the ETag.
+	_, etag, err := r.client.PutAlertmanagerGlobal(ctx, state.ETag.ValueString(), body)
 	if err != nil {
 		resp.Diagnostics.AddError("failed to update alertmanager global", apiErrorDetail(err))
 		return
 	}
-	if err := mapGlobalToState(out, etag, &plan); err != nil {
-		resp.Diagnostics.AddError("failed to render global state", apiErrorDetail(err))
-		return
-	}
+	plan.ID = types.StringValue("alertmanager-global")
+	plan.ETag = types.StringValue(etag)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
