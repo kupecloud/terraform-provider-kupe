@@ -255,6 +255,46 @@ func TestRetryOnTransient5xx(t *testing.T) {
 	}
 }
 
+// TestRedirectTreatedAsError covers MEDIUM-1: a 3xx response must surface
+// as an error, never as a silent success. The client refuses to follow
+// redirects (CheckRedirect returns ErrUseLastResponse), so requestWithETag
+// receives the raw 3xx; without the 2xx-only success check a DELETE/PUT
+// against a redirecting endpoint would return nil error and drop the
+// resource from state while the server never processed the mutation.
+func TestRedirectTreatedAsError(t *testing.T) {
+	for _, status := range []int{
+		http.StatusMovedPermanently,  // 301
+		http.StatusFound,             // 302
+		http.StatusTemporaryRedirect, // 307
+		http.StatusPermanentRedirect, // 308
+	} {
+		mock := newMockAPI()
+		mock.on("DELETE", "/api/v1/tenants/acme/clusters/prod", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Location", "https://elsewhere.example.com/")
+			w.WriteHeader(status)
+		})
+
+		c := mock.client("acme")
+		err := c.DeleteCluster(context.Background(), "prod")
+		if err == nil {
+			mock.close()
+			t.Fatalf("status %d: expected error, got nil (redirect silently treated as success)", status)
+		}
+		var apiErr *APIError
+		if !errors.As(err, &apiErr) {
+			mock.close()
+			t.Fatalf("status %d: expected *APIError, got %T", status, err)
+		}
+		if apiErr.StatusCode != status {
+			t.Errorf("status %d: expected APIError.StatusCode=%d, got %d", status, status, apiErr.StatusCode)
+		}
+		if apiErr.Message == "" {
+			t.Errorf("status %d: expected non-empty message (status text fallback)", status)
+		}
+		mock.close()
+	}
+}
+
 // TestNoRetryOn4xx confirms client errors are NOT retried (only the first
 // attempt is made) — a 404 should surface immediately as a typed *APIError.
 func TestNoRetryOn4xx(t *testing.T) {

@@ -80,17 +80,28 @@ func New(baseURL, tenant, token string) *Client {
 	// PUT) and the Authorization bearer header to whatever host the redirect
 	// points at. We constrain the base host in normalizeHost; refusing
 	// redirects here closes the replay-to-unintended-host surface entirely.
-	// ErrUseLastResponse makes Do return the 3xx response as-is, which our
-	// >=400 / 2xx handling treats as a non-2xx (surfaced to the user).
-	rc.HTTPClient.CheckRedirect = func(*http.Request, []*http.Request) error {
+	// ErrUseLastResponse makes Do return the 3xx response as-is, which
+	// requestWithETag's non-2xx handling surfaces to the user as an error
+	// rather than silently accepting the redirect as a successful write.
+	noRedirect := func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}
+	rc.HTTPClient.CheckRedirect = noRedirect
+
+	// StandardClient() wraps the retrying transport in a fresh *http.Client
+	// whose own redirect policy defaults to "follow". Without setting it, a
+	// 3xx returned by the transport would be followed by THIS outer client
+	// (replaying the request to the redirect target and, if that target
+	// answers 2xx, masking a never-processed mutation as success). Refuse
+	// redirects on the outer client too so the 3xx reaches requestWithETag.
+	std := rc.StandardClient()
+	std.CheckRedirect = noRedirect
 
 	return &Client{
 		baseURL:    baseURL,
 		tenant:     tenant,
 		token:      token,
-		httpClient: rc.StandardClient(),
+		httpClient: std,
 	}
 }
 
@@ -207,7 +218,14 @@ func (c *Client) requestWithETag(ctx context.Context, method, path, etag string,
 		return "", fmt.Errorf("reading response: %w", err)
 	}
 
-	if resp.StatusCode >= 400 {
+	// Only a 2xx is a success. Anything else — including a 3xx the client
+	// was handed because CheckRedirect refuses to follow redirects — is an
+	// error. Treating a 3xx as success would let a DELETE/PUT/POST against a
+	// redirecting endpoint (trailing-slash normalisation, http→https on a
+	// misconfigured host, a proxy/ingress redirect) "succeed" while the
+	// server never processed the mutation, dropping the resource from state
+	// or writing a zero-valued object (orphaned billable clusters).
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		apiErr := &APIError{StatusCode: resp.StatusCode, Message: string(respBody)}
 		// Single decode handles both shapes: structured envelopes carry
 		// Code (canonical) while legacy responses only carry Error. If the
@@ -231,6 +249,12 @@ func (c *Client) requestWithETag(ctx context.Context, method, path, etag string,
 			case env.Message != "":
 				apiErr.Message = env.Message
 			}
+		}
+		// A redirect (or any status with an empty/non-JSON body) leaves
+		// Message blank; fall back to the HTTP status text so the user sees
+		// e.g. "301 Moved Permanently" instead of an empty error.
+		if apiErr.Message == "" {
+			apiErr.Message = http.StatusText(resp.StatusCode)
 		}
 		return "", apiErr
 	}
