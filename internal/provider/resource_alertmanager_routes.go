@@ -63,7 +63,7 @@ type AlertmanagerRoutesResource struct {
 
 type AlertmanagerRoutesResourceModel struct {
 	ID         types.String    `tfsdk:"id"`
-	RoutesJSON JSONStringValue `tfsdk:"routes_json"`
+	RoutesJSON RoutesJSONValue `tfsdk:"routes_json"`
 	ETag       types.String    `tfsdk:"etag"`
 }
 
@@ -105,7 +105,7 @@ func (r *AlertmanagerRoutesResource) Schema(_ context.Context, _ resource.Schema
 				// keep them out of plan output. (State is still plaintext — see
 				// the body_json descriptions for the same caveat.)
 				Sensitive:  true,
-				CustomType: JSONStringTypeInstance,
+				CustomType: RoutesJSONTypeInstance,
 			},
 			"etag": schema.StringAttribute{
 				Description: "Wrapper ETag from the most recent read or write. Used for optimistic " +
@@ -189,15 +189,19 @@ func (r *AlertmanagerRoutesResource) Create(ctx context.Context, req resource.Cr
 		)
 		return
 	}
-	out, etag, err := r.client.PutAlertmanagerRoutes(ctx, existingETag, routes)
+	// Keep the planned routes_json and take only the ETag. kupe-api decodes
+	// routes into typed omitempty structs, so its echo strips explicit
+	// zero-values (continue:false, empty match/group_by); mapping the echo
+	// back would fail the apply with "inconsistent result after apply". The
+	// RoutesJSONType semantic equality strips the same zero-values so a later
+	// Read of the stripped GET echo still produces no false drift (MEDIUM-4).
+	_, etag, err := r.client.PutAlertmanagerRoutes(ctx, existingETag, routes)
 	if err != nil {
 		resp.Diagnostics.AddError("failed to create alertmanager routes", apiErrorDetail(err))
 		return
 	}
-	if err := mapRoutesToState(out, etag, &plan); err != nil {
-		resp.Diagnostics.AddError("failed to render routes state", apiErrorDetail(err))
-		return
-	}
+	plan.ID = types.StringValue("alertmanager-routes")
+	plan.ETag = types.StringValue(etag)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -235,15 +239,15 @@ func (r *AlertmanagerRoutesResource) Update(ctx context.Context, req resource.Up
 		resp.Diagnostics.AddError("invalid routes", err.Error())
 		return
 	}
-	out, etag, err := r.client.PutAlertmanagerRoutes(ctx, state.ETag.ValueString(), routes)
+	// As in Create: keep the planned routes_json and take only the ETag; the
+	// echo strips zero-values (MEDIUM-4).
+	_, etag, err := r.client.PutAlertmanagerRoutes(ctx, state.ETag.ValueString(), routes)
 	if err != nil {
 		resp.Diagnostics.AddError("failed to update alertmanager routes", apiErrorDetail(err))
 		return
 	}
-	if err := mapRoutesToState(out, etag, &plan); err != nil {
-		resp.Diagnostics.AddError("failed to render routes state", apiErrorDetail(err))
-		return
-	}
+	plan.ID = types.StringValue("alertmanager-routes")
+	plan.ETag = types.StringValue(etag)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -273,6 +277,6 @@ func mapRoutesToState(routes []json.RawMessage, etag string, state *Alertmanager
 	if err != nil {
 		return err
 	}
-	state.RoutesJSON = JSONStringValue{StringValue: basetypes.NewStringValue(body)}
+	state.RoutesJSON = RoutesJSONValue{StringValue: basetypes.NewStringValue(body)}
 	return nil
 }

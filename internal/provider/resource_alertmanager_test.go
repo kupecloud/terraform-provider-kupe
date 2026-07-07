@@ -193,6 +193,43 @@ func TestAccAlertmanagerRoutesResource(t *testing.T) {
 	})
 }
 
+// TestAccAlertmanagerRoutesZeroValues covers MEDIUM-4: an explicit
+// `continue:false` and an empty `match:{}` are omitempty zero-values that
+// kupe-api strips from its typed echo and subsequent GETs. Before the fix,
+// Create failed with "Provider produced inconsistent result after apply"
+// (the stripped echo was mapped into state) and a refresh showed perpetual
+// drift. With keep-planned-on-write plus RoutesJSONType zero-normalisation:
+// (a) Create stores the planned routes_json verbatim (apply consistency +
+// the step's post-apply idempotency plan is empty), and (b) a RefreshState
+// against the stripped GET still plans empty.
+func TestAccAlertmanagerRoutesZeroValues(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+
+	cfg := `[{"receiver":"slack","matchers":["severity=\"critical\""],"continue":false,"match":{}}]`
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccRoutesConfig(mock.url(), cfg),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					// Planned value kept verbatim, zero-values included.
+					resource.TestCheckResourceAttr("kupe_alertmanager_routes.main", "routes_json", cfg),
+					resource.TestCheckResourceAttrSet("kupe_alertmanager_routes.main", "etag"),
+				),
+			},
+			// Refresh reads the stripped server echo into state; the plan
+			// against the original config (carried over from the prior step)
+			// must still be empty (no drift). A RefreshState step reuses the
+			// previous step's config and cannot set its own.
+			{
+				RefreshState: true,
+			},
+		},
+	})
+}
+
 // TestAccAlertmanagerRoutesCreateRejectsExisting covers MEDIUM-3 for the
 // routes singleton: a Create when the tenant already has a child route list
 // must error and direct the user to import rather than replacing the list.

@@ -415,10 +415,12 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 			Items []map[string]any `json:"items"`
 		}
 		mustDecodeJSON(r, &body)
-		m.amRoutes = body.Items
-		if m.amRoutes == nil {
-			m.amRoutes = []map[string]any{}
-		}
+		// kupe-api decodes routes into typed omitempty structs and
+		// re-marshals, so explicit zero-values (continue:false, empty
+		// match/group_by) are dropped from what it stores and echoes. Mirror
+		// that here so the MEDIUM-4 regression test exercises the real
+		// contract.
+		m.amRoutes = mockStripRouteZeros(body.Items)
 		m.amETag = `"` + m.nextRV() + `"`
 		w.Header().Set("ETag", m.amETag)
 		mustEncodeJSON(w, map[string]any{"items": m.amRoutes})
@@ -526,6 +528,61 @@ func mockMaskValue(v any) any {
 		return out
 	default:
 		return v
+	}
+}
+
+// mockStripRouteZeros mirrors kupe-api's omitempty routes echo: each stored
+// route has its JSON zero-values (false, "", null, [], {}) dropped. Elements
+// are kept positionally so ordering is preserved.
+func mockStripRouteZeros(items []map[string]any) []map[string]any {
+	out := make([]map[string]any, len(items))
+	for i, it := range items {
+		m, _ := mockStripZeroValue(it).(map[string]any)
+		if m == nil {
+			m = map[string]any{}
+		}
+		out[i] = m
+	}
+	return out
+}
+
+func mockStripZeroValue(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		out := map[string]any{}
+		for k, child := range t {
+			cs := mockStripZeroValue(child)
+			if mockIsZeroValue(cs) {
+				continue
+			}
+			out[k] = cs
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, child := range t {
+			out[i] = mockStripZeroValue(child)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+func mockIsZeroValue(v any) bool {
+	switch t := v.(type) {
+	case nil:
+		return true
+	case bool:
+		return !t
+	case string:
+		return t == ""
+	case []any:
+		return len(t) == 0
+	case map[string]any:
+		return len(t) == 0
+	default:
+		return false
 	}
 }
 
