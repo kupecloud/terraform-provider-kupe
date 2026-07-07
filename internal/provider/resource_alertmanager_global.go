@@ -139,12 +139,33 @@ func (r *AlertmanagerGlobalResource) Create(ctx context.Context, req resource.Cr
 		resp.Diagnostics.AddError("invalid global body", err.Error())
 		return
 	}
+	// GET first so an apply cannot silently clobber a global section
+	// authored elsewhere (Console UI, another workspace). The PUT replaces
+	// the whole section with no required If-Match, so without this a
+	// pre-existing config would be overwritten instead of erroring
+	// (MEDIUM-3). The fetched ETag is reused for the PUT below so the create
+	// itself is also race-safe. Note the GET echo is masked (KA-1), but the
+	// key SET is not, so a non-empty existing section is still detectable.
+	existing, existingETag, getErr := r.client.GetAlertmanagerGlobal(ctx)
+	if getErr != nil && !client.IsNotFound(getErr) {
+		resp.Diagnostics.AddError("failed to check for existing alertmanager global", apiErrorDetail(getErr))
+		return
+	}
+	if len(existing) > 0 {
+		resp.Diagnostics.AddError(
+			"alertmanager global config already exists",
+			"the tenant already has an Alertmanager global section configured. This is a singleton "+
+				"resource; import the existing section instead of creating it:\n\n"+
+				"  terraform import kupe_alertmanager_global.<name> alertmanager-global",
+		)
+		return
+	}
 	// kupe-api masks credential-bearing values with "<secret>" in the PUT
 	// echo (KA-1), so the response body carries no information the plan
 	// does not already have. Keep the planned body_json and take only the
 	// ETag — mapping the masked echo would fail the apply with
 	// "inconsistent result after apply". See alertmanager_unmask.go.
-	_, etag, err := r.client.PutAlertmanagerGlobal(ctx, "", body)
+	_, etag, err := r.client.PutAlertmanagerGlobal(ctx, existingETag, body)
 	if err != nil {
 		resp.Diagnostics.AddError("failed to create alertmanager global", apiErrorDetail(err))
 		return

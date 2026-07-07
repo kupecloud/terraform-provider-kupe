@@ -184,6 +184,25 @@ func (r *AlertmanagerReceiverResource) Create(ctx context.Context, req resource.
 		resp.Diagnostics.AddError("invalid receiver body", err.Error())
 		return
 	}
+	// GET first so an apply cannot silently clobber a receiver authored
+	// elsewhere (Console UI, another workspace). kupe-api treats PUT as
+	// create-or-replace with no required If-Match, so without this a
+	// pre-existing receiver of the same name would be overwritten instead
+	// of erroring — destructive loss of tenant alerting config through a
+	// routine apply. Terraform create semantics require erroring and
+	// directing the user to import (MEDIUM-3).
+	if _, _, getErr := r.client.GetAlertmanagerReceiver(ctx, plan.Name.ValueString()); getErr == nil {
+		resp.Diagnostics.AddError(
+			"alertmanager receiver already exists",
+			fmt.Sprintf("a receiver named %q already exists on the server. Import it instead of "+
+				"creating it:\n\n  terraform import kupe_alertmanager_receiver.<name> %s",
+				plan.Name.ValueString(), plan.Name.ValueString()),
+		)
+		return
+	} else if !client.IsNotFound(getErr) {
+		resp.Diagnostics.AddError("failed to check for existing alertmanager receiver", apiErrorDetail(getErr))
+		return
+	}
 	// kupe-api masks credential-bearing values with "<secret>" in the PUT
 	// echo (KA-1), so the response body carries no information the plan
 	// does not already have. Keep the planned body_json and take only the

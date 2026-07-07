@@ -169,7 +169,27 @@ func (r *AlertmanagerRoutesResource) Create(ctx context.Context, req resource.Cr
 		resp.Diagnostics.AddError("invalid routes", err.Error())
 		return
 	}
-	out, etag, err := r.client.PutAlertmanagerRoutes(ctx, "", routes)
+	// GET first so an apply cannot silently clobber a route list authored
+	// elsewhere (Console UI, another workspace). The PUT replaces the whole
+	// child route list with no required If-Match, so without this a
+	// pre-existing list would be overwritten instead of erroring (MEDIUM-3).
+	// The fetched ETag is reused for the PUT below so the create itself is
+	// also race-safe against a concurrent writer.
+	existing, existingETag, getErr := r.client.GetAlertmanagerRoutes(ctx)
+	if getErr != nil && !client.IsNotFound(getErr) {
+		resp.Diagnostics.AddError("failed to check for existing alertmanager routes", apiErrorDetail(getErr))
+		return
+	}
+	if len(existing) > 0 {
+		resp.Diagnostics.AddError(
+			"alertmanager routes already exist",
+			"the tenant already has Alertmanager child routes configured. This is a singleton "+
+				"resource; import the existing list instead of creating it:\n\n"+
+				"  terraform import kupe_alertmanager_routes.<name> alertmanager-routes",
+		)
+		return
+	}
+	out, etag, err := r.client.PutAlertmanagerRoutes(ctx, existingETag, routes)
 	if err != nil {
 		resp.Diagnostics.AddError("failed to create alertmanager routes", apiErrorDetail(err))
 		return

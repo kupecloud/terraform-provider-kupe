@@ -78,6 +78,33 @@ func (m *mockKupeAPI) mutateReceiver(name string, f func(map[string]any)) {
 	}
 }
 
+// seedReceiver / seedRoutes / seedGlobal pre-populate alertmanager state to
+// simulate config authored out-of-band (Console UI, another workspace)
+// before a terraform Create runs. Used by the MEDIUM-3 "Create must not
+// clobber a pre-existing config" tests. Each bumps the shared ETag like a
+// real write would.
+func (m *mockKupeAPI) seedReceiver(name string, body map[string]any) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	body["name"] = name
+	m.amReceivers[name] = body
+	m.amETag = `"` + m.nextRV() + `"`
+}
+
+func (m *mockKupeAPI) seedRoutes(routes []map[string]any) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.amRoutes = routes
+	m.amETag = `"` + m.nextRV() + `"`
+}
+
+func (m *mockKupeAPI) seedGlobal(g map[string]any) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.amGlobal = g
+	m.amETag = `"` + m.nextRV() + `"`
+}
+
 func (m *mockKupeAPI) nextRV() string {
 	m.rvCounter++
 	return fmt.Sprintf("%d", m.rvCounter)

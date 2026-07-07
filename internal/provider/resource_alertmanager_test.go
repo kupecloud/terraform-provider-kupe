@@ -2,6 +2,7 @@ package provider
 
 import (
 	"fmt"
+	"regexp"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -116,6 +117,28 @@ func TestAccAlertmanagerReceiverMaskedSecrets(t *testing.T) {
 	})
 }
 
+// TestAccAlertmanagerReceiverCreateRejectsExisting covers MEDIUM-3: a
+// Create against a receiver name that already exists on the server (authored
+// via the Console or another workspace) must error and direct the user to
+// import, not silently overwrite the pre-existing config.
+func TestAccAlertmanagerReceiverCreateRejectsExisting(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+	mock.seedReceiver("slack", map[string]any{
+		"slack_configs": []any{map[string]any{"channel": "#preexisting"}},
+	})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccReceiverConfig(mock.url(), `{"slack_configs":[{"channel":"#alerts"}]}`),
+				ExpectError: regexp.MustCompile(`already exists`),
+			},
+		},
+	})
+}
+
 func testAccReceiverConfig(host, body string) string {
 	return fmt.Sprintf(`
 provider "kupe" {
@@ -165,6 +188,25 @@ func TestAccAlertmanagerRoutesResource(t *testing.T) {
 				ImportStateVerify:       true,
 				ImportStateId:           "alertmanager-routes",
 				ImportStateVerifyIgnore: []string{"routes_json"},
+			},
+		},
+	})
+}
+
+// TestAccAlertmanagerRoutesCreateRejectsExisting covers MEDIUM-3 for the
+// routes singleton: a Create when the tenant already has a child route list
+// must error and direct the user to import rather than replacing the list.
+func TestAccAlertmanagerRoutesCreateRejectsExisting(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+	mock.seedRoutes([]map[string]any{{"receiver": "existing", "matchers": []any{`team="infra"`}}})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccRoutesConfig(mock.url(), `[{"receiver":"slack","matchers":["severity=\"critical\""]}]`),
+				ExpectError: regexp.MustCompile(`already exist`),
 			},
 		},
 	})
@@ -251,6 +293,25 @@ func TestAccAlertmanagerGlobalMaskedSecrets(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("kupe_alertmanager_global.main", "body_json", second),
 				),
+			},
+		},
+	})
+}
+
+// TestAccAlertmanagerGlobalCreateRejectsExisting covers MEDIUM-3 for the
+// global singleton: a Create when the tenant already has a non-empty global
+// section must error and direct the user to import.
+func TestAccAlertmanagerGlobalCreateRejectsExisting(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+	mock.seedGlobal(map[string]any{"smtp_from": "preexisting@example.com"})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccGlobalConfig(mock.url(), `{"smtp_from":"alerts@example.com"}`),
+				ExpectError: regexp.MustCompile(`already exists`),
 			},
 		},
 	})
