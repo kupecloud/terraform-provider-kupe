@@ -53,14 +53,36 @@ var (
 // Non-transient responses (2xx, 4xx other than 429) are returned on the
 // first attempt. Mutations stay safe under retry: PATCH carries an
 // If-Match ETag (a retried stale write 412s rather than double-applying),
-// and create/delete are GET-by-name idempotent or surface a 409 the caller
-// already handles.
+// DELETE is idempotent, and POST is never retried at all (POSTs mint new
+// server-side identity — a retried apikey POST would create a second live
+// credential the state never records). See the CheckRetry policy below.
 func New(baseURL, tenant, token string) *Client {
 	rc := retryablehttp.NewClient()
 	rc.RetryMax = retryMax
 	rc.RetryWaitMin = retryWaitMin
 	rc.RetryWaitMax = retryWaitMax
 	rc.Logger = nil // don't emit retryablehttp's default stderr logging
+	// Never retry a POST. POSTs to kupe-api are not idempotent: POST
+	// /apikeys mints a fresh id+secret on every call, so a retry after a
+	// committed-but-lost response (LB 502/504 after commit, client timeout)
+	// would create a SECOND live credential the state never records — an
+	// orphaned, valid admin key. POST create for named resources
+	// (cluster/secret/member) would instead surface a confusing 409 on the
+	// retry with the just-created resource missing from state. The default
+	// policy's transient-failure retries stay in force for idempotent
+	// methods (GET/PUT-with-If-Match/DELETE). requestWithETag tags POST
+	// requests via the request context; see noRetryContextKey.
+	rc.CheckRetry = func(ctx context.Context, resp *http.Response, err error) (bool, error) {
+		if v, _ := ctx.Value(noRetryContextKey{}).(bool); v {
+			// Honour context cancellation/deadline like the default policy,
+			// but never retry the request itself.
+			if ctx.Err() != nil {
+				return false, ctx.Err()
+			}
+			return false, nil
+		}
+		return retryablehttp.DefaultRetryPolicy(ctx, resp, err)
+	}
 	// On retry exhaustion, pass the final response straight through instead
 	// of wrapping it in retryablehttp's "giving up after N attempts" error.
 	// This keeps our >=400 decoding intact so callers still get a typed
@@ -173,6 +195,14 @@ func IsPreconditionFailed(err error) bool {
 	return false
 }
 
+// noRetryContextKey tags a request context to opt it out of the transport's
+// automatic retry. requestWithETag sets it for non-idempotent POSTs; the
+// CheckRetry policy in New reads it. Using the context (rather than
+// inspecting resp.Request.Method in CheckRetry) is deliberate: on a
+// connection error the response is nil, so the method would be unavailable
+// exactly in the committed-but-lost case a POST must not retry.
+type noRetryContextKey struct{}
+
 // request executes an HTTP request and decodes the JSON response.
 func (c *Client) request(ctx context.Context, method, path string, body, result any) (string, error) {
 	return c.requestWithETag(ctx, method, path, "", body, result)
@@ -181,6 +211,12 @@ func (c *Client) request(ctx context.Context, method, path string, body, result 
 // requestWithETag executes an HTTP request with optional If-Match header.
 // Returns the ETag from the response.
 func (c *Client) requestWithETag(ctx context.Context, method, path, etag string, body, result any) (string, error) {
+	// POSTs are non-idempotent (see the CheckRetry policy in New): tag the
+	// context so the transport does not retry them on a transient failure.
+	if method == http.MethodPost {
+		ctx = context.WithValue(ctx, noRetryContextKey{}, true)
+	}
+
 	var bodyReader io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)

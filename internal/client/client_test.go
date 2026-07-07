@@ -255,6 +255,56 @@ func TestRetryOnTransient5xx(t *testing.T) {
 	}
 }
 
+// TestNoRetryOnPost covers MEDIUM-2: a non-idempotent POST (here POST
+// /apikeys) must NOT be retried by the transport. A retried POST after a
+// committed-but-lost response would mint a second live credential the state
+// never records. The handler always 503s; the client must give up after a
+// single attempt and surface the error rather than retrying.
+func TestNoRetryOnPost(t *testing.T) {
+	mock := newMockAPI()
+	defer mock.close()
+
+	var attempts int32
+	mock.on("POST", "/api/v1/tenants/acme/apikeys", func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	})
+
+	c := mock.client("acme")
+	_, err := c.CreateAPIKey(context.Background(), CreateAPIKeyRequest{DisplayName: "ci", Role: "admin"})
+	if err == nil {
+		t.Fatal("expected error from persistent 503")
+	}
+	if got := atomic.LoadInt32(&attempts); got != 1 {
+		t.Errorf("expected exactly 1 attempt (POST must not retry), got %d", got)
+	}
+}
+
+// TestRetryStillAppliesToIdempotentMethods guards that disabling POST retry
+// did not disable retry for everyone: a transient 503 on a DELETE (an
+// idempotent method) is still retried to recovery.
+func TestRetryStillAppliesToIdempotentMethods(t *testing.T) {
+	mock := newMockAPI()
+	defer mock.close()
+
+	var attempts int32
+	mock.on("DELETE", "/api/v1/tenants/acme/apikeys/ak-1", func(w http.ResponseWriter, _ *http.Request) {
+		if atomic.AddInt32(&attempts, 1) <= 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	c := mock.client("acme")
+	if err := c.DeleteAPIKey(context.Background(), "ak-1"); err != nil {
+		t.Fatalf("expected retry to recover DELETE, got %v", err)
+	}
+	if got := atomic.LoadInt32(&attempts); got != 3 {
+		t.Errorf("expected 3 attempts (2 fail + 1 success), got %d", got)
+	}
+}
+
 // TestRedirectTreatedAsError covers MEDIUM-1: a 3xx response must surface
 // as an error, never as a silent success. The client refuses to follow
 // redirects (CheckRedirect returns ErrUseLastResponse), so requestWithETag
