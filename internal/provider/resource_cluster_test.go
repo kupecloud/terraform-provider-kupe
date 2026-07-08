@@ -128,6 +128,51 @@ func TestAccClusterResource_VersionNotBlankedOnUnrelatedEdit(t *testing.T) {
 	})
 }
 
+// TestAccClusterResource_EmptyResourcesBlock is the LOW-4 regression guard:
+// a `resources = {}` block (used to request clearing the limits) must apply
+// cleanly. The server echoes an empty `{}`; before the fix mapClusterToState
+// collapsed that to nil, turning the planned known object into null and
+// failing "Provider produced inconsistent result after apply". The step's
+// automatic post-apply refresh/plan also asserts there's no perpetual drift.
+func TestAccClusterResource_EmptyResourcesBlock(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccClusterConfigEmptyResources(mock.url(), "empty-res", "Empty Res"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("kupe_cluster.test", "name", "empty-res"),
+					// The block is present (not null) but every limit is unset.
+					resource.TestCheckNoResourceAttr("kupe_cluster.test", "resources.cpu"),
+					resource.TestCheckNoResourceAttr("kupe_cluster.test", "resources.memory"),
+					resource.TestCheckNoResourceAttr("kupe_cluster.test", "resources.storage"),
+				),
+			},
+		},
+	})
+}
+
+// testAccClusterConfigEmptyResources sets an explicitly empty `resources`
+// block to exercise the LOW-4 clear-the-limits path.
+func testAccClusterConfigEmptyResources(host, name, displayName string) string {
+	return fmt.Sprintf(`
+provider "kupe" {
+  host    = %q
+  tenant  = "acme"
+  api_key = "kupe_test_key"
+}
+
+resource "kupe_cluster" "test" {
+  name         = %q
+  display_name = %q
+  resources    = {}
+}
+`, host, name, displayName)
+}
+
 func testAccClusterConfig(host, name, displayName, clusterType string) string {
 	return fmt.Sprintf(`
 provider "kupe" {

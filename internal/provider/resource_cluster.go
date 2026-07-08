@@ -598,13 +598,30 @@ func mapClusterToState(c *client.Cluster, etag string, state *ClusterResourceMod
 		state.HAEtcdReplicasDesired = types.Int64Value(0)
 	}
 
-	if c.Resources != nil && (c.Resources.CPU != "" || c.Resources.Memory != "" || c.Resources.Storage != "") {
+	// state.Resources still holds the planned (Create/Update) or prior
+	// (Read) block at this point — this is the last field we map. Use it
+	// to disambiguate "user never set a resources block" from "user wrote
+	// `resources = {}` to clear the limits", because the server echoes an
+	// empty `{}` for both.
+	switch {
+	case c.Resources != nil && (c.Resources.CPU != "" || c.Resources.Memory != "" || c.Resources.Storage != ""):
 		state.Resources = &ClusterResourcesModel{
 			CPU:     stringOrNull(c.Resources.CPU),
 			Memory:  stringOrNull(c.Resources.Memory),
 			Storage: stringOrNull(c.Resources.Storage),
 		}
-	} else {
+	case state.Resources != nil:
+		// The server reports no limits, but the plan/prior state carried a
+		// (now-empty) `resources` block. Collapsing to nil here would turn
+		// a known object into null and fail "Provider produced inconsistent
+		// result after apply" (and show perpetual drift on refresh).
+		// Preserve an all-null block matching the planned empty shape.
+		state.Resources = &ClusterResourcesModel{
+			CPU:     types.StringNull(),
+			Memory:  types.StringNull(),
+			Storage: types.StringNull(),
+		}
+	default:
 		state.Resources = nil
 	}
 }
