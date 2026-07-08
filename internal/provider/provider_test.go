@@ -3,6 +3,7 @@ package provider
 import (
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -37,6 +38,47 @@ func TestStringValueOrEnv(t *testing.T) {
 			t.Errorf("expected env-val, got %q", v)
 		}
 	})
+}
+
+// TestAddUnknownConfigErrors is the LOW-3 regression guard: a provider
+// attribute wired to an unknown (not-yet-known) value must produce an
+// attribute error rather than silently falling back to the environment.
+// Known and null values must pass through untouched (null legitimately
+// means "read the env var").
+func TestAddUnknownConfigErrors(t *testing.T) {
+	known := KupeProviderModel{
+		Host:   types.StringValue("https://api.kupe.cloud"),
+		Tenant: types.StringNull(),
+		APIKey: types.StringValue("kupe_key"),
+		Token:  types.StringNull(),
+	}
+
+	t.Run("known and null values produce no error", func(t *testing.T) {
+		var diags diag.Diagnostics
+		addUnknownConfigErrors(known, &diags)
+		if diags.HasError() {
+			t.Fatalf("expected no error diagnostics, got %v", diags)
+		}
+	})
+
+	cases := []struct {
+		name  string
+		model KupeProviderModel
+	}{
+		{"unknown host", func() KupeProviderModel { m := known; m.Host = types.StringUnknown(); return m }()},
+		{"unknown tenant", func() KupeProviderModel { m := known; m.Tenant = types.StringUnknown(); return m }()},
+		{"unknown api_key", func() KupeProviderModel { m := known; m.APIKey = types.StringUnknown(); return m }()},
+		{"unknown token", func() KupeProviderModel { m := known; m.Token = types.StringUnknown(); return m }()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var diags diag.Diagnostics
+			addUnknownConfigErrors(tc.model, &diags)
+			if !diags.HasError() {
+				t.Fatalf("expected an error diagnostic for %s, got none", tc.name)
+			}
+		})
+	}
 }
 
 func TestNew(t *testing.T) {

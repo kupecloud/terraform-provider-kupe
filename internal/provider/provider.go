@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -78,6 +80,17 @@ func (p *KupeProvider) Configure(ctx context.Context, req provider.ConfigureRequ
 		return
 	}
 
+	// A provider attribute wired to another resource's not-yet-known
+	// output is Unknown at configure time. stringValueOrEnv would silently
+	// treat that as "unset" and fall back to the environment — potentially
+	// configuring the client against the wrong tenant/credentials, or
+	// surfacing a misleading "missing host". Detect it explicitly and tell
+	// the user the value must be resolvable during planning.
+	addUnknownConfigErrors(config, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	host := stringValueOrEnv(config.Host, "KUPE_HOST")
 	tenant := stringValueOrEnv(config.Tenant, "KUPE_TENANT")
 	apiKey := stringValueOrEnv(config.APIKey, "KUPE_API_KEY")
@@ -126,6 +139,35 @@ func (p *KupeProvider) DataSources(_ context.Context) []func() datasource.DataSo
 		NewTenantDataSource,
 		NewClusterDataSource,
 		NewPlanDataSource,
+	}
+}
+
+// addUnknownConfigErrors appends an attribute error for every provider
+// config value that is Unknown at Configure time (typically wired to
+// another resource's not-yet-known output). Such a value cannot be
+// resolved during planning, and silently falling back to the environment
+// (see stringValueOrEnv) risks pointing the client at the wrong
+// tenant/credentials, so we fail with an actionable message instead.
+func addUnknownConfigErrors(config KupeProviderModel, diags *diag.Diagnostics) {
+	for _, a := range []struct {
+		name string
+		p    path.Path
+		v    types.String
+	}{
+		{"host", path.Root("host"), config.Host},
+		{"tenant", path.Root("tenant"), config.Tenant},
+		{"api_key", path.Root("api_key"), config.APIKey},
+		{"token", path.Root("token"), config.Token},
+	} {
+		if a.v.IsUnknown() {
+			diags.AddAttributeError(
+				a.p,
+				"provider configuration value not yet known",
+				fmt.Sprintf("The %q attribute is unknown at configure time — it cannot be resolved until "+
+					"apply, so the provider cannot be configured during planning. Set it to a static value, "+
+					"or leave it unset to read the corresponding KUPE_* environment variable.", a.name),
+			)
+		}
 	}
 }
 
