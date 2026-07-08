@@ -280,17 +280,31 @@ func (r *SecretResource) Delete(ctx context.Context, req resource.DeleteRequest,
 	defer cancel()
 	err := waitForCondition(waitCtx, func(c context.Context) (bool, error) {
 		_, _, err := r.client.GetSecret(c, name)
-		return client.IsNotFound(err), nil
+		if client.IsNotFound(err) {
+			return true, nil
+		}
+		if isTerminalAPIError(err) {
+			// A revoked key / lost role mid-teardown will never resolve
+			// by polling — surface it instead of stalling to the timeout.
+			return true, err
+		}
+		return false, nil
 	})
-	if err != nil {
+	switch {
+	case err == nil:
+		// confirmed gone
+	case isTerminalAPIError(err):
+		resp.Diagnostics.AddError("failed to confirm secret deletion", apiErrorDetail(err))
+	default:
 		resp.Diagnostics.AddWarning(
 			"secret still terminating",
 			fmt.Sprintf("DELETE was accepted but secret %q is still terminating after the configured "+
-				"delete timeout. Kupe Cloud is still cleaning up the synced Secrets in your target "+
-				"clusters. Re-running `terraform destroy` will wait again, and the same secret name "+
-				"cannot be reused until termination completes. If the secret stays in this state, "+
-				"check it in the Kupe Console or contact Kupe Cloud support. Override "+
-				"with `timeouts.delete = \"5m\"` for secrets with many sync targets.", name),
+				"delete timeout. Terraform has removed the secret from state; the Kupe platform "+
+				"continues cleaning up the synced Secrets in your target clusters in the background, "+
+				"and the secret name stays reserved until that completes (creating a secret with the "+
+				"same name may 409 until then). If the secret stays in this state, check it in the "+
+				"Kupe Console or contact Kupe Cloud support. Override with `timeouts.delete = \"5m\"` "+
+				"for secrets with many sync targets.", name),
 		)
 	}
 }
@@ -319,6 +333,12 @@ func (r *SecretResource) waitForSecretReady(
 	err := waitForCondition(waitCtx, func(c context.Context) (bool, error) {
 		secret, etag, err := r.client.GetSecret(c, name)
 		if err != nil {
+			if isTerminalAPIError(err) {
+				// 401/403/400 will never clear by waiting — surface the
+				// real cause instead of stalling to the timeout. See the
+				// cluster helper for the same rationale.
+				return true, err
+			}
 			// Transient — keep polling. See the cluster helper for
 			// the same rationale and waitForCondition's contract.
 			return false, nil //nolint:nilerr // transient errors keep the poll going
@@ -331,10 +351,18 @@ func (r *SecretResource) waitForSecretReady(
 		}
 		return phase == secretPhaseActive, nil
 	})
-	if err != nil {
+	switch {
+	case err == nil:
+		// converged
+	case isTerminalAPIError(err):
+		diags.AddError(
+			fmt.Sprintf("secret %s failed while waiting for Active", kind),
+			apiErrorDetail(err),
+		)
+	default:
 		diags.AddWarning(
 			fmt.Sprintf("secret %s timed out before reaching Active", kind),
-			fmt.Sprintf("secret %q reached phase=%q before the %s timeout fired. Wait a few moments "+
+			fmt.Sprintf("secret %q only reached phase=%q when the %s timeout fired. Wait a few moments "+
 				"and re-run `terraform apply` to pick up the Active state — Kupe Cloud is still "+
 				"syncing the value to your target clusters and a subsequent apply will be a no-op "+
 				"once the sync completes. If the secret stays in this phase for longer than expected, "+

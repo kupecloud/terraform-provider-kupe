@@ -73,6 +73,29 @@ func waitForCondition(ctx context.Context, fn func(context.Context) (bool, error
 	}
 }
 
+// isTerminalAPIError reports whether err (or anything it wraps) is a
+// *client.APIError carrying a status a readiness/deletion poll must treat
+// as permanent rather than transient. 400 (the request is malformed or was
+// rejected by an admission webhook), 401 (the credential was revoked or is
+// invalid), and 403 (the credential lacks the required role) will never
+// clear by waiting: continuing to poll only stalls to the full timeout and
+// buries the real cause behind a generic "timed out" warning. 404 is
+// deliberately excluded — it is the success signal for deletion polls and
+// for readiness polls means the object simply isn't observable yet, not a
+// permanent failure.
+func isTerminalAPIError(err error) bool {
+	var apiErr *client.APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	switch apiErr.StatusCode {
+	case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden:
+		return true
+	default:
+		return false
+	}
+}
+
 // apiErrorDetail returns a user-actionable detail string for a kupe-api
 // error. The intent is that the user sees not just "kupe api: 401 …" in
 // their diagnostic but also a one-sentence pointer at how to fix it. For

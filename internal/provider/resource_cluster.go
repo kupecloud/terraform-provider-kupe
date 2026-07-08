@@ -471,17 +471,31 @@ func (r *ClusterResource) Delete(ctx context.Context, req resource.DeleteRequest
 	defer cancel()
 	err := waitForCondition(waitCtx, func(c context.Context) (bool, error) {
 		_, _, err := r.client.GetCluster(c, name)
-		return client.IsNotFound(err), nil
+		if client.IsNotFound(err) {
+			return true, nil
+		}
+		if isTerminalAPIError(err) {
+			// A revoked key / lost role mid-teardown will never resolve
+			// by polling — surface it instead of stalling to the timeout.
+			return true, err
+		}
+		return false, nil
 	})
-	if err != nil {
+	switch {
+	case err == nil:
+		// confirmed gone
+	case isTerminalAPIError(err):
+		resp.Diagnostics.AddError("failed to confirm cluster deletion", apiErrorDetail(err))
+	default:
 		resp.Diagnostics.AddWarning(
 			"cluster still terminating",
 			fmt.Sprintf("DELETE was accepted but cluster %q is still terminating after the configured "+
-				"delete timeout. Kupe Cloud is still cleaning up the underlying resources. Re-running "+
-				"`terraform destroy` will wait again, and the same cluster name cannot be reused until "+
-				"termination completes. If the cluster stays in this state, check it in the Kupe "+
-				"Console or contact Kupe Cloud support. Override with "+
-				"`timeouts.delete = \"30m\"` for clusters with heavier teardown.", name),
+				"delete timeout. Terraform has removed the cluster from state; the Kupe platform "+
+				"continues teardown of the underlying resources in the background, and the cluster "+
+				"name stays reserved until that completes (creating a cluster with the same name may "+
+				"409 until then). If the cluster stays in this state, check it in the Kupe Console or "+
+				"contact Kupe Cloud support. Override with `timeouts.delete = \"30m\"` for clusters "+
+				"with heavier teardown.", name),
 		)
 	}
 }
@@ -506,6 +520,12 @@ func (r *ClusterResource) waitForClusterReady(
 	err := waitForCondition(waitCtx, func(c context.Context) (bool, error) {
 		cluster, etag, err := r.client.GetCluster(c, name)
 		if err != nil {
+			if isTerminalAPIError(err) {
+				// 401/403/400 will never clear by waiting (revoked key,
+				// missing role, malformed request). Surface the real
+				// cause immediately instead of stalling to the timeout.
+				return true, err
+			}
 			// Transient — keep polling. The eventual deadline will
 			// surface a timeout if the API stays unreachable. We
 			// deliberately discard err here per waitForCondition's
@@ -522,10 +542,18 @@ func (r *ClusterResource) waitForClusterReady(
 		}
 		return phase == clusterPhaseRunning, nil
 	})
-	if err != nil {
+	switch {
+	case err == nil:
+		// converged
+	case isTerminalAPIError(err):
+		diags.AddError(
+			fmt.Sprintf("cluster %s failed while waiting for Running", kind),
+			apiErrorDetail(err),
+		)
+	default:
 		diags.AddWarning(
 			fmt.Sprintf("cluster %s timed out before reaching Running", kind),
-			fmt.Sprintf("cluster %q reached phase=%q before the %s timeout fired. Wait a few minutes "+
+			fmt.Sprintf("cluster %q only reached phase=%q when the %s timeout fired. Wait a few minutes "+
 				"and re-run `terraform apply` to pick up the Running state — provisioning continues "+
 				"in the background and a subsequent apply will be a no-op once the cluster is ready. "+
 				"If the cluster stays in this phase for longer than expected, check the cluster status "+

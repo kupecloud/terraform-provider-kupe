@@ -135,6 +135,36 @@ func fakeAPIError(status int, msg string) error {
 	return &client.APIError{StatusCode: status, Message: msg}
 }
 
+// TestIsTerminalAPIError pins which statuses a readiness/deletion poll
+// treats as permanent (401/403/400 — surface immediately) versus transient
+// (keep polling). Regression guard for LOW-1: before the fix every GET
+// error inside the poll closures was swallowed, so a revoked key stalled to
+// the full timeout and hid the real 401/403 behind a generic warning.
+func TestIsTerminalAPIError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil is not terminal", nil, false},
+		{"400 is terminal", fakeAPIError(http.StatusBadRequest, "bad request"), true},
+		{"401 is terminal", fakeAPIError(http.StatusUnauthorized, "invalid token"), true},
+		{"403 is terminal", fakeAPIError(http.StatusForbidden, "access denied"), true},
+		{"404 is not terminal", fakeAPIError(http.StatusNotFound, "not found"), false},
+		{"409 is not terminal", fakeAPIError(http.StatusConflict, "already exists"), false},
+		{"500 is not terminal", fakeAPIError(http.StatusInternalServerError, "boom"), false},
+		{"wrapped 403 is terminal", fmt.Errorf("get: %w", fakeAPIError(http.StatusForbidden, "access denied")), true},
+		{"non-api error is not terminal", errors.New("connection refused"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isTerminalAPIError(tt.err); got != tt.want {
+				t.Errorf("isTerminalAPIError(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
 // shrinkPollInterval lowers the helper's poll interval so the tests run
 // in millisecond-scale rather than seconds. Tests restore the original
 // in a t.Cleanup.
