@@ -8,7 +8,12 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Do NOT cancel in-progress main runs: a run cancelled after `release` has
+  # tagged a version but before `publish` uploads the provider zips, SHA256SUMS
+  # and signature leaves a tagged registry version with missing/partial assets,
+  # breaking `terraform init` for that version.
+  # Queued runs still coalesce; only pr.yaml may cancel in progress.
+  cancel-in-progress: false
 
 permissions:
   contents: read
