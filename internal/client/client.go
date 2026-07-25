@@ -40,8 +40,11 @@ type Client struct {
 // apply for long. These are vars (not consts) so tests can shrink the
 // backoff without changing production behaviour.
 var (
-	retryMax     = 4
-	retryWaitMin = 500 * time.Millisecond
+	retryMax = 4
+	// "Min"/"Max" here mean minimum/maximum (mirroring retryablehttp's
+	// RetryWaitMin/RetryWaitMax fields), not the time unit revive's
+	// time-naming rule assumes — keep the names aligned with the library.
+	retryWaitMin = 500 * time.Millisecond //nolint:revive // "Min" = minimum, mirrors retryablehttp.RetryWaitMin
 	retryWaitMax = 5 * time.Second
 )
 
