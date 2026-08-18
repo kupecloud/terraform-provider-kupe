@@ -22,9 +22,8 @@ data "kupe_plan" "pro" {
 
 # Create a production cluster
 resource "kupe_cluster" "production" {
-  name         = "production"
-  display_name = "Production"
-  version      = "1.31"
+  name    = "production"
+  version = "1.31"
 
   resources = {
     cpu     = "4"
@@ -35,9 +34,8 @@ resource "kupe_cluster" "production" {
 
 # Create a staging cluster
 resource "kupe_cluster" "staging" {
-  name         = "staging"
-  display_name = "Staging"
-  version      = "1.31"
+  name    = "staging"
+  version = "1.31"
 
   resources = {
     cpu     = "2"
@@ -72,9 +70,8 @@ resource "kupe_tenant_member" "developer" {
 
 # Create a CI/CD API key
 resource "kupe_api_key" "cicd" {
-  display_name = "CI/CD Pipeline"
-  role         = "admin"
-  expires_at   = "2027-01-01T00:00:00Z"
+  role       = "admin"
+  expires_at = "2027-01-01T00:00:00Z"
 }
 
 output "cicd_api_key" {

@@ -165,8 +165,11 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 		mustDecodeJSON(r, &body)
 		name := body["name"].(string)
 		rv := m.nextRV()
+		// Mirror kupe-api ≥ v1.5.2: displayName in the request is ignored and
+		// the response echoes the cluster NAME. A provider that maps this back
+		// into state would produce "inconsistent result after apply".
 		cluster := map[string]any{
-			"name": name, "displayName": body["displayName"],
+			"name": name, "displayName": name,
 			"type": body["type"], "version": strOrEmpty(body["version"]),
 			"resources":       body["resources"],
 			"status":          map[string]any{"phase": "Pending"},

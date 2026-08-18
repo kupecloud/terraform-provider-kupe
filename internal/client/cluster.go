@@ -8,7 +8,7 @@ import (
 // Cluster represents a managed cluster in the API response.
 type Cluster struct {
 	Name             string           `json:"name"`
-	DisplayName      string           `json:"displayName"`
+	DisplayName      string           `json:"displayName"` // Deprecated: mirrors Name; kept for API compatibility.
 	Type             string           `json:"type"`
 	Version          string           `json:"version"`
 	Resources        *ClusterResource `json:"resources,omitempty"`
@@ -71,7 +71,7 @@ type ClusterStatus struct {
 // CreateClusterRequest is the body for creating a cluster.
 type CreateClusterRequest struct {
 	Name             string           `json:"name"`
-	DisplayName      string           `json:"displayName"`
+	DisplayName      string           `json:"displayName,omitempty"` // Deprecated: accepted and ignored by kupe-api.
 	Type             string           `json:"type"`
 	Version          string           `json:"version,omitempty"`
 	Resources        *ClusterResource `json:"resources,omitempty"`

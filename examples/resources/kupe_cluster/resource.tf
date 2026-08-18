@@ -1,7 +1,6 @@
 resource "kupe_cluster" "production" {
-  name         = "production"
-  display_name = "Production"
-  version      = "1.32"
+  name    = "production"
+  version = "1.32"
 
   resources = {
     cpu     = "4"
@@ -20,7 +19,6 @@ resource "kupe_cluster" "production" {
 # GitOps if you need HA on an existing cluster.
 resource "kupe_cluster" "prod_eu1" {
   name              = "prod-eu1"
-  display_name      = "Production EU1"
   version           = "1.35"
   high_availability = true
 

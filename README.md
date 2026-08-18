@@ -66,7 +66,6 @@ supported for local development endpoints such as
 ```hcl
 resource "kupe_cluster" "production" {
   name         = "production"
-  display_name = "Production"
   type         = "shared"
   version      = "1.31"
 

@@ -27,7 +27,7 @@ data "kupe_cluster" "production" {
 
 ### Read-Only
 
-- `display_name` (String) Human-readable cluster name.
+- `display_name` (String, Deprecated) **Deprecated.** Kupe clusters have no separate display name; this mirrors `name`. Use `name` instead.
 - `endpoint` (String) Cluster API server endpoint.
 - `ha_configured` (Boolean) True once the operator has confirmed both 3/3 apiserver replicas AND 3/3 deployed-etcd replicas are `Ready` for the first time. Etcd readiness is required because the OSS deployed-etcd path runs etcd in its own StatefulSet — quorum loss with healthy apiserver pods still blocks writes.
 - `ha_enabled_at` (String) Timestamp when `ha_configured` first became true (billing anchor).

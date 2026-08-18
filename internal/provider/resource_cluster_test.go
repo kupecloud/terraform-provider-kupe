@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 )
 
 // TestAccClusterResource_TypeValidator guards the stringvalidator.OneOf on
@@ -74,16 +75,76 @@ func TestAccClusterResource(t *testing.T) {
 					resource.TestCheckResourceAttr("kupe_cluster.test", "version", "1.32"),
 				),
 			},
-			// Import roundtrip — cluster imports by `name`.
+			// Import roundtrip — cluster imports by `name`. display_name is a
+			// deprecated config-only attribute (never read from the API), so
+			// it is absent after import by design.
 			{
 				ResourceName:                         "kupe_cluster.test",
 				ImportState:                          true,
 				ImportStateVerify:                    true,
 				ImportStateId:                        "test-cluster",
 				ImportStateVerifyIdentifierAttribute: "name",
+				ImportStateVerifyIgnore:              []string{"display_name"},
 			},
 		},
 	})
+}
+
+// TestAccClusterResource_DisplayNameOptional guards the 2026-08-18 contract
+// fix: `display_name` is deprecated/optional and the API echoes the cluster
+// name in `displayName`. A cluster created WITHOUT display_name must apply
+// cleanly (state null, no "inconsistent result after apply"), and adding or
+// removing display_name later must never force replacement — the mock's
+// nextRV/createdAt would change on a recreate, so createdAt is pinned.
+func TestAccClusterResource_DisplayNameOptional(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccClusterConfigNoDisplayName(mock.url(), "nodisplay"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("kupe_cluster.test", "name", "nodisplay"),
+					resource.TestCheckNoResourceAttr("kupe_cluster.test", "display_name"),
+				),
+			},
+			{
+				// Adding a display_name is an in-place, API-less change.
+				Config: testAccClusterConfig(mock.url(), "nodisplay", "Legacy Display", "shared"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("kupe_cluster.test", plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.TestCheckResourceAttr("kupe_cluster.test", "display_name", "Legacy Display"),
+			},
+			{
+				Config: testAccClusterConfigNoDisplayName(mock.url(), "nodisplay"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("kupe_cluster.test", plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.TestCheckNoResourceAttr("kupe_cluster.test", "display_name"),
+			},
+		},
+	})
+}
+
+func testAccClusterConfigNoDisplayName(host, name string) string {
+	return fmt.Sprintf(`
+provider "kupe" {
+  host    = %q
+  tenant  = "acme"
+  api_key = "test-key"
+}
+
+resource "kupe_cluster" "test" {
+  name = %q
+}
+`, host, name)
 }
 
 // TestAccClusterResource_VersionNotBlankedOnUnrelatedEdit is the end-to-end

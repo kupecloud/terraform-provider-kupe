@@ -27,9 +27,8 @@ The same contract applies whether you delete via Terraform, the `kupe` CLI, or t
 
 ```terraform
 resource "kupe_cluster" "production" {
-  name         = "production"
-  display_name = "Production"
-  version      = "1.32"
+  name    = "production"
+  version = "1.32"
 
   resources = {
     cpu     = "4"
@@ -48,7 +47,6 @@ resource "kupe_cluster" "production" {
 # GitOps if you need HA on an existing cluster.
 resource "kupe_cluster" "prod_eu1" {
   name              = "prod-eu1"
-  display_name      = "Production EU1"
   version           = "1.35"
   high_availability = true
 
@@ -77,11 +75,11 @@ output "prod_eu1_ha_ready" {
 
 ### Required
 
-- `display_name` (String) Human-readable display name (immutable after creation).
 - `name` (String) Cluster name (immutable after creation).
 
 ### Optional
 
+- `display_name` (String, Deprecated) **Deprecated.** Kupe clusters have no separate display name — `name` is the user-facing identifier everywhere (console, CLI, kubeconfig contexts). The value is accepted and ignored by the API and is kept in state exactly as configured; remove it from your configuration. Until provider v1.6.1 this attribute was required and compared against an empty API echo, which tainted every freshly created cluster with "inconsistent result after apply" and replaced it on the next apply.
 - `high_availability` (Boolean) Enable a 3-replica HA control plane with HA etcd (chart-managed external etcd StatefulSet), hard anti-affinity, and encrypted-at-rest etcd via a per-cluster AES-CBC key. Adds an hourly charge — see `data.kupe_plan` for the rate. Default `false`.
 
 **Create-time-only.** This attribute is effectively immutable: changing it on an existing resource forces Terraform to **replace** the cluster (destroy + create). The operator rejects both directions of the toggle with canonical error codes (`HA_ENABLE_ON_EXISTING_UNSUPPORTED`, `HA_DISABLE_UNSUPPORTED`) — `RequiresReplace` here makes Terraform's plan reflect that reality up front. Use a blue-green swap workflow if you need HA on an existing cluster: create a new HA cluster, redeploy via GitOps, swap traffic, then destroy the old.

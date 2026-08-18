@@ -22,7 +22,7 @@ func TestAccClusterDataSource(t *testing.T) {
 				Config: testAccClusterDataSourceConfig(mock.url()),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("data.kupe_cluster.read", "name", "ds-test"),
-					resource.TestCheckResourceAttr("data.kupe_cluster.read", "display_name", "DataSource Test"),
+					resource.TestCheckResourceAttr("data.kupe_cluster.read", "display_name", "ds-test"), // deprecated: mirrors name
 					resource.TestCheckResourceAttr("data.kupe_cluster.read", "type", "shared"),
 					resource.TestCheckResourceAttr("data.kupe_cluster.read", "version", "1.32"),
 					// Create now waits for phase=Running before returning

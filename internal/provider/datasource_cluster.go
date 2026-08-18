@@ -51,8 +51,10 @@ func (d *ClusterDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 				Required:    true,
 			},
 			"display_name": schema.StringAttribute{
-				Description: "Human-readable cluster name.",
-				Computed:    true,
+				Description: "**Deprecated.** Kupe clusters have no separate display name; this mirrors `name`. " +
+					"Use `name` instead.",
+				Computed:           true,
+				DeprecationMessage: "`display_name` is deprecated and mirrors `name`; use `name` instead.",
 			},
 			"type": schema.StringAttribute{
 				Description: "Cluster type. Today the operator only supports `shared` — `dedicated` was reserved in " +

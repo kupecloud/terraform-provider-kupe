@@ -7,10 +7,9 @@
 #   - destroy: kubectl get managedcluster -n tenant-kupe-test returns empty
 
 resource "kupe_cluster" "smoke" {
-  name         = "smoke-cluster"
-  display_name = "Smoke Test Cluster"
-  type         = "shared"
-  version      = "1.35"
+  name    = "smoke-cluster"
+  type    = "shared"
+  version = "1.35"
 
   resources = {
     cpu     = "2"

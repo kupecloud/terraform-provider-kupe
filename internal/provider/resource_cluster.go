@@ -107,11 +107,15 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				},
 			},
 			"display_name": schema.StringAttribute{
-				Description: "Human-readable display name (immutable after creation).",
-				Required:    true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
+				Description: "**Deprecated.** Kupe clusters have no separate display name — `name` is the " +
+					"user-facing identifier everywhere (console, CLI, kubeconfig contexts). The value is accepted " +
+					"and ignored by the API and is kept in state exactly as configured; remove it from your " +
+					"configuration. Until provider v1.6.1 this attribute was required and compared against an " +
+					"empty API echo, which tainted every freshly created cluster with \"inconsistent result after " +
+					"apply\" and replaced it on the next apply.",
+				Optional: true,
+				DeprecationMessage: "`display_name` is deprecated: the cluster `name` is the display name. The " +
+					"attribute is ignored — remove it from your configuration.",
 			},
 			"type": schema.StringAttribute{
 				Description: "**Deprecated.** Cluster type. Only `shared` is supported today — the operator rejects " +
@@ -569,7 +573,9 @@ func (r *ClusterResource) ImportState(ctx context.Context, req resource.ImportSt
 
 func mapClusterToState(c *client.Cluster, etag string, state *ClusterResourceModel) {
 	state.Name = types.StringValue(c.Name)
-	state.DisplayName = types.StringValue(c.DisplayName)
+	// DisplayName is deliberately NOT mapped from the API: the attribute is
+	// deprecated/ignored and the API mirrors `name` in the response. The
+	// configured value (or null) is preserved so plans stay clean.
 	state.Type = types.StringValue(c.Type)
 	state.Version = types.StringValue(c.Version)
 	state.HighAvailability = types.BoolValue(c.HighAvailability)
