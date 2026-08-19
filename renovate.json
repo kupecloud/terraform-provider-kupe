@@ -1,4 +1,4 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["local>kupecloud/renovate"]
+  "extends": ["local>kupecloud/github-workflows//renovate/default"]
 }
