@@ -7,6 +7,7 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c
     hooks:
+      - id: detect-private-key
       - id: check-added-large-files
       - id: check-json
       - id: check-merge-conflict
@@ -86,3 +87,17 @@ repos:
         language: system
         pass_filenames: false
         files: ^(internal/|scripts/|main\.go|go\.mod|Makefile)
+
+  # Refuse any commit whose STAGED content contains a secret. Added org-wide on
+  # 2026-10-06 after three OpenTofu state files carrying a dev SSH private key
+  # and a live Cloudflare Access OAuth client secret were committed to
+  # kupe-tests (99e0452) and sat in history for 34 days. gitleaks v8.30.1 flags
+  # all of them, so this would have blocked that commit.
+  #
+  # Chosen over GitHub secret scanning because push protection needs the paid
+  # Secret Protection product on private repos ($19/committer/month) and only
+  # alerts AFTER the push; this refuses before the commit exists.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: 83d9cd684c87d95d656c1458ef04895a7f1cbd8e # v8.30.1
+    hooks:
+      - id: gitleaks
