@@ -1,0 +1,30 @@
+---
+page_title: "{{.Name}} {{.Type}} - {{.ProviderName}}"
+subcategory: ""
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# {{.Name}} ({{.Type}})
+
+{{ .Description | trimspace }}
+
+## Example Usage
+
+{{ tffile "examples/resources/kupe_database_binding/resource.tf" }}
+
+### Using the credentials Secret
+
+Inside the cluster, the bound namespace sees a Service named after the database and the Secret named by `secret_name`, with the keys `host`, `port`, `database`, `username`, `password`, `sslmode`, `ca.crt` and `uri`.
+
+The example below is illustrative. It uses the [hashicorp/kubernetes](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs) provider, configured against the bound cluster, to pass the connection URI to a Deployment and to read the Secret from the bound namespace.
+
+{{ tffile "examples/resources/kupe_database_binding/kubernetes-secret.tf" }}
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Import
+
+Import is supported using the following syntax:
+
+{{ codefile "shell" "examples/resources/kupe_database_binding/import.sh" }}

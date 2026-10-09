@@ -53,6 +53,26 @@ func TestAPIErrorDetail(t *testing.T) {
 			wantNoSubstr: []string{schemaHint, roleHint},
 		},
 		{
+			// Kubernetes field causes arrive inside the 400 message and
+			// must reach the user verbatim.
+			name: "400 validation keeps field causes",
+			err: &client.APIError{
+				StatusCode: http.StatusBadRequest,
+				Message:    `invalid database "orders-db": spec.resources.storage: Invalid value: "string": storage can only grow`,
+			},
+			wantSubstr: []string{"spec.resources.storage", "storage can only grow"},
+		},
+		{
+			name: "404 databases_unavailable says the feature is off, not that the resource is gone",
+			err: &client.APIError{
+				StatusCode: http.StatusNotFound,
+				Message:    "managed databases are not available on this platform",
+				Code:       client.CodeDatabasesUnavailable,
+			},
+			wantSubstr:   []string{"Managed databases are not enabled", "Error code: databases_unavailable"},
+			wantNoSubstr: []string{"does not exist on the server"},
+		},
+		{
 			// True RBAC denial: bare "access denied" message from kupe-api.
 			// The role hint is the actionable signal — keep it.
 			name: "403 access denied shows role hint",
@@ -151,6 +171,11 @@ func TestIsTerminalAPIError(t *testing.T) {
 		{"401 is terminal", fakeAPIError(http.StatusUnauthorized, "invalid token"), true},
 		{"403 is terminal", fakeAPIError(http.StatusForbidden, "access denied"), true},
 		{"404 is not terminal", fakeAPIError(http.StatusNotFound, "not found"), false},
+		{
+			"404 databases_unavailable is terminal",
+			&client.APIError{StatusCode: http.StatusNotFound, Code: client.CodeDatabasesUnavailable},
+			true,
+		},
 		{"409 is not terminal", fakeAPIError(http.StatusConflict, "already exists"), false},
 		{"500 is not terminal", fakeAPIError(http.StatusInternalServerError, "boom"), false},
 		{"wrapped 403 is terminal", fmt.Errorf("get: %w", fakeAPIError(http.StatusForbidden, "access denied")), true},
@@ -276,5 +301,42 @@ func TestWaitForCondition_DeletePredicate(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("expected nil after the resource disappeared, got %v", err)
+	}
+}
+
+func TestDeleteUntilAccepted(t *testing.T) {
+	conflict := fakeAPIError(http.StatusConflict, "the object has been modified")
+	protected := &client.APIError{StatusCode: http.StatusConflict, Code: client.CodeDeletionProtected}
+	tests := []struct {
+		name      string
+		responses []error // one per attempt; the last repeats
+		wantErr   error   // matched with errors.Is; nil means success
+		wantCalls int
+	}{
+		{name: "accepted at once", responses: []error{nil}, wantCalls: 1},
+		{name: "already gone", responses: []error{fakeAPIError(http.StatusNotFound, "not found")}, wantCalls: 1},
+		{name: "conflicts are retried", responses: []error{conflict, conflict, nil}, wantCalls: 3},
+		{name: "deletion protection is returned at once", responses: []error{protected}, wantErr: protected, wantCalls: 1},
+		{name: "a persistent conflict returns the last refusal", responses: []error{conflict}, wantErr: conflict},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			shrinkPollInterval(t)
+			calls := 0
+			err := deleteUntilAccepted(context.Background(), 50*time.Millisecond, func(context.Context) error {
+				resp := tt.responses[min(calls, len(tt.responses)-1)]
+				calls++
+				return resp
+			})
+			if tt.wantErr == nil && err != nil {
+				t.Fatalf("expected success, got %v", err)
+			}
+			if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
+				t.Fatalf("expected %v, got %v", tt.wantErr, err)
+			}
+			if tt.wantCalls != 0 && calls != tt.wantCalls {
+				t.Errorf("delete called %d times, want %d", calls, tt.wantCalls)
+			}
+		})
 	}
 }

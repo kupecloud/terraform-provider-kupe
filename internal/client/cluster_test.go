@@ -74,7 +74,7 @@ func TestCreateCluster(t *testing.T) {
 		Name:        "staging",
 		DisplayName: "Staging",
 		Type:        "shared",
-		Resources:   &ClusterResource{CPU: "2", Memory: "8Gi"},
+		Resources:   &ResourceQuantities{CPU: "2", Memory: "8Gi"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -154,7 +154,7 @@ func TestUpdateCluster_OmitsVersionWhenNil(t *testing.T) {
 	// Only resources changes; Version stays nil (the "version unset, edit
 	// an unrelated field" scenario).
 	_, _, err := c.UpdateCluster(context.Background(), "prod", `"old-etag"`, PatchClusterRequest{
-		Resources: &ClusterResource{CPU: "4"},
+		Resources: &ResourceQuantities{CPU: "4"},
 	})
 	if err != nil {
 		t.Fatal(err)

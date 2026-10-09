@@ -169,11 +169,14 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("kupe api: %d %s", e.StatusCode, e.Message)
 }
 
-// IsNotFound returns true if the error is a 404.
+// IsNotFound returns true if the error is a 404 for the requested resource.
+// A 404 meaning a whole feature is unavailable (CodeDatabasesUnavailable) is
+// excluded: treating it as "not found" would drop existing resources from
+// state on refresh and report deletes as complete.
 func IsNotFound(err error) bool {
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
-		return apiErr.StatusCode == http.StatusNotFound
+		return apiErr.StatusCode == http.StatusNotFound && apiErr.Code != CodeDatabasesUnavailable
 	}
 	return false
 }

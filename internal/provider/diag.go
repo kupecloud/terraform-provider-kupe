@@ -31,8 +31,7 @@ var defaultPollInterval = 2 * time.Second
 //
 //   - fn returns (true, nil): success — caller exits with nil
 //   - fn returns (true, err): terminal failure observed — caller surfaces
-//     err. Not currently used (we treat Degraded as in-progress), but the
-//     signature supports a future hard-failure detection path
+//     err (pollUntil uses this for permanent API errors)
 //   - fn returns (false, _): keep polling. Any transient error inside the
 //     closure is the caller's responsibility to swallow; the helper
 //     doesn't inspect it
@@ -73,16 +72,76 @@ func waitForCondition(ctx context.Context, fn func(context.Context) (bool, error
 	}
 }
 
+// pollUntil polls observe under timeout until it reports done. An error from
+// observe ends the poll when isTerminalAPIError classifies it as permanent
+// (a revoked key or lost role never clears by waiting); any other error is
+// treated as transient and the poll continues, so a persistent fault ends as
+// a timeout. observe ends the poll with its own error by returning done=true
+// with it. observe is also where callers persist what they observed, so an
+// interrupted apply keeps the latest values.
+func pollUntil(ctx context.Context, timeout time.Duration, observe func(context.Context) (bool, error)) error {
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return waitForCondition(waitCtx, func(c context.Context) (bool, error) {
+		done, err := observe(c)
+		if done || err == nil {
+			return done, err
+		}
+		if isTerminalAPIError(err) {
+			return true, err
+		}
+		return false, nil //nolint:nilerr // transient errors keep the poll going
+	})
+}
+
+// waitForDeletion polls get until it returns 404. kupe-api accepts a DELETE
+// as soon as the platform starts tearing the resource down; until the
+// teardown finishes the name stays reserved, so an immediate re-create would
+// conflict. Returns nil once gone, a terminal API error, or a timeout error.
+func waitForDeletion(ctx context.Context, timeout time.Duration, get func(context.Context) error) error {
+	return pollUntil(ctx, timeout, func(c context.Context) (bool, error) {
+		err := get(c)
+		if client.IsNotFound(err) {
+			return true, nil
+		}
+		return false, err
+	})
+}
+
+// deleteUntilAccepted sends del until the API accepts it or reports the
+// resource already gone. A 409 conflict (the resource changed while the
+// delete was being admitted) is retried until the timeout, after which the
+// last refusal is returned. A deletion-protection refusal and permanent API
+// errors are returned at once.
+func deleteUntilAccepted(ctx context.Context, timeout time.Duration, del func(context.Context) error) error {
+	var lastErr error
+	err := pollUntil(ctx, timeout, func(c context.Context) (bool, error) {
+		lastErr = del(c)
+		switch {
+		case lastErr == nil || client.IsNotFound(lastErr):
+			return true, nil
+		case client.IsDeletionProtected(lastErr):
+			return true, lastErr
+		}
+		return false, lastErr
+	})
+	if errors.Is(err, context.DeadlineExceeded) && lastErr != nil {
+		return fmt.Errorf("delete not accepted before the timeout: %w", lastErr)
+	}
+	return err
+}
+
 // isTerminalAPIError reports whether err (or anything it wraps) is a
 // *client.APIError carrying a status a readiness/deletion poll must treat
 // as permanent rather than transient. 400 (the request is malformed or was
 // rejected by an admission webhook), 401 (the credential was revoked or is
 // invalid), and 403 (the credential lacks the required role) will never
 // clear by waiting: continuing to poll only stalls to the full timeout and
-// buries the real cause behind a generic "timed out" warning. 404 is
+// buries the real cause behind a generic "timed out" warning. A plain 404 is
 // deliberately excluded — it is the success signal for deletion polls and
 // for readiness polls means the object simply isn't observable yet, not a
-// permanent failure.
+// permanent failure. The 404 that says managed databases are not enabled is
+// permanent and included.
 func isTerminalAPIError(err error) bool {
 	var apiErr *client.APIError
 	if !errors.As(err, &apiErr) {
@@ -91,6 +150,9 @@ func isTerminalAPIError(err error) bool {
 	switch apiErr.StatusCode {
 	case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden:
 		return true
+	case http.StatusNotFound:
+		// A disabled feature does not come back by waiting.
+		return apiErr.Code == client.CodeDatabasesUnavailable
 	default:
 		return false
 	}
@@ -149,6 +211,9 @@ func apiErrorDetail(err error) string {
 		}
 		return base
 	case http.StatusNotFound:
+		if apiErr.Code == client.CodeDatabasesUnavailable {
+			return base + "\n\nManaged databases are not enabled for this Kupe Cloud environment, so the provider cannot read or change databases. Existing state is kept unchanged. Contact Kupe Cloud support if you expected them to be available."
+		}
 		return base + "\n\nThe resource does not exist on the server. If you expected it to exist it may have been deleted out-of-band; run `terraform refresh` to reconcile or `terraform import` to re-attach."
 	case http.StatusConflict:
 		return base + "\n\nThe operation conflicts with current server state. Usually means a resource with this name already exists on the tenant or is being modified concurrently."

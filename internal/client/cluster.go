@@ -7,16 +7,16 @@ import (
 
 // Cluster represents a managed cluster in the API response.
 type Cluster struct {
-	Name             string           `json:"name"`
-	DisplayName      string           `json:"displayName"` // Deprecated: mirrors Name; kept for API compatibility.
-	Type             string           `json:"type"`
-	Version          string           `json:"version"`
-	Resources        *ClusterResource `json:"resources,omitempty"`
-	Alerts           any              `json:"alerts,omitempty"`
-	HighAvailability bool             `json:"highAvailability,omitempty"`
-	Status           *ClusterStatus   `json:"status,omitempty"`
-	ResourceVersion  string           `json:"resourceVersion"`
-	CreatedAt        string           `json:"createdAt"`
+	Name             string              `json:"name"`
+	DisplayName      string              `json:"displayName"` // Deprecated: mirrors Name; kept for API compatibility.
+	Type             string              `json:"type"`
+	Version          string              `json:"version"`
+	Resources        *ResourceQuantities `json:"resources,omitempty"`
+	Alerts           any                 `json:"alerts,omitempty"`
+	HighAvailability bool                `json:"highAvailability,omitempty"`
+	Status           *ClusterStatus      `json:"status,omitempty"`
+	ResourceVersion  string              `json:"resourceVersion"`
+	CreatedAt        string              `json:"createdAt"`
 	// Warnings is advisory; today populated only on POST /clusters
 	// responses (e.g. HA_K8S_VERSION_RETIRING). Receive-only — no
 	// omitempty so the decoder happily accepts the always-present empty
@@ -33,8 +33,9 @@ type Warning struct {
 	Field    string `json:"field,omitempty"`
 }
 
-// ClusterResource defines resource limits.
-type ClusterResource struct {
+// ResourceQuantities are CPU, memory and storage in Kubernetes quantity
+// format, shared by clusters (limits) and databases (per-instance requests).
+type ResourceQuantities struct {
 	CPU     string `json:"cpu,omitempty"`
 	Memory  string `json:"memory,omitempty"`
 	Storage string `json:"storage,omitempty"`
@@ -70,23 +71,23 @@ type ClusterStatus struct {
 
 // CreateClusterRequest is the body for creating a cluster.
 type CreateClusterRequest struct {
-	Name             string           `json:"name"`
-	DisplayName      string           `json:"displayName,omitempty"` // Deprecated: accepted and ignored by kupe-api.
-	Type             string           `json:"type"`
-	Version          string           `json:"version,omitempty"`
-	Resources        *ClusterResource `json:"resources,omitempty"`
-	Alerts           any              `json:"alerts,omitempty"`
-	HighAvailability bool             `json:"highAvailability,omitempty"`
+	Name             string              `json:"name"`
+	DisplayName      string              `json:"displayName,omitempty"` // Deprecated: accepted and ignored by kupe-api.
+	Type             string              `json:"type"`
+	Version          string              `json:"version,omitempty"`
+	Resources        *ResourceQuantities `json:"resources,omitempty"`
+	Alerts           any                 `json:"alerts,omitempty"`
+	HighAvailability bool                `json:"highAvailability,omitempty"`
 }
 
 // PatchClusterRequest is the body for updating a cluster. HighAvailability
 // uses *bool so the provider can distinguish "no change" (nil) from "set to
 // false" (the operator rejects true → false in v1).
 type PatchClusterRequest struct {
-	Version          *string          `json:"version,omitempty"`
-	Resources        *ClusterResource `json:"resources,omitempty"`
-	Alerts           any              `json:"alerts,omitempty"`
-	HighAvailability *bool            `json:"highAvailability,omitempty"`
+	Version          *string             `json:"version,omitempty"`
+	Resources        *ResourceQuantities `json:"resources,omitempty"`
+	Alerts           any                 `json:"alerts,omitempty"`
+	HighAvailability *bool               `json:"highAvailability,omitempty"`
 }
 
 // ListClusters lists all clusters for the tenant.

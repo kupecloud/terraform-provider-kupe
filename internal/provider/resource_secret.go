@@ -276,19 +276,9 @@ func (r *SecretResource) Delete(ctx context.Context, req resource.DeleteRequest,
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	err := waitForCondition(waitCtx, func(c context.Context) (bool, error) {
+	err := waitForDeletion(ctx, timeout, func(c context.Context) error {
 		_, _, err := r.client.GetSecret(c, name)
-		if client.IsNotFound(err) {
-			return true, nil
-		}
-		if isTerminalAPIError(err) {
-			// A revoked key / lost role mid-teardown will never resolve
-			// by polling — surface it instead of stalling to the timeout.
-			return true, err
-		}
-		return false, nil
+		return err
 	})
 	switch {
 	case err == nil:
@@ -328,20 +318,10 @@ func (r *SecretResource) waitForSecretReady(
 	diags *diag.Diagnostics,
 	kind string,
 ) {
-	waitCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	err := waitForCondition(waitCtx, func(c context.Context) (bool, error) {
+	err := pollUntil(ctx, timeout, func(c context.Context) (bool, error) {
 		secret, etag, err := r.client.GetSecret(c, name)
 		if err != nil {
-			if isTerminalAPIError(err) {
-				// 401/403/400 will never clear by waiting — surface the
-				// real cause instead of stalling to the timeout. See the
-				// cluster helper for the same rationale.
-				return true, err
-			}
-			// Transient — keep polling. See the cluster helper for
-			// the same rationale and waitForCondition's contract.
-			return false, nil //nolint:nilerr // transient errors keep the poll going
+			return false, err
 		}
 		mapSecretToState(secret, etag, plan, diags)
 		diags.Append(state.Set(c, plan)...)

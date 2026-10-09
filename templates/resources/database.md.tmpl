@@ -1,0 +1,34 @@
+---
+page_title: "{{.Name}} {{.Type}} - {{.ProviderName}}"
+subcategory: ""
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# {{.Name}} ({{.Type}})
+
+{{ .Description | trimspace }}
+
+## Example Usage
+
+{{ tffile "examples/resources/kupe_database/resource.tf" }}
+
+### Protecting a database from destroy
+
+`deletion_protection` makes the Kupe platform refuse the delete. `prevent_destroy` stops Terraform from planning it in the first place, so use both for databases you cannot lose.
+
+{{ tffile "examples/resources/kupe_database/protected.tf" }}
+
+To delete a protected database, set `deletion_protection = false` (and remove `prevent_destroy`), run `terraform apply`, then destroy it.
+
+### Connecting applications
+
+Grant access with [`kupe_database_binding`](database_binding.md). Each binding places a Service named after the database and a credentials Secret into one namespace of one cluster.
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Import
+
+Import is supported using the following syntax:
+
+{{ codefile "shell" "examples/resources/kupe_database/import.sh" }}

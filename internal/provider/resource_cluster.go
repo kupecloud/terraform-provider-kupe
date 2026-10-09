@@ -51,27 +51,27 @@ type ClusterResource struct {
 }
 
 type ClusterResourceModel struct {
-	Name                  types.String           `tfsdk:"name"`
-	DisplayName           types.String           `tfsdk:"display_name"`
-	Type                  types.String           `tfsdk:"type"`
-	Version               types.String           `tfsdk:"version"`
-	Resources             *ClusterResourcesModel `tfsdk:"resources"`
-	HighAvailability      types.Bool             `tfsdk:"high_availability"`
-	Phase                 types.String           `tfsdk:"phase"`
-	Endpoint              types.String           `tfsdk:"endpoint"`
-	HAConfigured          types.Bool             `tfsdk:"ha_configured"`
-	HAEnabledAt           types.String           `tfsdk:"ha_enabled_at"`
-	HAPhase               types.String           `tfsdk:"ha_phase"`
-	HAReplicasReady       types.Int64            `tfsdk:"ha_replicas_ready"`
-	HAReplicasDesired     types.Int64            `tfsdk:"ha_replicas_desired"`
-	HAEtcdReplicasReady   types.Int64            `tfsdk:"ha_etcd_replicas_ready"`
-	HAEtcdReplicasDesired types.Int64            `tfsdk:"ha_etcd_replicas_desired"`
-	ETag                  types.String           `tfsdk:"etag"`
-	CreatedAt             types.String           `tfsdk:"created_at"`
-	Timeouts              timeouts.Value         `tfsdk:"timeouts"`
+	Name                  types.String    `tfsdk:"name"`
+	DisplayName           types.String    `tfsdk:"display_name"`
+	Type                  types.String    `tfsdk:"type"`
+	Version               types.String    `tfsdk:"version"`
+	Resources             *ResourcesModel `tfsdk:"resources"`
+	HighAvailability      types.Bool      `tfsdk:"high_availability"`
+	Phase                 types.String    `tfsdk:"phase"`
+	Endpoint              types.String    `tfsdk:"endpoint"`
+	HAConfigured          types.Bool      `tfsdk:"ha_configured"`
+	HAEnabledAt           types.String    `tfsdk:"ha_enabled_at"`
+	HAPhase               types.String    `tfsdk:"ha_phase"`
+	HAReplicasReady       types.Int64     `tfsdk:"ha_replicas_ready"`
+	HAReplicasDesired     types.Int64     `tfsdk:"ha_replicas_desired"`
+	HAEtcdReplicasReady   types.Int64     `tfsdk:"ha_etcd_replicas_ready"`
+	HAEtcdReplicasDesired types.Int64     `tfsdk:"ha_etcd_replicas_desired"`
+	ETag                  types.String    `tfsdk:"etag"`
+	CreatedAt             types.String    `tfsdk:"created_at"`
+	Timeouts              timeouts.Value  `tfsdk:"timeouts"`
 }
 
-type ClusterResourcesModel struct {
+type ResourcesModel struct {
 	CPU     types.String `tfsdk:"cpu"`
 	Memory  types.String `tfsdk:"memory"`
 	Storage types.String `tfsdk:"storage"`
@@ -295,7 +295,7 @@ func (r *ClusterResource) Create(ctx context.Context, req resource.CreateRequest
 	}
 
 	if plan.Resources != nil {
-		createReq.Resources = clusterResourcesFromPlan(plan.Resources)
+		createReq.Resources = resourcesFromPlan(plan.Resources)
 	}
 
 	cluster, etag, err := r.client.CreateCluster(ctx, createReq)
@@ -398,11 +398,11 @@ func (r *ClusterResource) Update(ctx context.Context, req resource.UpdateRequest
 		!plan.Resources.CPU.Equal(state.Resources.CPU) ||
 		!plan.Resources.Memory.Equal(state.Resources.Memory) ||
 		!plan.Resources.Storage.Equal(state.Resources.Storage)):
-		patchReq.Resources = clusterResourcesFromPlan(plan.Resources)
+		patchReq.Resources = resourcesFromPlan(plan.Resources)
 		hasChanges = true
 	case plan.Resources == nil && state.Resources != nil:
 		// User removed the resources block — send empty to clear.
-		patchReq.Resources = &client.ClusterResource{}
+		patchReq.Resources = &client.ResourceQuantities{}
 		hasChanges = true
 	}
 
@@ -471,19 +471,9 @@ func (r *ClusterResource) Delete(ctx context.Context, req resource.DeleteRequest
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	err := waitForCondition(waitCtx, func(c context.Context) (bool, error) {
+	err := waitForDeletion(ctx, timeout, func(c context.Context) error {
 		_, _, err := r.client.GetCluster(c, name)
-		if client.IsNotFound(err) {
-			return true, nil
-		}
-		if isTerminalAPIError(err) {
-			// A revoked key / lost role mid-teardown will never resolve
-			// by polling — surface it instead of stalling to the timeout.
-			return true, err
-		}
-		return false, nil
+		return err
 	})
 	switch {
 	case err == nil:
@@ -519,22 +509,10 @@ func (r *ClusterResource) waitForClusterReady(
 	diags *diag.Diagnostics,
 	kind string,
 ) {
-	waitCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	err := waitForCondition(waitCtx, func(c context.Context) (bool, error) {
+	err := pollUntil(ctx, timeout, func(c context.Context) (bool, error) {
 		cluster, etag, err := r.client.GetCluster(c, name)
 		if err != nil {
-			if isTerminalAPIError(err) {
-				// 401/403/400 will never clear by waiting (revoked key,
-				// missing role, malformed request). Surface the real
-				// cause immediately instead of stalling to the timeout.
-				return true, err
-			}
-			// Transient — keep polling. The eventual deadline will
-			// surface a timeout if the API stays unreachable. We
-			// deliberately discard err here per waitForCondition's
-			// contract; a persistent fault becomes a timeout warning.
-			return false, nil //nolint:nilerr // transient errors keep the poll going
+			return false, err
 		}
 		mapClusterToState(cluster, etag, plan)
 		// Persist what we just observed so a Ctrl-C between polls
@@ -611,7 +589,7 @@ func mapClusterToState(c *client.Cluster, etag string, state *ClusterResourceMod
 	// empty `{}` for both.
 	switch {
 	case c.Resources != nil && (c.Resources.CPU != "" || c.Resources.Memory != "" || c.Resources.Storage != ""):
-		state.Resources = &ClusterResourcesModel{
+		state.Resources = &ResourcesModel{
 			CPU:     stringOrNull(c.Resources.CPU),
 			Memory:  stringOrNull(c.Resources.Memory),
 			Storage: stringOrNull(c.Resources.Storage),
@@ -622,7 +600,7 @@ func mapClusterToState(c *client.Cluster, etag string, state *ClusterResourceMod
 		// a known object into null and fail "Provider produced inconsistent
 		// result after apply" (and show perpetual drift on refresh).
 		// Preserve an all-null block matching the planned empty shape.
-		state.Resources = &ClusterResourcesModel{
+		state.Resources = &ResourcesModel{
 			CPU:     types.StringNull(),
 			Memory:  types.StringNull(),
 			Storage: types.StringNull(),
@@ -632,11 +610,11 @@ func mapClusterToState(c *client.Cluster, etag string, state *ClusterResourceMod
 	}
 }
 
-// clusterResourcesFromPlan builds a ClusterResource only including
+// resourcesFromPlan builds a ResourceQuantities only including
 // non-null fields so omitted nested values are absent from the JSON body
 // rather than sent as empty strings.
-func clusterResourcesFromPlan(m *ClusterResourcesModel) *client.ClusterResource {
-	r := &client.ClusterResource{}
+func resourcesFromPlan(m *ResourcesModel) *client.ResourceQuantities {
+	r := &client.ResourceQuantities{}
 	if !m.CPU.IsNull() && !m.CPU.IsUnknown() {
 		r.CPU = m.CPU.ValueString()
 	}

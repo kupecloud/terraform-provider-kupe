@@ -10,6 +10,8 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
+
+	"github.com/kupecloud/terraform-provider-kupe/internal/client"
 )
 
 // mockKupeAPI is a stateful mock API server for acceptance tests.
@@ -32,6 +34,15 @@ type mockKupeAPI struct {
 	amRoutes    []map[string]any
 	amGlobal    map[string]any
 	amETag      string
+	// Managed databases keyed by name; bindings keyed by "{database}/{name}".
+	databases        map[string]map[string]any
+	databaseBindings map[string]map[string]any
+	// databasesDisabled makes every database route answer like a platform
+	// with managed databases turned off.
+	databasesDisabled bool
+	// databaseDeleteConflicts is how many upcoming database DELETEs are
+	// refused with a plain 409, like a concurrent change does.
+	databaseDeleteConflicts int
 }
 
 func newMockKupeAPI() *mockKupeAPI {
@@ -46,6 +57,9 @@ func newMockKupeAPI() *mockKupeAPI {
 		amGlobal:    map[string]any{},
 		amETag:      `"1"`,
 		rvCounter:   1,
+
+		databases:        make(map[string]map[string]any),
+		databaseBindings: make(map[string]map[string]any),
 		tenant: map[string]any{
 			"name": "acme", "displayName": "Acme Corp",
 			"contactEmail": "admin@acme.com", "plan": "starter",
@@ -441,6 +455,9 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("ETag", m.amETag)
 		mustEncodeJSON(w, mockMaskSecrets(m.amGlobal))
 
+	case strings.HasPrefix(r.URL.Path, mockDatabasesPath):
+		m.serveDatabases(w, r)
+
 	default:
 		w.WriteHeader(404)
 		mustEncodeJSON(w, map[string]string{"error": "not found"})
@@ -594,4 +611,246 @@ func testAccProtoV6ProviderFactories() map[string]func() (tfprotov6.ProviderServ
 	return map[string]func() (tfprotov6.ProviderServer, error){
 		"kupe": providerserver.NewProtocol6WithError(New("test")()),
 	}
+}
+
+// --- Managed databases ---
+
+const mockDatabasesPath = "/api/v1/tenants/acme/databases"
+
+// mockCodeMajorUpgradeUnavailable is kupe-api's 400 code for a PATCH that
+// changes a database's version.
+const mockCodeMajorUpgradeUnavailable = "major_upgrade_unavailable"
+
+// mockDatabasePatchFields are the only fields kupe-api's PATCH accepts.
+var mockDatabasePatchFields = map[string]bool{
+	"version": true, "resources": true, "highAvailability": true, "deletionProtection": true,
+}
+
+func mockError(w http.ResponseWriter, status int, code, msg string) {
+	w.WriteHeader(status)
+	body := map[string]string{"error": msg}
+	if code != "" {
+		body["code"], body["severity"], body["message"] = code, "error", msg
+	}
+	mustEncodeJSON(w, body)
+}
+
+// serveDatabases routes /databases[/{name}[/bindings[/{binding}]]]. Like the
+// other mock routes it advances status on GET: a database goes Pending ->
+// Running and catches observedGeneration up with generation; a binding goes
+// Pending -> Ready. Called with m.mu held.
+func (m *mockKupeAPI) serveDatabases(w http.ResponseWriter, r *http.Request) {
+	if m.databasesDisabled {
+		mockError(w, http.StatusNotFound, client.CodeDatabasesUnavailable, "managed databases are not enabled")
+		return
+	}
+	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, mockDatabasesPath), "/")
+	var segs []string
+	if rest != "" {
+		segs = strings.Split(rest, "/")
+	}
+	switch {
+	case len(segs) == 0 && r.Method == http.MethodPost:
+		m.createDatabase(w, r)
+	case len(segs) == 1 && r.Method == http.MethodGet:
+		m.getDatabase(w, segs[0])
+	case len(segs) == 1 && r.Method == http.MethodPatch:
+		m.patchDatabase(w, r, segs[0])
+	case len(segs) == 1 && r.Method == http.MethodDelete:
+		m.deleteDatabase(w, segs[0])
+	case len(segs) == 2 && segs[1] == "bindings" && r.Method == http.MethodPost:
+		m.createDatabaseBinding(w, r, segs[0])
+	case len(segs) == 3 && segs[1] == "bindings" && r.Method == http.MethodGet:
+		m.getDatabaseBinding(w, segs[0], segs[2])
+	case len(segs) == 3 && segs[1] == "bindings" && r.Method == http.MethodDelete:
+		m.deleteDatabaseBinding(w, segs[0], segs[2])
+	default:
+		mockError(w, http.StatusNotFound, "", "not found")
+	}
+}
+
+func (m *mockKupeAPI) createDatabase(w http.ResponseWriter, r *http.Request) {
+	var body map[string]any
+	mustDecodeJSON(r, &body)
+	name := strOrEmpty(body["name"])
+	if _, exists := m.databases[name]; exists {
+		mockError(w, http.StatusConflict, "", "database already exists")
+		return
+	}
+	engine := strOrEmpty(body["engine"])
+	if engine == "" {
+		engine = "postgres"
+	}
+	if engine != "postgres" {
+		mockError(w, http.StatusBadRequest, "", fmt.Sprintf("unsupported engine %q", engine))
+		return
+	}
+	version := strOrEmpty(body["version"])
+	if version == "" {
+		version = "18"
+	}
+	protected, set := body["deletionProtection"].(bool)
+	rv := m.nextRV()
+	db := map[string]any{
+		"name": name, "engine": engine, "version": version,
+		"resources":          body["resources"],
+		"highAvailability":   body["highAvailability"] == true,
+		"deletionProtection": protected || !set,
+		"generation":         1,
+		"status":             map[string]any{"phase": "Pending", "observedGeneration": 0, "currentVersion": ""},
+		"resourceVersion":    rv, "createdAt": "2026-10-09T10:00:00Z",
+	}
+	m.databases[name] = db
+	w.Header().Set("ETag", `"`+rv+`"`)
+	w.WriteHeader(http.StatusCreated)
+	mustEncodeJSON(w, db)
+}
+
+func (m *mockKupeAPI) getDatabase(w http.ResponseWriter, name string) {
+	db, ok := m.databases[name]
+	if !ok {
+		mockError(w, http.StatusNotFound, "", "not found")
+		return
+	}
+	status := db["status"].(map[string]any)
+	status["phase"] = "Running"
+	status["observedGeneration"] = db["generation"]
+	status["currentVersion"] = db["version"].(string) + ".0"
+	w.Header().Set("ETag", `"`+db["resourceVersion"].(string)+`"`)
+	mustEncodeJSON(w, db)
+}
+
+func (m *mockKupeAPI) patchDatabase(w http.ResponseWriter, r *http.Request, name string) {
+	db, ok := m.databases[name]
+	if !ok {
+		mockError(w, http.StatusNotFound, "", "not found")
+		return
+	}
+	if ifMatch := r.Header.Get("If-Match"); ifMatch != "" && strings.Trim(ifMatch, `"`) != db["resourceVersion"] {
+		mockError(w, http.StatusPreconditionFailed, "", "resource has been modified (ETag mismatch)")
+		return
+	}
+	var body map[string]any
+	mustDecodeJSON(r, &body)
+	if len(body) == 0 {
+		mockError(w, http.StatusBadRequest, "", "at least one field required")
+		return
+	}
+	for key := range body {
+		if !mockDatabasePatchFields[key] {
+			mockError(w, http.StatusBadRequest, "", fmt.Sprintf("unknown field %q", key))
+			return
+		}
+	}
+	if v, ok := body["version"]; ok && v != db["version"] {
+		mockError(w, http.StatusBadRequest, mockCodeMajorUpgradeUnavailable, "major version upgrades are not available yet")
+		return
+	}
+	if res, ok := body["resources"].(map[string]any); ok {
+		current, _ := db["resources"].(map[string]any)
+		for k, v := range res {
+			current[k] = v
+		}
+	}
+	for _, key := range []string{"highAvailability", "deletionProtection"} {
+		if v, ok := body[key]; ok {
+			db[key] = v
+		}
+	}
+	db["generation"] = db["generation"].(int) + 1
+	rv := m.nextRV()
+	db["resourceVersion"] = rv
+	w.Header().Set("ETag", `"`+rv+`"`)
+	mustEncodeJSON(w, db)
+}
+
+func (m *mockKupeAPI) deleteDatabase(w http.ResponseWriter, name string) {
+	db, ok := m.databases[name]
+	if !ok {
+		mockError(w, http.StatusNotFound, "", "not found")
+		return
+	}
+	if m.databaseDeleteConflicts > 0 {
+		m.databaseDeleteConflicts--
+		mockError(w, http.StatusConflict, "", "the database changed while it was being deleted, retry")
+		return
+	}
+	if db["deletionProtection"] == true {
+		mockError(w, http.StatusConflict, client.CodeDeletionProtected,
+			fmt.Sprintf("database %q has deletionProtection enabled: set it to false before deleting", name))
+		return
+	}
+	delete(m.databases, name)
+	for key := range m.databaseBindings {
+		if strings.HasPrefix(key, name+"/") {
+			delete(m.databaseBindings, key)
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (m *mockKupeAPI) createDatabaseBinding(w http.ResponseWriter, r *http.Request, database string) {
+	if _, ok := m.databases[database]; !ok {
+		mockError(w, http.StatusNotFound, "", "database not found")
+		return
+	}
+	var body map[string]any
+	mustDecodeJSON(r, &body)
+	name := strOrEmpty(body["name"])
+	if name == "" {
+		mockError(w, http.StatusBadRequest, "", `invalid name ""`)
+		return
+	}
+	key := database + "/" + name
+	if _, exists := m.databaseBindings[key]; exists {
+		mockError(w, http.StatusConflict, "", "binding already exists")
+		return
+	}
+	binding := map[string]any{
+		"name": name, "database": database,
+		"cluster": body["cluster"], "namespace": body["namespace"], "role": body["role"],
+		"secretName":      strOrEmpty(body["secretName"]),
+		"status":          map[string]any{"phase": "Pending", "host": "", "secretName": "", "message": ""},
+		"resourceVersion": m.nextRV(), "createdAt": "2026-10-09T10:05:00Z",
+	}
+	m.databaseBindings[key] = binding
+	w.WriteHeader(http.StatusCreated)
+	mustEncodeJSON(w, binding)
+}
+
+func (m *mockKupeAPI) getDatabaseBinding(w http.ResponseWriter, database, name string) {
+	binding, ok := m.databaseBindings[database+"/"+name]
+	if !ok {
+		mockError(w, http.StatusNotFound, "", "binding not found for this database")
+		return
+	}
+	secretName := binding["secretName"].(string)
+	if secretName == "" {
+		secretName = database + "-" + binding["role"].(string)
+	}
+	binding["status"] = map[string]any{
+		"phase":      "Ready",
+		"host":       fmt.Sprintf("%s.%s.svc.cluster.local", database, binding["namespace"]),
+		"secretName": secretName,
+		"message":    "",
+	}
+	mustEncodeJSON(w, binding)
+}
+
+func (m *mockKupeAPI) deleteDatabaseBinding(w http.ResponseWriter, database, name string) {
+	key := database + "/" + name
+	if _, ok := m.databaseBindings[key]; !ok {
+		mockError(w, http.StatusNotFound, "", "binding not found for this database")
+		return
+	}
+	delete(m.databaseBindings, key)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// setDatabaseState changes the mock's database state under its lock, for
+// tests that simulate the platform changing between steps.
+func (m *mockKupeAPI) setDatabaseState(f func(m *mockKupeAPI)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	f(m)
 }
