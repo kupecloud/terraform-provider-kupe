@@ -43,9 +43,9 @@ type mockKupeAPI struct {
 	// with managed databases turned off: reads, deletes and a PATCH that
 	// only changes deletionProtection work, everything else is refused.
 	databasesDisabled bool
-	// databaseCreationPaused refuses database creation like kupe-api does
-	// while creation is paused.
-	databaseCreationPaused bool
+	// creationPaused refuses cluster and database creation like kupe-api
+	// does while creation is paused.
+	creationPaused bool
 	// databaseDeleteConflicts is how many upcoming database DELETEs are
 	// refused with a plain 409, like a concurrent change does.
 	databaseDeleteConflicts int
@@ -183,6 +183,10 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 			items = append(items, c)
 		}
 		mustEncodeJSON(w, map[string]any{"items": items})
+
+	case r.Method == "POST" && r.URL.Path == "/api/v1/tenants/acme/clusters" && m.creationPaused:
+		mockError(w, http.StatusBadRequest, client.CodeCreationPaused,
+			"Cluster creation is temporarily paused while we expand platform capacity. Please try again later.")
 
 	case r.Method == "POST" && r.URL.Path == "/api/v1/tenants/acme/clusters":
 		var body map[string]any
@@ -701,7 +705,7 @@ func mockAllowedWhileDisabled(r *http.Request) bool {
 }
 
 func (m *mockKupeAPI) createDatabase(w http.ResponseWriter, r *http.Request) {
-	if m.databaseCreationPaused {
+	if m.creationPaused {
 		mockError(w, http.StatusBadRequest, client.CodeCreationPaused,
 			"Database creation is temporarily paused while we expand platform capacity. Please try again later.")
 		return
@@ -897,9 +901,9 @@ func (m *mockKupeAPI) deleteDatabaseBinding(w http.ResponseWriter, database, nam
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// setDatabaseState changes the mock's database state under its lock, for
-// tests that simulate the platform changing between steps.
-func (m *mockKupeAPI) setDatabaseState(f func(m *mockKupeAPI)) {
+// setState changes the mock's state under its lock, for tests that
+// simulate the platform changing between steps.
+func (m *mockKupeAPI) setState(f func(m *mockKupeAPI)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	f(m)

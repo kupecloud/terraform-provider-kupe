@@ -79,7 +79,8 @@ func TestAPIErrorDetail(t *testing.T) {
 				Message:    "Database creation is temporarily paused while we expand platform capacity. Please try again later.",
 				Code:       client.CodeCreationPaused,
 			},
-			wantSubstr: []string{"Error code: creation_paused", "temporarily paused, so nothing was created", "apply` again later"},
+			wantSubstr:   []string{"Error code: creation_paused", "Creation is temporarily paused on the Kupe platform, so nothing was created", "Existing resources are not affected", "apply` again later"},
+			wantNoSubstr: []string{"databases"},
 		},
 		{
 			name: "400 storage_shrink_unsupported says storage only grows",
@@ -184,7 +185,7 @@ func TestDeleteErrorDetail(t *testing.T) {
 		{
 			name:         "a conflict that outlasted the timeout keeps the wrapper and gets the delete hint",
 			err:          fmt.Errorf("%w: %w", errDeleteNotAccepted, conflict),
-			wantSubstr:   []string{wrapper, "kupe API returned 409", deleteHint, "terraform destroy` again"},
+			wantSubstr:   []string{wrapper, "kupe API returned 409", deleteHint, "Run the same `terraform` command again"},
 			wantNoSubstr: []string{createConflict},
 		},
 		{

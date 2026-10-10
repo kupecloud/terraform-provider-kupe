@@ -304,7 +304,7 @@ func TestAccDatabaseResource_DatabasesUnavailable(t *testing.T) {
 		Steps: []resource.TestStep{
 			{Config: testAccDatabaseConfig(mock.url(), testDatabase{})},
 			{
-				PreConfig:        func() { mock.setDatabaseState(func(m *mockKupeAPI) { m.databasesDisabled = true }) },
+				PreConfig:        func() { mock.setState(func(m *mockKupeAPI) { m.databasesDisabled = true }) },
 				Config:           testAccDatabaseConfig(mock.url(), testDatabase{cpu: "1"}),
 				ConfigPlanChecks: expectAction(plancheck.ResourceActionUpdate),
 				ExpectError:      regexp.MustCompile("Managed databases are not enabled"),
@@ -366,7 +366,7 @@ func TestAccDatabaseResource_UpdateAfterConcurrentWrite(t *testing.T) {
 			defer mock.close()
 			step := resource.TestStep{
 				PreConfig: func() {
-					mock.setDatabaseState(func(m *mockKupeAPI) { m.databaseBeforePatch = tt.beforePatch })
+					mock.setState(func(m *mockKupeAPI) { m.databaseBeforePatch = tt.beforePatch })
 				},
 				Config: testAccDatabaseConfig(mock.url(), testDatabase{cpu: "1", protection: boolPtr(false)}),
 				Check:  resource.TestCheckResourceAttr("kupe_database.test", "resources.cpu", "1"),
@@ -389,7 +389,7 @@ func TestAccDatabaseResource_UpdateAfterConcurrentWrite(t *testing.T) {
 func TestAccDatabaseResource_CreationPaused(t *testing.T) {
 	mock := newMockKupeAPI()
 	defer mock.close()
-	mock.setDatabaseState(func(m *mockKupeAPI) { m.databaseCreationPaused = true })
+	mock.setState(func(m *mockKupeAPI) { m.creationPaused = true })
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
@@ -397,7 +397,7 @@ func TestAccDatabaseResource_CreationPaused(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config:      testAccDatabaseConfig(mock.url(), testDatabase{}),
-				ExpectError: regexp.MustCompile(`(?s)Error code: creation_paused.*temporarily paused, so nothing was created`),
+				ExpectError: regexp.MustCompile(`(?s)Error code: creation_paused.*temporarily paused on the Kupe\s+platform,\s+so\s+nothing\s+was\s+created`),
 			},
 		},
 	})
@@ -418,13 +418,13 @@ func TestAccDatabaseResource_DeleteTimesOutOnConflict(t *testing.T) {
 			{Config: testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false), deleteTimeout: "1s"})},
 			{
 				PreConfig: func() {
-					mock.setDatabaseState(func(m *mockKupeAPI) { m.databaseDeleteConflicts = math.MaxInt })
+					mock.setState(func(m *mockKupeAPI) { m.databaseDeleteConflicts = math.MaxInt })
 				},
 				Config:      testAccProviderConfig(mock.url()),
 				ExpectError: regexp.MustCompile(`(?s)delete not accepted before the timeout: kupe API returned 409.*kept refusing the delete`),
 			},
 			{
-				PreConfig: func() { mock.setDatabaseState(func(m *mockKupeAPI) { m.databaseDeleteConflicts = 0 }) },
+				PreConfig: func() { mock.setState(func(m *mockKupeAPI) { m.databaseDeleteConflicts = 0 }) },
 				Config:    testAccProviderConfig(mock.url()),
 			},
 		},
@@ -475,7 +475,7 @@ func TestAccDatabaseResource_DeleteRetriesConflict(t *testing.T) {
 		Steps: []resource.TestStep{
 			{Config: testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false)})},
 			{
-				PreConfig: func() { mock.setDatabaseState(func(m *mockKupeAPI) { m.databaseDeleteConflicts = 2 }) },
+				PreConfig: func() { mock.setState(func(m *mockKupeAPI) { m.databaseDeleteConflicts = 2 }) },
 				Config:    testAccProviderConfig(mock.url()),
 				Check:     testAccCheckNoDatabases(mock),
 			},

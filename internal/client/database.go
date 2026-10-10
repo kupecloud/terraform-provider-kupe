@@ -16,8 +16,9 @@ const (
 	// changes deletionProtection still work then, so existing databases
 	// can be removed.
 	CodeDatabasesUnavailable = "databases_unavailable"
-	// CodeCreationPaused comes with a 400 when creating databases is
-	// temporarily paused. Existing databases are unaffected.
+	// CodeCreationPaused comes with a 400 when the platform has temporarily
+	// paused creating clusters or databases. Existing resources are
+	// unaffected.
 	CodeCreationPaused = "creation_paused"
 	// CodeMajorUpgradeUnavailable comes with a 400 when a PATCH changes the
 	// engine major version.

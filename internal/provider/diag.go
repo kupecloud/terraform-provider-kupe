@@ -153,7 +153,7 @@ func deleteErrorDetail(err error) string {
 	if apiErr.StatusCode == http.StatusConflict {
 		return errDeleteNotAccepted.Error() + ": " + apiErrorSummary(apiErr) +
 			"\n\nThe Kupe platform kept refusing the delete because the resource was changing while the delete " +
-			"was being admitted, so nothing was deleted. Run `terraform destroy` again; if it keeps failing, " +
+			"was being admitted, so nothing was deleted. Run the same `terraform` command again; if it keeps failing, " +
 			"contact Kupe Cloud support."
 	}
 	return errDeleteNotAccepted.Error() + ": " + apiErrorDetail(apiErr)
@@ -219,11 +219,12 @@ func apiErrorDetail(err error) string {
 	base := apiErrorSummary(apiErr)
 	switch apiErr.StatusCode {
 	case http.StatusBadRequest:
-		// Database codes with a known remedy get one.
+		// Codes with a known remedy get one. creation_paused is shared by
+		// clusters and databases, so its text names neither.
 		switch apiErr.Code {
 		case client.CodeCreationPaused:
-			return base + "\n\nCreating new databases is temporarily paused, so nothing was created. Existing " +
-				"databases are not affected. Run `terraform apply` again later."
+			return base + "\n\nCreation is temporarily paused on the Kupe platform, so nothing was created. " +
+				"Existing resources are not affected. Run `terraform apply` again later."
 		case client.CodeStorageShrinkUnsupported:
 			return base + "\n\nDatabase storage can only grow. Keep the current size or set a larger one."
 		}

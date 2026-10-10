@@ -216,6 +216,26 @@ func TestAccClusterResource_EmptyResourcesBlock(t *testing.T) {
 	})
 }
 
+// TestAccClusterResource_CreationPaused: a cluster create refused with 400
+// creation_paused ends in an error that says nothing was created, in wording
+// that fits a cluster as well as a database.
+func TestAccClusterResource_CreationPaused(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+	mock.setState(func(m *mockKupeAPI) { m.creationPaused = true })
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccClusterConfig(mock.url(), "paused", "Paused", "shared"),
+				ExpectError: regexp.MustCompile(`(?s)failed to create cluster.*Error code: creation_paused.*` +
+					`Creation is temporarily paused on the Kupe platform, so nothing was created\.\s+Existing\s+resources\s+are\s+not\s+affected`),
+			},
+		},
+	})
+}
+
 // testAccClusterConfigEmptyResources sets an explicitly empty `resources`
 // block to exercise the LOW-4 clear-the-limits path.
 func testAccClusterConfigEmptyResources(host, name, displayName string) string {
