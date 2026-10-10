@@ -5,7 +5,7 @@ description: |-
   Manages a Kupe managed PostgreSQL database. Create and Update wait for the database to reach phase=Running with the change applied; Delete waits until the database is gone. Timeouts are configurable via the timeouts block (defaults: create/update 30m, delete 15m).
   Applications reach the database through kupe_database_binding, which places a Service and a credentials Secret in one namespace of one cluster. Credentials are never returned by the API or stored in Terraform state.
   Destroy semantics
-  Deleting a database deletes its data. deletion_protection (default true) makes the Kupe platform refuse the delete: set it to false and apply before destroying. Add lifecycle { prevent_destroy = true } to stop Terraform from planning the destroy at all.
+  Deleting a database removes it immediately. Its storage is kept for 7 days for support-assisted recovery, then permanently deleted. There is no self-service restore in v1. deletion_protection (default true) makes the Kupe platform refuse the delete: set it to false and apply before destroying. Add lifecycle { prevent_destroy = true } to stop Terraform from planning the destroy at all.
 ---
 
 # kupe_database (Resource)
@@ -16,7 +16,7 @@ Applications reach the database through `kupe_database_binding`, which places a 
 
 ### Destroy semantics
 
-Deleting a database deletes its data. `deletion_protection` (default `true`) makes the Kupe platform refuse the delete: set it to `false` and apply before destroying. Add `lifecycle { prevent_destroy = true }` to stop Terraform from planning the destroy at all.
+Deleting a database removes it immediately. Its storage is kept for 7 days for support-assisted recovery, then permanently deleted. There is no self-service restore in v1. `deletion_protection` (default `true`) makes the Kupe platform refuse the delete: set it to `false` and apply before destroying. Add `lifecycle { prevent_destroy = true }` to stop Terraform from planning the destroy at all.
 
 ## Example Usage
 

@@ -1,0 +1,91 @@
+package provider
+
+import (
+	"context"
+	"fmt"
+	"regexp"
+	"strings"
+
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+)
+
+// Name formats the platform enforces. "--" is reserved as a delimiter in the
+// names the platform derives from databases and clusters, so those names
+// may not contain it: each "-" must be followed by a letter or digit.
+var (
+	databaseNamePattern = regexp.MustCompile(`^[a-z](-?[a-z0-9])*$`)
+	clusterRefPattern   = regexp.MustCompile(`^[a-z0-9](-?[a-z0-9])*$`)
+	namespacePattern    = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+)
+
+// databaseNameValidators check a database name: a DNS-1035 label (starts
+// with a letter) without "--".
+func databaseNameValidators() []validator.String {
+	return []validator.String{
+		stringvalidator.LengthAtMost(maxNameLength),
+		stringvalidator.RegexMatches(databaseNamePattern,
+			"must be lowercase letters, digits and '-', start with a letter, end with a letter or digit, and not contain '--'"),
+	}
+}
+
+// clusterRefValidators check a reference to a cluster by name.
+func clusterRefValidators() []validator.String {
+	return []validator.String{
+		stringvalidator.LengthAtMost(maxNameLength),
+		stringvalidator.RegexMatches(clusterRefPattern,
+			"must be lowercase letters, digits and '-', start and end with a letter or digit, and not contain '--'"),
+	}
+}
+
+// bindingNamespaceValidators check the cluster namespace a binding delivers
+// into: a DNS-1123 label that is not reserved for the platform.
+func bindingNamespaceValidators() []validator.String {
+	return []validator.String{
+		stringvalidator.LengthAtMost(maxNameLength),
+		stringvalidator.RegexMatches(namespacePattern,
+			"must be lowercase letters, digits and '-', and start and end with a letter or digit"),
+		notPlatformNamespace{},
+	}
+}
+
+// cpuQuantityValidators and sizeQuantityValidators check database resource
+// quantities against the formats in quantity.go.
+func cpuQuantityValidators() []validator.String {
+	return []validator.String{
+		stringvalidator.LengthAtMost(maxQuantityLength),
+		stringvalidator.RegexMatches(cpuQuantityPattern, `must be a CPU count without a unit, e.g. "2", "500m" or "0.5"`),
+	}
+}
+
+func sizeQuantityValidators() []validator.String {
+	return []validator.String{
+		stringvalidator.LengthAtMost(maxQuantityLength),
+		stringvalidator.RegexMatches(sizeQuantityPattern,
+			`must be a number with a unit suffix (Ki, Mi, Gi, Ti, Pi, Ei, k, M, G, T, P or E), e.g. "512Mi" or "10Gi"`),
+	}
+}
+
+// notPlatformNamespace rejects the namespaces the platform reserves for
+// itself inside every cluster: kube-* and argocd.
+type notPlatformNamespace struct{}
+
+func (v notPlatformNamespace) Description(_ context.Context) string {
+	return "must not be a kube-* namespace or argocd"
+}
+
+func (v notPlatformNamespace) MarkdownDescription(ctx context.Context) string {
+	return v.Description(ctx)
+}
+
+func (v notPlatformNamespace) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	ns := req.ConfigValue.ValueString()
+	if strings.HasPrefix(ns, "kube-") || ns == "argocd" {
+		resp.Diagnostics.AddAttributeError(req.Path, "Reserved namespace",
+			fmt.Sprintf("%s is %q: kube-* namespaces and argocd are reserved for the Kupe platform. Use an application namespace.",
+				req.Path, ns))
+	}
+}

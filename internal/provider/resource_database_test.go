@@ -2,7 +2,10 @@ package provider
 
 import (
 	"fmt"
+	"math"
+	"os"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -15,15 +18,19 @@ import (
 // testDatabase is the HCL a kupe_database.test config is rendered from.
 // Empty strings and nil pointers leave the attribute out.
 type testDatabase struct {
-	engine, version              string
+	name, engine, version        string
 	cpu, memory, storage         string
 	highAvailability, protection *bool
+	deleteTimeout                string
 }
 
 func boolPtr(b bool) *bool { return &b }
 
 func (d testDatabase) hcl() string {
-	cpu, memory, storage := d.cpu, d.memory, d.storage
+	name, cpu, memory, storage := d.name, d.cpu, d.memory, d.storage
+	if name == "" {
+		name = "orders-db"
+	}
 	if cpu == "" {
 		cpu = "500m"
 	}
@@ -46,9 +53,12 @@ func (d testDatabase) hcl() string {
 	if d.protection != nil {
 		attrs += fmt.Sprintf("  deletion_protection = %t\n", *d.protection)
 	}
+	if d.deleteTimeout != "" {
+		attrs += fmt.Sprintf("  timeouts = { delete = %q }\n", d.deleteTimeout)
+	}
 	return fmt.Sprintf(`
 resource "kupe_database" "test" {
-  name = "orders-db"
+  name = %q
 %s
   resources = {
     cpu     = %q
@@ -56,7 +66,7 @@ resource "kupe_database" "test" {
     storage = %q
   }
 }
-`, attrs, cpu, memory, storage)
+`, name, attrs, cpu, memory, storage)
 }
 
 func testAccProviderConfig(host string) string {
@@ -163,6 +173,7 @@ func TestAccDatabaseResource(t *testing.T) {
 func TestAccDatabaseResource_DeletionProtectionBlocksDestroy(t *testing.T) {
 	mock := newMockKupeAPI()
 	defer mock.close()
+	refused := "(?s)deletion protection is enabled.*`deletion_protection\\s+=\\s+false`.*" + wrappedText(sharedDeleteNotice)
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
@@ -171,7 +182,7 @@ func TestAccDatabaseResource_DeletionProtectionBlocksDestroy(t *testing.T) {
 			{Config: testAccDatabaseConfig(mock.url(), testDatabase{})},
 			{
 				Config:      testAccProviderConfig(mock.url()),
-				ExpectError: regexp.MustCompile("(?s)deletion protection is enabled.*`deletion_protection\\s+=\\s+false`"),
+				ExpectError: regexp.MustCompile(refused),
 			},
 			{
 				// The refused delete left the database in state: lifting
@@ -181,6 +192,34 @@ func TestAccDatabaseResource_DeletionProtectionBlocksDestroy(t *testing.T) {
 			},
 		},
 	})
+}
+
+// sharedDeleteNotice is the wording for what deleting a database does to its
+// data. Every Kupe surface (API docs, CLI, provider docs and diagnostics)
+// states it verbatim.
+const sharedDeleteNotice = "Deleting a database removes it immediately. Its storage is kept for 7 days for " +
+	"support-assisted recovery, then permanently deleted. There is no self-service restore in v1."
+
+// wrappedText matches text in Terraform output, which may wrap it across lines.
+func wrappedText(text string) string {
+	words := strings.Fields(text)
+	for i, word := range words {
+		words[i] = regexp.QuoteMeta(word)
+	}
+	return strings.Join(words, `\s+`)
+}
+
+func TestDatabaseDeleteNotice(t *testing.T) {
+	if databaseDeleteNotice != sharedDeleteNotice {
+		t.Errorf("databaseDeleteNotice = %q, want the shared wording %q", databaseDeleteNotice, sharedDeleteNotice)
+	}
+	doc, err := os.ReadFile("../../docs/resources/database.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(doc), sharedDeleteNotice) {
+		t.Errorf("docs/resources/database.md does not state %q; run make docs", sharedDeleteNotice)
+	}
 }
 
 func TestAccDatabaseResource_PlanTimeErrors(t *testing.T) {
@@ -251,31 +290,179 @@ func TestAccDatabaseResource_StorageGrowsWithOtherUnits(t *testing.T) {
 	})
 }
 
-// TestAccDatabaseResource_DatabasesUnavailableKeepsState: when the platform
-// answers 404 databases_unavailable, refresh must fail with a clear message
-// rather than treat the database as deleted and plan to create it again.
-func TestAccDatabaseResource_DatabasesUnavailableKeepsState(t *testing.T) {
+// TestAccDatabaseResource_DatabasesUnavailable: with managed databases
+// disabled, kupe-api still serves reads, deletes and a PATCH of deletion
+// protection alone. Refresh must keep the database in state, other changes
+// must fail with a clear message, and the database must still be removable.
+func TestAccDatabaseResource_DatabasesUnavailable(t *testing.T) {
 	mock := newMockKupeAPI()
 	defer mock.close()
-	config := testAccDatabaseConfig(mock.url(), testDatabase{})
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
 		CheckDestroy:             testAccCheckNoDatabases(mock),
 		Steps: []resource.TestStep{
-			{Config: config},
+			{Config: testAccDatabaseConfig(mock.url(), testDatabase{})},
 			{
-				PreConfig:   func() { mock.setDatabaseState(func(m *mockKupeAPI) { m.databasesDisabled = true }) },
-				Config:      config,
-				ExpectError: regexp.MustCompile("Managed databases are not enabled"),
+				PreConfig:        func() { mock.setDatabaseState(func(m *mockKupeAPI) { m.databasesDisabled = true }) },
+				Config:           testAccDatabaseConfig(mock.url(), testDatabase{cpu: "1"}),
+				ConfigPlanChecks: expectAction(plancheck.ResourceActionUpdate),
+				ExpectError:      regexp.MustCompile("Managed databases are not enabled"),
 			},
 			{
-				PreConfig:        func() { mock.setDatabaseState(func(m *mockKupeAPI) { m.databasesDisabled = false }) },
 				Config:           testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false)}),
 				ConfigPlanChecks: expectAction(plancheck.ResourceActionUpdate),
+				Check:            resource.TestCheckResourceAttr("kupe_database.test", "deletion_protection", "false"),
+			},
+			{
+				Config: testAccProviderConfig(mock.url()),
+				Check:  testAccCheckNoDatabases(mock),
 			},
 		},
 	})
+}
+
+// TestAccDatabaseResource_UpdateAfterConcurrentWrite covers a write landing
+// between refresh and update, which makes the update's ETag stale.
+func TestAccDatabaseResource_UpdateAfterConcurrentWrite(t *testing.T) {
+	statusWrite := func(db map[string]any) {
+		db["status"].(map[string]any)["phase"] = "Running"
+	}
+	specWrite := func(field string, value any) func(map[string]any) {
+		return func(db map[string]any) {
+			if field == "cpu" {
+				db["resources"].(map[string]any)["cpu"] = value
+			} else {
+				db[field] = value
+			}
+			db["generation"] = db["generation"].(int) + 1
+		}
+	}
+	tests := []struct {
+		name        string
+		beforePatch []func(map[string]any)
+		wantErr     string // empty means the update applies
+	}{
+		{name: "a status write is retried with the fresh ETag", beforePatch: []func(map[string]any){statusWrite}},
+		{
+			name:        "the retry happens once",
+			beforePatch: []func(map[string]any){statusWrite, statusWrite},
+			wantErr:     `(?s)kupe API returned 412.*kept changing while the update was being sent`,
+		},
+		{
+			name:        "a change to the patched setting is reported",
+			beforePatch: []func(map[string]any){specWrite("cpu", "2")},
+			wantErr:     `(?s)database changed outside this apply.*\(resources now differs`,
+		},
+		{
+			name:        "a change to another setting is reported",
+			beforePatch: []func(map[string]any){specWrite("highAvailability", true)},
+			wantErr:     `(?s)database changed outside this apply.*\(high_availability now differs`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := newMockKupeAPI()
+			defer mock.close()
+			step := resource.TestStep{
+				PreConfig: func() {
+					mock.setDatabaseState(func(m *mockKupeAPI) { m.databaseBeforePatch = tt.beforePatch })
+				},
+				Config: testAccDatabaseConfig(mock.url(), testDatabase{cpu: "1", protection: boolPtr(false)}),
+				Check:  resource.TestCheckResourceAttr("kupe_database.test", "resources.cpu", "1"),
+			}
+			if tt.wantErr != "" {
+				step.Check, step.ExpectError = nil, regexp.MustCompile(tt.wantErr)
+			}
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+				CheckDestroy:             testAccCheckNoDatabases(mock),
+				Steps: []resource.TestStep{
+					{Config: testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false)})},
+					step,
+				},
+			})
+		})
+	}
+}
+
+func TestAccDatabaseResource_CreationPaused(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+	mock.setDatabaseState(func(m *mockKupeAPI) { m.databaseCreationPaused = true })
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		CheckDestroy:             testAccCheckNoDatabases(mock),
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccDatabaseConfig(mock.url(), testDatabase{}),
+				ExpectError: regexp.MustCompile(`(?s)Error code: creation_paused.*temporarily paused, so nothing was created`),
+			},
+		},
+	})
+}
+
+// TestAccDatabaseResource_DeleteTimesOutOnConflict: a delete the platform
+// keeps refusing with a plain 409 ends in an error that says the delete was
+// not accepted, with a hint about deleting rather than about name clashes.
+func TestAccDatabaseResource_DeleteTimesOutOnConflict(t *testing.T) {
+	shrinkPollInterval(t)
+	mock := newMockKupeAPI()
+	defer mock.close()
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		CheckDestroy:             testAccCheckNoDatabases(mock),
+		Steps: []resource.TestStep{
+			{Config: testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false), deleteTimeout: "1s"})},
+			{
+				PreConfig: func() {
+					mock.setDatabaseState(func(m *mockKupeAPI) { m.databaseDeleteConflicts = math.MaxInt })
+				},
+				Config:      testAccProviderConfig(mock.url()),
+				ExpectError: regexp.MustCompile(`(?s)delete not accepted before the timeout: kupe API returned 409.*kept refusing the delete`),
+			},
+			{
+				PreConfig: func() { mock.setDatabaseState(func(m *mockKupeAPI) { m.databaseDeleteConflicts = 0 }) },
+				Config:    testAccProviderConfig(mock.url()),
+			},
+		},
+	})
+}
+
+// TestAccDatabaseResource_InvalidConfig: names and quantities the platform
+// would refuse fail validation before anything is sent.
+func TestAccDatabaseResource_InvalidConfig(t *testing.T) {
+	const badName, badCPU, badSize = "must be lowercase letters", "must be a CPU count", "must be a number with a unit"
+	tests := []struct {
+		name    string
+		db      testDatabase
+		wantErr string
+	}{
+		{name: "uppercase name", db: testDatabase{name: "Orders"}, wantErr: badName},
+		{name: "name starting with a digit", db: testDatabase{name: "1orders"}, wantErr: badName},
+		{name: "name with a double hyphen", db: testDatabase{name: "orders--db"}, wantErr: badName},
+		{name: "name ending with a hyphen", db: testDatabase{name: "orders-"}, wantErr: badName},
+		{name: "cpu with a unit", db: testDatabase{cpu: "1Gi"}, wantErr: badCPU},
+		{name: "memory with milli and a unit", db: testDatabase{memory: "1mGi"}, wantErr: badSize},
+		{name: "memory without a unit", db: testDatabase{memory: "1024"}, wantErr: badSize},
+		{name: "storage with an unknown unit", db: testDatabase{storage: "10GB"}, wantErr: badSize},
+		{name: "storage over 20 characters", db: testDatabase{storage: "1234567890123456789Gi"}, wantErr: "string length must be at most 20"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := newMockKupeAPI()
+			defer mock.close()
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+				CheckDestroy:             testAccCheckNoDatabases(mock),
+				Steps: []resource.TestStep{
+					{Config: testAccDatabaseConfig(mock.url(), tt.db), ExpectError: regexp.MustCompile(tt.wantErr)},
+				},
+			})
+		})
+	}
 }
 
 func TestAccDatabaseResource_DeleteRetriesConflict(t *testing.T) {
@@ -355,7 +542,7 @@ func TestDatabaseConverged(t *testing.T) {
 	}
 }
 
-func TestParseQuantity(t *testing.T) {
+func TestParseSizeQuantity(t *testing.T) {
 	tests := []struct {
 		a, b   string
 		wantOK bool
@@ -364,20 +551,46 @@ func TestParseQuantity(t *testing.T) {
 		{a: "10Gi", b: "10240Mi", wantOK: true, cmp: 0},
 		{a: "1.5Gi", b: "1536Mi", wantOK: true, cmp: 0},
 		{a: "1G", b: "1Gi", wantOK: true, cmp: -1},
-		{a: "500m", b: "1", wantOK: true, cmp: -1},
-		{a: ".5Ti", b: "512Gi", wantOK: true, cmp: 0},
+		{a: "0.5Ti", b: "512Gi", wantOK: true, cmp: 0},
+		{a: "1mGi", b: "1Gi", wantOK: false},
+		{a: ".5Ti", b: "1Gi", wantOK: false},
+		{a: "500m", b: "1Gi", wantOK: false},
+		{a: "1024", b: "1Gi", wantOK: false},
 		{a: "10GB", b: "1Gi", wantOK: false},
 		{a: "", b: "1Gi", wantOK: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.a+" vs "+tt.b, func(t *testing.T) {
-			a, okA := parseQuantity(tt.a)
-			b, okB := parseQuantity(tt.b)
+			a, okA := parseSizeQuantity(tt.a)
+			b, okB := parseSizeQuantity(tt.b)
 			if okA != tt.wantOK || !okB {
-				t.Fatalf("parseQuantity(%q) ok = %v, want %v (and %q ok = %v)", tt.a, okA, tt.wantOK, tt.b, okB)
+				t.Fatalf("parseSizeQuantity(%q) ok = %v, want %v (and %q ok = %v)", tt.a, okA, tt.wantOK, tt.b, okB)
 			}
 			if tt.wantOK && a.Cmp(b) != tt.cmp {
 				t.Errorf("%s compared with %s = %d, want %d", tt.a, tt.b, a.Cmp(b), tt.cmp)
+			}
+		})
+	}
+}
+
+func TestCPUQuantityPattern(t *testing.T) {
+	tests := []struct {
+		value string
+		want  bool
+	}{
+		{value: "2", want: true},
+		{value: "500m", want: true},
+		{value: "0.5", want: true},
+		{value: ".5", want: true},
+		{value: "1Gi", want: false},
+		{value: "1mGi", want: false},
+		{value: "1.5m", want: false},
+		{value: "", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			if got := cpuQuantityPattern.MatchString(tt.value); got != tt.want {
+				t.Errorf("cpuQuantityPattern matches %q = %v, want %v", tt.value, got, tt.want)
 			}
 		})
 	}

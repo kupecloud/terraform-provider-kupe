@@ -65,8 +65,8 @@ func (m storageNeverShrinksModifier) PlanModifyString(_ context.Context, req pla
 	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() || req.PlanValue.IsUnknown() || req.StateValue.IsNull() {
 		return
 	}
-	planned, okPlanned := parseQuantity(req.PlanValue.ValueString())
-	current, okCurrent := parseQuantity(req.StateValue.ValueString())
+	planned, okPlanned := parseSizeQuantity(req.PlanValue.ValueString())
+	current, okCurrent := parseSizeQuantity(req.StateValue.ValueString())
 	if !okPlanned || !okCurrent || planned.Cmp(current) >= 0 {
 		return
 	}

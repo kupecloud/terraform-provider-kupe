@@ -2,7 +2,7 @@
 title: "Testing"
 description: "Two-layer test strategy for the kupe terraform provider — mock-backed acceptance tests for fast CI coverage, plus manual smoke against the live dev API for release validation."
 owner: platform-team
-lastReviewed: "2026-10-09"
+lastReviewed: "2026-10-10"
 ---
 
 ## Overview
@@ -47,8 +47,8 @@ go test -run TestAccCluster ./internal/provider/...   # narrow to one
 | `kupe_alertmanager_receiver` | [resource_alertmanager_test.go](../internal/provider/resource_alertmanager_test.go) | create, body update | ✓ (body_json verify skipped — see below) | — |
 | `kupe_alertmanager_routes` | same file | initial + mutate | ✓ (routes_json verify skipped) | — |
 | `kupe_alertmanager_global` | same file | initial + mutate | ✓ (body_json verify skipped) | — |
-| `kupe_database` | [resource_database_test.go](../internal/provider/resource_database_test.go) | create, update resources, HA on and off, deletion protection off | ✓ verify | plan-time errors for engine change, storage shrink and version change; delete refused while protected; delete retried on 409; databases-unavailable keeps state |
-| `kupe_database_binding` | [resource_database_binding_test.go](../internal/provider/resource_database_binding_test.go) | create, replace on namespace / secret_name / name change | ✓ verify | default name, role validator, default name too long |
+| `kupe_database` | [resource_database_test.go](../internal/provider/resource_database_test.go) | create, update resources, HA on and off, deletion protection off | ✓ verify | plan-time errors for engine change, storage shrink and version change; name and quantity validators; update retried once on a stale ETag when only status changed, concurrent setting changes reported; creation paused; delete refused while protected; delete retried on 409 and the timeout message; databases disabled still allows unprotect and destroy |
+| `kupe_database_binding` | [resource_database_binding_test.go](../internal/provider/resource_database_binding_test.go) | create, replace on namespace / secret_name / name change | ✓ verify | default name, role validator, default name too long, reserved namespace, `--` in database or cluster |
 | `kupe_database` (data) | [resource_database_test.go](../internal/provider/resource_database_test.go) | read | n/a | — |
 | `kupe_tenant` (data) | [datasource_tenant_test.go](../internal/provider/datasource_tenant_test.go) | read | n/a | — |
 | `kupe_plan` (data) | same file | read | n/a | — |
@@ -60,7 +60,7 @@ The provider also has helper unit tests in [provider_test.go](../internal/provid
 
 ### What the mock covers
 
-The mock at [testutil_test.go](../internal/provider/testutil_test.go) is a stateful in-memory implementation of the kupe-api routing tree for the `acme` tenant — full CRUD on clusters, secrets, members, apikeys, alertmanager (receivers, routes, global), and databases and their bindings (including If-Match, the deletion-protection 409 and the PATCH field allow-list). It does **not** run the kupe-api validator, so tests that need real validation (e.g. invalid alertmanager JSON) won't catch issues — those land in the manual smoke layer instead.
+The mock at [testutil_test.go](../internal/provider/testutil_test.go) is a stateful in-memory implementation of the kupe-api routing tree for the `acme` tenant — full CRUD on clusters, secrets, members, apikeys, alertmanager (receivers, routes, global), and databases and their bindings (including If-Match, the deletion-protection 409, the PATCH field allow-list, the storage-shrink and creation-paused 400s, and what stays served while databases are disabled). It does **not** run the kupe-api validator, so tests that need real validation (e.g. invalid alertmanager JSON) won't catch issues — those land in the manual smoke layer instead.
 
 The mock matches the kupe-api response shapes from when it was last synchronised. Drift is the main reason Layer 2 (manual smoke) exists.
 

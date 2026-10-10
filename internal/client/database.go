@@ -11,9 +11,20 @@ const (
 	// CodeDeletionProtected comes with a 409 when a database delete is
 	// refused because deletion protection is enabled.
 	CodeDeletionProtected = "deletion_protected"
-	// CodeDatabasesUnavailable comes with a 404 from every database route
-	// when managed databases are not enabled on the platform.
+	// CodeDatabasesUnavailable comes with a 404 when managed databases are
+	// not enabled on the platform. Reads, deletes and a PATCH that only
+	// changes deletionProtection still work then, so existing databases
+	// can be removed.
 	CodeDatabasesUnavailable = "databases_unavailable"
+	// CodeCreationPaused comes with a 400 when creating databases is
+	// temporarily paused. Existing databases are unaffected.
+	CodeCreationPaused = "creation_paused"
+	// CodeMajorUpgradeUnavailable comes with a 400 when a PATCH changes the
+	// engine major version.
+	CodeMajorUpgradeUnavailable = "major_upgrade_unavailable"
+	// CodeStorageShrinkUnsupported comes with a 400 when a PATCH lowers the
+	// storage size.
+	CodeStorageShrinkUnsupported = "storage_shrink_unsupported"
 )
 
 // Database is a managed database in the API response. The API never returns

@@ -1,8 +1,10 @@
 package provider
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -37,12 +39,20 @@ type mockKupeAPI struct {
 	// Managed databases keyed by name; bindings keyed by "{database}/{name}".
 	databases        map[string]map[string]any
 	databaseBindings map[string]map[string]any
-	// databasesDisabled makes every database route answer like a platform
-	// with managed databases turned off.
+	// databasesDisabled makes the database routes answer like a platform
+	// with managed databases turned off: reads, deletes and a PATCH that
+	// only changes deletionProtection work, everything else is refused.
 	databasesDisabled bool
+	// databaseCreationPaused refuses database creation like kupe-api does
+	// while creation is paused.
+	databaseCreationPaused bool
 	// databaseDeleteConflicts is how many upcoming database DELETEs are
 	// refused with a plain 409, like a concurrent change does.
 	databaseDeleteConflicts int
+	// databaseBeforePatch is applied, one per PATCH, to the database just
+	// before the next PATCHes check If-Match: a write landing between the
+	// provider's read and its update.
+	databaseBeforePatch []func(db map[string]any)
 }
 
 func newMockKupeAPI() *mockKupeAPI {
@@ -617,10 +627,6 @@ func testAccProtoV6ProviderFactories() map[string]func() (tfprotov6.ProviderServ
 
 const mockDatabasesPath = "/api/v1/tenants/acme/databases"
 
-// mockCodeMajorUpgradeUnavailable is kupe-api's 400 code for a PATCH that
-// changes a database's version.
-const mockCodeMajorUpgradeUnavailable = "major_upgrade_unavailable"
-
 // mockDatabasePatchFields are the only fields kupe-api's PATCH accepts.
 var mockDatabasePatchFields = map[string]bool{
 	"version": true, "resources": true, "highAvailability": true, "deletionProtection": true,
@@ -640,14 +646,14 @@ func mockError(w http.ResponseWriter, status int, code, msg string) {
 // Running and catches observedGeneration up with generation; a binding goes
 // Pending -> Ready. Called with m.mu held.
 func (m *mockKupeAPI) serveDatabases(w http.ResponseWriter, r *http.Request) {
-	if m.databasesDisabled {
-		mockError(w, http.StatusNotFound, client.CodeDatabasesUnavailable, "managed databases are not enabled")
-		return
-	}
 	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, mockDatabasesPath), "/")
 	var segs []string
 	if rest != "" {
 		segs = strings.Split(rest, "/")
+	}
+	if m.databasesDisabled && !mockAllowedWhileDisabled(r) {
+		mockError(w, http.StatusNotFound, client.CodeDatabasesUnavailable, "managed databases are not enabled")
+		return
 	}
 	switch {
 	case len(segs) == 0 && r.Method == http.MethodPost:
@@ -669,7 +675,37 @@ func (m *mockKupeAPI) serveDatabases(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// mockAllowedWhileDisabled reports whether kupe-api still serves r with
+// databases disabled: reads, deletes, and a PATCH of deletionProtection
+// alone, so existing databases can be removed. It restores the body it
+// reads.
+func mockAllowedWhileDisabled(r *http.Request) bool {
+	switch r.Method {
+	case http.MethodGet, http.MethodDelete:
+		return true
+	case http.MethodPatch:
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			return false
+		}
+		r.Body = io.NopCloser(bytes.NewReader(raw))
+		var body map[string]any
+		if json.Unmarshal(raw, &body) != nil {
+			return false
+		}
+		_, ok := body["deletionProtection"]
+		return ok && len(body) == 1
+	default:
+		return false
+	}
+}
+
 func (m *mockKupeAPI) createDatabase(w http.ResponseWriter, r *http.Request) {
+	if m.databaseCreationPaused {
+		mockError(w, http.StatusBadRequest, client.CodeCreationPaused,
+			"Database creation is temporarily paused while we expand platform capacity. Please try again later.")
+		return
+	}
 	var body map[string]any
 	mustDecodeJSON(r, &body)
 	name := strOrEmpty(body["name"])
@@ -726,6 +762,11 @@ func (m *mockKupeAPI) patchDatabase(w http.ResponseWriter, r *http.Request, name
 		mockError(w, http.StatusNotFound, "", "not found")
 		return
 	}
+	if len(m.databaseBeforePatch) > 0 {
+		m.databaseBeforePatch[0](db)
+		m.databaseBeforePatch = m.databaseBeforePatch[1:]
+		db["resourceVersion"] = m.nextRV()
+	}
 	if ifMatch := r.Header.Get("If-Match"); ifMatch != "" && strings.Trim(ifMatch, `"`) != db["resourceVersion"] {
 		mockError(w, http.StatusPreconditionFailed, "", "resource has been modified (ETag mismatch)")
 		return
@@ -743,11 +784,20 @@ func (m *mockKupeAPI) patchDatabase(w http.ResponseWriter, r *http.Request, name
 		}
 	}
 	if v, ok := body["version"]; ok && v != db["version"] {
-		mockError(w, http.StatusBadRequest, mockCodeMajorUpgradeUnavailable, "major version upgrades are not available yet")
+		mockError(w, http.StatusBadRequest, client.CodeMajorUpgradeUnavailable, "major version upgrades are not available yet")
 		return
 	}
 	if res, ok := body["resources"].(map[string]any); ok {
 		current, _ := db["resources"].(map[string]any)
+		if storage, ok := res["storage"].(string); ok {
+			requested, okRequested := parseSizeQuantity(storage)
+			stored, okStored := parseSizeQuantity(strOrEmpty(current["storage"]))
+			if okRequested && okStored && requested.Cmp(stored) < 0 {
+				mockError(w, http.StatusBadRequest, client.CodeStorageShrinkUnsupported,
+					fmt.Sprintf("storage can only grow: %s is smaller than the current %s", storage, current["storage"]))
+				return
+			}
+		}
 		for k, v := range res {
 			current[k] = v
 		}

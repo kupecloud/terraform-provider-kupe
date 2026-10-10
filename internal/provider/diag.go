@@ -108,27 +108,69 @@ func waitForDeletion(ctx context.Context, timeout time.Duration, get func(contex
 	})
 }
 
+// errDeleteNotAccepted wraps the last refusal when deleteUntilAccepted runs
+// out of time.
+var errDeleteNotAccepted = errors.New("delete not accepted before the timeout")
+
 // deleteUntilAccepted sends del until the API accepts it or reports the
-// resource already gone. A 409 conflict (the resource changed while the
-// delete was being admitted) is retried until the timeout, after which the
-// last refusal is returned. A deletion-protection refusal and permanent API
-// errors are returned at once.
+// resource already gone. A 409 conflict (the resource kept changing while
+// the delete was being admitted) is retried until the timeout, after which
+// the last refusal is returned wrapped in errDeleteNotAccepted. A
+// deletion-protection refusal and permanent API errors are returned at once.
 func deleteUntilAccepted(ctx context.Context, timeout time.Duration, del func(context.Context) error) error {
 	var lastErr error
 	err := pollUntil(ctx, timeout, func(c context.Context) (bool, error) {
-		lastErr = del(c)
-		switch {
-		case lastErr == nil || client.IsNotFound(lastErr):
-			return true, nil
-		case client.IsDeletionProtected(lastErr):
-			return true, lastErr
+		err := del(c)
+		// An attempt cut short by the deadline says nothing about why the
+		// delete was refused: keep the refusal before it.
+		if c.Err() == nil || lastErr == nil {
+			lastErr = err
 		}
-		return false, lastErr
+		switch {
+		case err == nil || client.IsNotFound(err):
+			return true, nil
+		case client.IsDeletionProtected(err):
+			return true, err
+		}
+		return false, err
 	})
 	if errors.Is(err, context.DeadlineExceeded) && lastErr != nil {
-		return fmt.Errorf("delete not accepted before the timeout: %w", lastErr)
+		return fmt.Errorf("%w: %w", errDeleteNotAccepted, lastErr)
 	}
 	return err
+}
+
+// deleteErrorDetail is apiErrorDetail for errors from deleteUntilAccepted. A
+// delete that ran out of time keeps the "not accepted" context, and a 409
+// gets a hint about the delete rather than about creating a resource.
+func deleteErrorDetail(err error) string {
+	var apiErr *client.APIError
+	if !errors.Is(err, errDeleteNotAccepted) || !errors.As(err, &apiErr) {
+		// apiErrorDetail keeps the whole message of a non-API error,
+		// wrapper included.
+		return apiErrorDetail(err)
+	}
+	if apiErr.StatusCode == http.StatusConflict {
+		return errDeleteNotAccepted.Error() + ": " + apiErrorSummary(apiErr) +
+			"\n\nThe Kupe platform kept refusing the delete because the resource was changing while the delete " +
+			"was being admitted, so nothing was deleted. Run `terraform destroy` again; if it keeps failing, " +
+			"contact Kupe Cloud support."
+	}
+	return errDeleteNotAccepted.Error() + ": " + apiErrorDetail(apiErr)
+}
+
+// apiErrorSummary is the status, message and, when present, the canonical
+// error code and field path of an API error. The code is a stable identifier
+// users can quote to support or branch on.
+func apiErrorSummary(apiErr *client.APIError) string {
+	summary := fmt.Sprintf("kupe API returned %d: %s", apiErr.StatusCode, apiErr.Message)
+	if apiErr.Code != "" {
+		summary += "\n\nError code: " + apiErr.Code
+		if apiErr.Field != "" {
+			summary += "\nField: " + apiErr.Field
+		}
+	}
+	return summary
 }
 
 // isTerminalAPIError reports whether err (or anything it wraps) is a
@@ -174,20 +216,17 @@ func apiErrorDetail(err error) string {
 		return err.Error()
 	}
 
-	base := fmt.Sprintf("kupe API returned %d: %s", apiErr.StatusCode, apiErr.Message)
-	// Surface the canonical error code (and field path, when present) so
-	// errors carry the same greppable, scriptable signal that warnings do
-	// (cluster Create uses the code as the warning summary). Codes like
-	// HA_DISABLE_UNSUPPORTED / CLUSTER_DEDICATED_UNSUPPORTED are stable
-	// identifiers users can quote to support or branch on.
-	if apiErr.Code != "" {
-		base += "\n\nError code: " + apiErr.Code
-		if apiErr.Field != "" {
-			base += "\nField: " + apiErr.Field
-		}
-	}
+	base := apiErrorSummary(apiErr)
 	switch apiErr.StatusCode {
 	case http.StatusBadRequest:
+		// Database codes with a known remedy get one.
+		switch apiErr.Code {
+		case client.CodeCreationPaused:
+			return base + "\n\nCreating new databases is temporarily paused, so nothing was created. Existing " +
+				"databases are not affected. Run `terraform apply` again later."
+		case client.CodeStorageShrinkUnsupported:
+			return base + "\n\nDatabase storage can only grow. Keep the current size or set a larger one."
+		}
 		// 400 covers two server-side outcomes that surface here:
 		// (a) the request body failed schema decoding (typo in
 		//     body_json / routes_json, missing required field), and
@@ -212,7 +251,7 @@ func apiErrorDetail(err error) string {
 		return base
 	case http.StatusNotFound:
 		if apiErr.Code == client.CodeDatabasesUnavailable {
-			return base + "\n\nManaged databases are not enabled for this Kupe Cloud environment, so the provider cannot read or change databases. Existing state is kept unchanged. Contact Kupe Cloud support if you expected them to be available."
+			return base + "\n\nManaged databases are not enabled for this Kupe Cloud environment. Existing databases can still be read, have deletion protection turned off, and be deleted; other changes are refused. Terraform state is kept unchanged. Contact Kupe Cloud support if you expected databases to be available."
 		}
 		return base + "\n\nThe resource does not exist on the server. If you expected it to exist it may have been deleted out-of-band; run `terraform refresh` to reconcile or `terraform import` to re-attach."
 	case http.StatusConflict:

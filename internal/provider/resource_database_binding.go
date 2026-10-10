@@ -85,17 +85,20 @@ func (r *DatabaseBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 			"database": schema.StringAttribute{
 				Description:   "Name of the database to bind.",
 				Required:      true,
+				Validators:    databaseNameValidators(),
 				PlanModifiers: replace,
 			},
 			"cluster": schema.StringAttribute{
 				Description: "Cluster to bind into. It may not exist yet: the binding becomes Ready once it does, " +
 					"so Create waits up to its timeout and then warns.",
 				Required:      true,
+				Validators:    clusterRefValidators(),
 				PlanModifiers: replace,
 			},
 			"namespace": schema.StringAttribute{
 				Description:   "Namespace inside the cluster that receives the Service and credentials Secret. Not `kube-*` or `argocd`.",
 				Required:      true,
+				Validators:    bindingNamespaceValidators(),
 				PlanModifiers: replace,
 			},
 			"role": schema.StringAttribute{
@@ -269,7 +272,7 @@ func (r *DatabaseBindingResource) Delete(ctx context.Context, req resource.Delet
 	if err := deleteUntilAccepted(ctx, timeout, func(c context.Context) error {
 		return r.client.DeleteDatabaseBinding(c, database, name)
 	}); err != nil {
-		resp.Diagnostics.AddError("failed to delete database binding", apiErrorDetail(err))
+		resp.Diagnostics.AddError("failed to delete database binding", deleteErrorDetail(err))
 		return
 	}
 

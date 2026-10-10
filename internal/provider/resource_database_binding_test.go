@@ -101,6 +101,10 @@ func TestAccDatabaseBindingResource_PlanTimeErrors(t *testing.T) {
 			name: "default name longer than 63 characters", cluster: strings.Repeat("c", 30),
 			namespace: strings.Repeat("n", 30), role: "app", wantErr: `Default binding name too long`,
 		},
+		{name: "kube-* namespace", cluster: "prod", namespace: "kube-system", role: "app", wantErr: `Reserved namespace`},
+		{name: "argocd namespace", cluster: "prod", namespace: "argocd", role: "app", wantErr: `Reserved namespace`},
+		{name: "namespace with uppercase", cluster: "prod", namespace: "API", role: "app", wantErr: `must be lowercase letters`},
+		{name: "cluster with a double hyphen", cluster: "prod--eu", namespace: "api", role: "app", wantErr: `not contain '--'`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -108,6 +112,7 @@ func TestAccDatabaseBindingResource_PlanTimeErrors(t *testing.T) {
 			defer mock.close()
 			resource.UnitTest(t, resource.TestCase{
 				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+				CheckDestroy:             testAccCheckNoDatabases(mock),
 				Steps: []resource.TestStep{
 					{
 						Config:      testAccDatabaseBindingConfig(mock.url(), tt.cluster, tt.namespace, tt.role, ""),
@@ -117,6 +122,29 @@ func TestAccDatabaseBindingResource_PlanTimeErrors(t *testing.T) {
 			})
 		})
 	}
+}
+
+// TestAccDatabaseBindingResource_DatabaseNameValidated: a literal database
+// name the platform would refuse fails validation.
+func TestAccDatabaseBindingResource_DatabaseNameValidated(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccProviderConfig(mock.url()) + `
+resource "kupe_database_binding" "test" {
+  database  = "orders--db"
+  cluster   = "prod"
+  namespace = "api"
+  role      = "app"
+}
+`,
+				ExpectError: regexp.MustCompile(`not contain '--'`),
+			},
+		},
+	})
 }
 
 func TestParseDatabaseBindingImportID(t *testing.T) {

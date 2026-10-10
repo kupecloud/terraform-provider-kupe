@@ -73,6 +73,25 @@ func TestAPIErrorDetail(t *testing.T) {
 			wantNoSubstr: []string{"does not exist on the server"},
 		},
 		{
+			name: "400 creation_paused says nothing was created and to retry later",
+			err: &client.APIError{
+				StatusCode: http.StatusBadRequest,
+				Message:    "Database creation is temporarily paused while we expand platform capacity. Please try again later.",
+				Code:       client.CodeCreationPaused,
+			},
+			wantSubstr: []string{"Error code: creation_paused", "temporarily paused, so nothing was created", "apply` again later"},
+		},
+		{
+			name: "400 storage_shrink_unsupported says storage only grows",
+			err: &client.APIError{
+				StatusCode: http.StatusBadRequest,
+				Message:    "storage can only grow",
+				Code:       client.CodeStorageShrinkUnsupported,
+				Field:      "resources.storage",
+			},
+			wantSubstr: []string{"Error code: storage_shrink_unsupported", "Field: resources.storage", "storage can only grow. Keep the current size"},
+		},
+		{
 			// True RBAC denial: bare "access denied" message from kupe-api.
 			// The role hint is the actionable signal — keep it.
 			name: "403 access denied shows role hint",
@@ -146,6 +165,81 @@ func TestAPIErrorDetail(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDeleteErrorDetail(t *testing.T) {
+	const (
+		wrapper        = "delete not accepted before the timeout"
+		deleteHint     = "kept refusing the delete"
+		createConflict = "a resource with this name already exists"
+	)
+	conflict := fakeAPIError(http.StatusConflict, "the database changed while it was being deleted, retry")
+	tests := []struct {
+		name         string
+		err          error
+		wantSubstr   []string
+		wantNoSubstr []string
+	}{
+		{
+			name:         "a conflict that outlasted the timeout keeps the wrapper and gets the delete hint",
+			err:          fmt.Errorf("%w: %w", errDeleteNotAccepted, conflict),
+			wantSubstr:   []string{wrapper, "kupe API returned 409", deleteHint, "terraform destroy` again"},
+			wantNoSubstr: []string{createConflict},
+		},
+		{
+			name:         "another error that outlasted the timeout keeps the wrapper and its own hint",
+			err:          fmt.Errorf("%w: %w", errDeleteNotAccepted, fakeAPIError(http.StatusServiceUnavailable, "unavailable")),
+			wantSubstr:   []string{wrapper, "kupe API returned 503", "temporarily unavailable"},
+			wantNoSubstr: []string{deleteHint},
+		},
+		{
+			name:         "a non-API error that outlasted the timeout is not prefixed twice",
+			err:          fmt.Errorf("%w: %w", errDeleteNotAccepted, errors.New("connection refused")),
+			wantSubstr:   []string{wrapper + ": connection refused"},
+			wantNoSubstr: []string{wrapper + ": " + wrapper},
+		},
+		{
+			name:         "an error returned at once is described as usual",
+			err:          fakeAPIError(http.StatusForbidden, "access denied"),
+			wantSubstr:   []string{"kupe API returned 403", "lack the role required"},
+			wantNoSubstr: []string{wrapper, deleteHint},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := deleteErrorDetail(tt.err)
+			for _, want := range tt.wantSubstr {
+				if !strings.Contains(got, want) {
+					t.Errorf("missing substring %q in:\n%s", want, got)
+				}
+			}
+			for _, unwanted := range tt.wantNoSubstr {
+				if strings.Contains(got, unwanted) {
+					t.Errorf("unexpected substring %q in:\n%s", unwanted, got)
+				}
+			}
+		})
+	}
+}
+
+// TestDeleteUntilAccepted_KeepsRefusalWhenCutOff: the attempt in flight when
+// the timeout fires fails with a context error; the error returned must
+// still be the refusal that kept the delete from being accepted.
+func TestDeleteUntilAccepted_KeepsRefusalWhenCutOff(t *testing.T) {
+	shrinkPollInterval(t)
+	conflict := fakeAPIError(http.StatusConflict, "the database changed while it was being deleted, retry")
+	calls := 0
+	err := deleteUntilAccepted(context.Background(), 50*time.Millisecond, func(c context.Context) error {
+		calls++
+		if calls < 3 {
+			return conflict
+		}
+		<-c.Done()
+		return fmt.Errorf("executing request: %w", c.Err())
+	})
+	if !errors.Is(err, errDeleteNotAccepted) || !errors.Is(err, conflict) {
+		t.Fatalf("expected the conflict wrapped as not accepted, got %v", err)
 	}
 }
 
@@ -318,6 +412,7 @@ func TestDeleteUntilAccepted(t *testing.T) {
 		{name: "conflicts are retried", responses: []error{conflict, conflict, nil}, wantCalls: 3},
 		{name: "deletion protection is returned at once", responses: []error{protected}, wantErr: protected, wantCalls: 1},
 		{name: "a persistent conflict returns the last refusal", responses: []error{conflict}, wantErr: conflict},
+		{name: "a persistent conflict is marked not accepted", responses: []error{conflict}, wantErr: errDeleteNotAccepted},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

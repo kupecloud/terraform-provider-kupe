@@ -2,7 +2,9 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
@@ -26,6 +28,11 @@ const databasePhaseRunning = "Running"
 
 // databaseEngine is the only engine kupe offers today, and the default.
 const databaseEngine = "postgres"
+
+// databaseDeleteNotice is what deleting a database means for its data. Docs
+// and diagnostics use the same words so the promise is stated once.
+const databaseDeleteNotice = "Deleting a database removes it immediately. Its storage is kept for 7 days for " +
+	"support-assisted recovery, then permanently deleted. There is no self-service restore in v1."
 
 // Default timeouts for database operations, overridable in the `timeouts`
 // block. Provisioning starts instances and storage; an upgrade or resize
@@ -82,14 +89,15 @@ func (r *DatabaseResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 			"credentials Secret in one namespace of one cluster. Credentials are never returned by the API or " +
 			"stored in Terraform state.\n\n" +
 			"### Destroy semantics\n\n" +
-			"Deleting a database deletes its data. `deletion_protection` (default `true`) makes the Kupe platform " +
+			databaseDeleteNotice + " `deletion_protection` (default `true`) makes the Kupe platform " +
 			"refuse the delete: set it to `false` and apply before destroying. Add `lifecycle { prevent_destroy = true }` " +
 			"to stop Terraform from planning the destroy at all.",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
 				Description: "Database name (immutable after creation). A lowercase DNS label starting with a letter, " +
 					"without `--`. It is also the Service name applications connect to.",
-				Required: true,
+				Required:   true,
+				Validators: databaseNameValidators(),
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -127,14 +135,17 @@ func (r *DatabaseResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 					"cpu": schema.StringAttribute{
 						Description: "CPU without a unit, e.g. `500m` or `2`.",
 						Required:    true,
+						Validators:  cpuQuantityValidators(),
 					},
 					"memory": schema.StringAttribute{
 						Description: "Memory with a unit, e.g. `1Gi` or `512Mi`.",
 						Required:    true,
+						Validators:  sizeQuantityValidators(),
 					},
 					"storage": schema.StringAttribute{
 						Description: "Storage with a unit, e.g. `10Gi`. Storage can only grow: a smaller value fails the plan.",
 						Required:    true,
+						Validators:  sizeQuantityValidators(),
 						PlanModifiers: []planmodifier.String{
 							storageNeverShrinks(),
 						},
@@ -276,7 +287,24 @@ func (r *DatabaseResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	db, etag, err := r.client.UpdateDatabase(ctx, name, state.ETag.ValueString(), patch)
+	db, etag, err := r.updateDatabase(ctx, &state, patch)
+	var changed *concurrentChangeError
+	if errors.As(err, &changed) {
+		resp.Diagnostics.AddError("database changed outside this apply",
+			fmt.Sprintf("Database %q was changed by another client since Terraform last read it (%s now differs "+
+				"from state), so the update was not applied. Run `terraform plan` to review the current values, then "+
+				"apply again.", name, strings.Join(changed.fields, ", ")))
+		return
+	}
+	var apiErr *client.APIError
+	if client.IsPreconditionFailed(err) && errors.As(err, &apiErr) {
+		// Only reached after the retry: the database kept changing between
+		// the re-read and the second attempt.
+		resp.Diagnostics.AddError("failed to update database", apiErrorSummary(apiErr)+
+			"\n\nThe database kept changing while the update was being sent, so it was not applied. Run "+
+			"`terraform apply` again.")
+		return
+	}
 	if err != nil {
 		resp.Diagnostics.AddError("failed to update database", apiErrorDetail(err))
 		return
@@ -327,6 +355,68 @@ func databasePatch(plan, state *DatabaseResourceModel) (client.PatchDatabaseRequ
 	return patch, hasChanges
 }
 
+// concurrentChangeError reports the fields another client changed while an
+// update was in flight.
+type concurrentChangeError struct {
+	fields []string
+}
+
+func (e *concurrentChangeError) Error() string {
+	return "database changed concurrently: " + strings.Join(e.fields, ", ")
+}
+
+// updateDatabase sends patch with the ETag from state. The ETag changes on
+// every write, including the platform's own status updates, so a 412 often
+// means only the status moved. On a 412 it re-reads the database: when its
+// settings still match state, nobody else changed them and the patch is sent
+// once more with the fresh ETag; otherwise it returns a
+// *concurrentChangeError. Every setting is compared, not only the patched
+// ones, because the response to the retried patch becomes the new state and
+// must match the plan.
+func (r *DatabaseResource) updateDatabase(
+	ctx context.Context, state *DatabaseResourceModel, patch client.PatchDatabaseRequest,
+) (*client.Database, string, error) {
+	name := state.Name.ValueString()
+	db, etag, err := r.client.UpdateDatabase(ctx, name, state.ETag.ValueString(), patch)
+	if !client.IsPreconditionFailed(err) {
+		return db, etag, err
+	}
+	current, currentETag, getErr := r.client.GetDatabase(ctx, name)
+	if getErr != nil {
+		return nil, "", fmt.Errorf("re-reading database after a stale update: %w", getErr)
+	}
+	if fields := settingsChanged(&state.databaseModel, databaseModelFromAPI(current)); len(fields) > 0 {
+		return nil, "", &concurrentChangeError{fields: fields}
+	}
+	return r.client.UpdateDatabase(ctx, name, currentETag, patch)
+}
+
+// settingsChanged lists, by attribute name, the settings an update can
+// change whose current value differs from prior.
+func settingsChanged(prior *databaseModel, current databaseModel) []string {
+	var changed []string
+	if !current.Version.Equal(prior.Version) {
+		changed = append(changed, "version")
+	}
+	if !resourcesEqual(prior.Resources, current.Resources) {
+		changed = append(changed, "resources")
+	}
+	if !current.HighAvailability.Equal(prior.HighAvailability) {
+		changed = append(changed, "high_availability")
+	}
+	if !current.DeletionProtection.Equal(prior.DeletionProtection) {
+		changed = append(changed, "deletion_protection")
+	}
+	return changed
+}
+
+func resourcesEqual(a, b *ResourcesModel) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.CPU.Equal(b.CPU) && a.Memory.Equal(b.Memory) && a.Storage.Equal(b.Storage)
+}
+
 func (r *DatabaseResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	var state DatabaseResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
@@ -350,12 +440,12 @@ func (r *DatabaseResource) Delete(ctx context.Context, req resource.DeleteReques
 	if client.IsDeletionProtected(err) {
 		resp.Diagnostics.AddError("database has deletion protection enabled",
 			fmt.Sprintf("Database %q was not deleted because deletion protection is enabled. To delete it, set "+
-				"`deletion_protection = false` on the resource, run `terraform apply`, then destroy it again. "+
-				"Deleting a database deletes its data.", name))
+				"`deletion_protection = false` on the resource, run `terraform apply`, then destroy it again. %s",
+				name, databaseDeleteNotice))
 		return
 	}
 	if err != nil {
-		resp.Diagnostics.AddError("failed to delete database", apiErrorDetail(err))
+		resp.Diagnostics.AddError("failed to delete database", deleteErrorDetail(err))
 		return
 	}
 
