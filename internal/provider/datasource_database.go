@@ -26,7 +26,7 @@ func (d *DatabaseDataSource) Metadata(_ context.Context, req datasource.Metadata
 
 func (d *DatabaseDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Reads an existing Kupe managed database by name. Credentials are never returned.",
+		Description: "Reads an existing Kupe database by name. Credentials are never returned.",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
 				Description: "Database name to look up.",

@@ -3,12 +3,12 @@
 page_title: "kupe_database Data Source - kupe"
 subcategory: ""
 description: |-
-  Reads an existing Kupe managed database by name. Credentials are never returned.
+  Reads an existing Kupe database by name. Credentials are never returned.
 ---
 
 # kupe_database (Data Source)
 
-Reads an existing Kupe managed database by name. Credentials are never returned.
+Reads an existing Kupe database by name. Credentials are never returned.
 
 ## Example Usage
 

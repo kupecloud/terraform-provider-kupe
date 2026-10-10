@@ -28,8 +28,8 @@ the rest of your infrastructure code.
 
 ## What the provider manages
 
-* managed clusters with `kupe_cluster`
-* managed PostgreSQL databases with `kupe_database`, bound into cluster
+* clusters with `kupe_cluster`
+* PostgreSQL databases with `kupe_database`, bound into cluster
   namespaces with `kupe_database_binding`
 * tenant secrets and sync targets with `kupe_secret`
 * tenant membership with `kupe_tenant_member`

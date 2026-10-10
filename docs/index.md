@@ -6,7 +6,7 @@ description: |-
 
 # Kupe Provider
 
-The Kupe provider manages tenant-scoped Kupe Cloud resources including clusters, managed databases, secrets, members, API keys, and per-tenant Alertmanager configuration.
+The Kupe provider manages tenant-scoped Kupe Cloud resources including clusters, databases, secrets, members, API keys, and per-tenant Alertmanager configuration.
 
 Use it when you want:
 

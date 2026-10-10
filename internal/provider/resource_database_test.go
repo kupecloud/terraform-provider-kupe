@@ -307,7 +307,7 @@ func TestAccDatabaseResource_DatabasesUnavailable(t *testing.T) {
 				PreConfig:        func() { mock.setState(func(m *mockKupeAPI) { m.databasesDisabled = true }) },
 				Config:           testAccDatabaseConfig(mock.url(), testDatabase{cpu: "1"}),
 				ConfigPlanChecks: expectAction(plancheck.ResourceActionUpdate),
-				ExpectError:      regexp.MustCompile("Managed databases are not enabled"),
+				ExpectError:      regexp.MustCompile("Databases are not enabled"),
 			},
 			{
 				Config:           testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false)}),

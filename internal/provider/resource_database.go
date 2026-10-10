@@ -82,7 +82,7 @@ func (r *DatabaseResource) Metadata(_ context.Context, req resource.MetadataRequ
 
 func (r *DatabaseResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages a Kupe managed PostgreSQL database. Create and Update wait for the database to " +
+		Description: "Manages a Kupe PostgreSQL database. Create and Update wait for the database to " +
 			"reach phase=Running with the change applied; Delete waits until the database is gone. Timeouts are " +
 			"configurable via the `timeouts` block (defaults: create/update 30m, delete 15m).\n\n" +
 			"Applications reach the database through `kupe_database_binding`, which places a Service and a " +

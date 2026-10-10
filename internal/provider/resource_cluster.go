@@ -88,8 +88,8 @@ func (r *ClusterResource) Metadata(_ context.Context, req resource.MetadataReque
 func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Manages a Kupe cluster for a tenant. Create and Update wait for the " +
-			"cluster to reach phase=Running before returning; Delete waits for the underlying " +
-			"ManagedCluster CR to finish terminating. Timeouts are configurable via the " +
+			"cluster to reach phase=Running before returning; Delete waits for the cluster " +
+			"to finish terminating. Timeouts are configurable via the " +
 			"`timeouts` block (defaults: create/update 15m, delete 10m).\n\n" +
 			"### Destroy semantics\n\n" +
 			"`terraform destroy` (or removing this resource from configuration) is **non-recoverable**. " +

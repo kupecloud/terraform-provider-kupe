@@ -73,7 +73,7 @@ func (r *DatabaseBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 	// Bindings are immutable: changing any argument replaces the binding.
 	replace := []planmodifier.String{stringplanmodifier.RequiresReplace()}
 	resp.Schema = schema.Schema{
-		Description: "Binds a Kupe managed database into one namespace of one cluster for one role. The Kupe " +
+		Description: "Binds a Kupe database into one namespace of one cluster for one role. The Kupe " +
 			"platform delivers a Service named after the database and a credentials Secret into that namespace and " +
 			"opens the network path; other namespaces see neither. Create waits for phase=Ready, and fails at once " +
 			"if the binding is Failed: the namespace already has a Service named after the database, or a Secret " +

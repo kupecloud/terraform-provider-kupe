@@ -3,7 +3,7 @@
 page_title: "kupe_cluster Resource - kupe"
 subcategory: ""
 description: |-
-  Manages a Kupe cluster for a tenant. Create and Update wait for the cluster to reach phase=Running before returning; Delete waits for the underlying ManagedCluster CR to finish terminating. Timeouts are configurable via the timeouts block (defaults: create/update 15m, delete 10m).
+  Manages a Kupe cluster for a tenant. Create and Update wait for the cluster to reach phase=Running before returning; Delete waits for the cluster to finish terminating. Timeouts are configurable via the timeouts block (defaults: create/update 15m, delete 10m).
   Destroy semantics
   terraform destroy (or removing this resource from configuration) is non-recoverable. When the cluster is deleted, the Kupe platform will:
   Permanently remove every workload running inside the cluster, along with its storage.Remove the cluster's public DNS endpoint.
@@ -12,7 +12,7 @@ description: |-
 
 # kupe_cluster (Resource)
 
-Manages a Kupe cluster for a tenant. Create and Update wait for the cluster to reach phase=Running before returning; Delete waits for the underlying ManagedCluster CR to finish terminating. Timeouts are configurable via the `timeouts` block (defaults: create/update 15m, delete 10m).
+Manages a Kupe cluster for a tenant. Create and Update wait for the cluster to reach phase=Running before returning; Delete waits for the cluster to finish terminating. Timeouts are configurable via the `timeouts` block (defaults: create/update 15m, delete 10m).
 
 ### Destroy semantics
 
