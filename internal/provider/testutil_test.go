@@ -53,6 +53,11 @@ type mockKupeAPI struct {
 	// before the next PATCHes check If-Match: a write landing between the
 	// provider's read and its update.
 	databaseBeforePatch []func(db map[string]any)
+	// databaseBindingStatus, when set, is the status every binding GET
+	// reports instead of Ready, like the platform does for a binding that
+	// waits or fails. databaseBindingGets counts those GETs.
+	databaseBindingStatus map[string]any
+	databaseBindingGets   int
 }
 
 func newMockKupeAPI() *mockKupeAPI {
@@ -878,16 +883,24 @@ func (m *mockKupeAPI) getDatabaseBinding(w http.ResponseWriter, database, name s
 		mockError(w, http.StatusNotFound, "", "binding not found for this database")
 		return
 	}
+	m.databaseBindingGets++
 	secretName := binding["secretName"].(string)
 	if secretName == "" {
 		secretName = database + "-" + binding["role"].(string)
 	}
-	binding["status"] = map[string]any{
+	status := map[string]any{
 		"phase":      "Ready",
 		"host":       fmt.Sprintf("%s.%s.svc.cluster.local", database, binding["namespace"]),
 		"secretName": secretName,
 		"message":    "",
 	}
+	if m.databaseBindingStatus != nil {
+		status = map[string]any{"secretName": secretName}
+		for k, v := range m.databaseBindingStatus {
+			status[k] = v
+		}
+	}
+	binding["status"] = status
 	mustEncodeJSON(w, binding)
 }
 

@@ -97,6 +97,17 @@ type DatabaseBindingStatus struct {
 	// SecretName is the effective credentials Secret name in the namespace.
 	SecretName string `json:"secretName"`
 	Message    string `json:"message"`
+	// Conditions carry the reason behind the phase, e.g. Conflict True
+	// (reason SyncConflict) on a Failed binding.
+	Conditions []Condition `json:"conditions"`
+}
+
+// Condition is one status condition of a resource.
+type Condition struct {
+	Type    string `json:"type"`
+	Status  string `json:"status"`
+	Reason  string `json:"reason"`
+	Message string `json:"message"`
 }
 
 // CreateDatabaseBindingRequest is the body for creating a binding. The

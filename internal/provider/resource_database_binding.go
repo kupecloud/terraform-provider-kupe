@@ -19,10 +19,19 @@ import (
 	"github.com/kupecloud/terraform-provider-kupe/internal/client"
 )
 
-// databaseBindingPhaseReady is the phase Create waits for. Pending and
-// Failed are treated as in progress: a binding to a cluster that does not
-// exist yet becomes Ready once the cluster does.
-const databaseBindingPhaseReady = "Ready"
+// Binding phases Create stops on. Pending is in progress: a binding to a
+// cluster that does not exist yet becomes Ready once the cluster does.
+// Failed is terminal for Create: waiting does not clear it, the tenant has
+// to act.
+const (
+	databaseBindingPhaseReady  = "Ready"
+	databaseBindingPhaseFailed = "Failed"
+)
+
+// databaseBindingConditionConflict is the condition that is True while an
+// object the platform did not create holds the binding's Service or Secret
+// name in the cluster namespace.
+const databaseBindingConditionConflict = "Conflict"
 
 // Default timeouts for binding operations, overridable in the `timeouts`
 // block. Delivering a Service and Secret into a cluster takes seconds.
@@ -66,8 +75,11 @@ func (r *DatabaseBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 	resp.Schema = schema.Schema{
 		Description: "Binds a Kupe managed database into one namespace of one cluster for one role. The Kupe " +
 			"platform delivers a Service named after the database and a credentials Secret into that namespace and " +
-			"opens the network path; other namespaces see neither. Create waits for phase=Ready; Delete waits until " +
-			"the binding is gone. Timeouts are configurable via the `timeouts` block (defaults: create/delete 5m).\n\n" +
+			"opens the network path; other namespaces see neither. Create waits for phase=Ready, and fails at once " +
+			"if the binding is Failed: the namespace already has a Service named after the database, or a Secret " +
+			"named `secret_name`, that the platform did not create. The failed binding stays in state, marked " +
+			"tainted. Delete waits until the binding is gone. Timeouts are configurable via the `timeouts` block " +
+			"(defaults: create/delete 5m).\n\n" +
 			"Bindings cannot be changed: changing any argument replaces the binding. Removing a binding removes the " +
 			"Service, the Secret and the network path, but not knowledge of the password; rotate the role's " +
 			"credentials if that matters.",
@@ -120,8 +132,9 @@ func (r *DatabaseBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 				},
 			},
 			"phase": schema.StringAttribute{
-				Description: "Current phase: Pending, Ready or Failed.",
-				Computed:    true,
+				Description: "Current phase: Pending (waiting for the database or the cluster), Ready, or Failed " +
+					"(the namespace already has a Service or Secret of the same name that the platform did not create).",
+				Computed: true,
 			},
 			"host": schema.StringAttribute{
 				Description: "In-cluster DNS name applications connect to, e.g. `orders-db.api.svc.cluster.local`.",
@@ -183,7 +196,7 @@ func (r *DatabaseBindingResource) Create(ctx context.Context, req resource.Creat
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	message := ""
+	status := binding.Status
 	err = pollUntil(ctx, timeout, func(c context.Context) (bool, error) {
 		observed, err := r.client.GetDatabaseBinding(c, database, binding.Name)
 		if err != nil {
@@ -191,12 +204,16 @@ func (r *DatabaseBindingResource) Create(ctx context.Context, req resource.Creat
 		}
 		mapDatabaseBindingToState(observed, &plan)
 		resp.Diagnostics.Append(resp.State.Set(c, &plan)...)
-		if observed.Status != nil {
-			message = observed.Status.Message
-		}
-		return plan.Phase.ValueString() == databaseBindingPhaseReady, nil
+		status = observed.Status
+		phase := plan.Phase.ValueString()
+		return phase == databaseBindingPhaseReady || phase == databaseBindingPhaseFailed, nil
 	})
 	switch {
+	case err == nil && plan.Phase.ValueString() == databaseBindingPhaseFailed:
+		// Terraform taints a resource whose Create returns an error along
+		// with a state, so the binding saved above stays tracked: `terraform
+		// destroy` removes it and the next apply replaces it.
+		resp.Diagnostics.AddError("database binding failed", databaseBindingFailedDetail(&plan, status))
 	case err == nil:
 		// Ready
 	case isTerminalAPIError(err):
@@ -206,11 +223,43 @@ func (r *DatabaseBindingResource) Create(ctx context.Context, req resource.Creat
 			"keeps reconciling it; re-run `terraform apply` later to record the Ready state. If the cluster %q "+
 			"does not exist yet, the binding becomes Ready once it does.",
 			binding.Name, plan.Phase.ValueString(), plan.Cluster.ValueString())
-		if message != "" {
-			detail += "\n\nStatus message: " + message
+		if status != nil && status.Message != "" {
+			detail += "\n\nStatus message: " + status.Message
 		}
 		resp.Diagnostics.AddWarning("database binding create timed out before reaching Ready", detail)
 	}
+}
+
+// databaseBindingConflicted reports whether the binding's Conflict condition
+// is True.
+func databaseBindingConflicted(status *client.DatabaseBindingStatus) bool {
+	if status == nil {
+		return false
+	}
+	for _, c := range status.Conditions {
+		if c.Type == databaseBindingConditionConflict {
+			return c.Status == "True"
+		}
+	}
+	return false
+}
+
+// databaseBindingFailedDetail explains a Failed binding: the platform's
+// message, what to change when another object holds the binding's names, and
+// what Terraform does with the failed binding next.
+func databaseBindingFailedDetail(b *DatabaseBindingResourceModel, status *client.DatabaseBindingStatus) string {
+	detail := fmt.Sprintf("Binding %q of database %q failed.", b.Name.ValueString(), b.Database.ValueString())
+	if status != nil && status.Message != "" {
+		detail += "\n\nStatus message: " + status.Message
+	}
+	if databaseBindingConflicted(status) {
+		detail += fmt.Sprintf("\n\nNamespace %q of cluster %q already has a Service named %q or a Secret named %q "+
+			"that the Kupe platform did not create, and the binding does not replace it. Rename or remove that "+
+			"object, or, if the Secret is the clash, set a different `secret_name`.",
+			b.Namespace.ValueString(), b.Cluster.ValueString(), b.Database.ValueString(), b.SecretName.ValueString())
+	}
+	return detail + "\n\nTerraform keeps the binding in state, marked tainted: the next `terraform apply` " +
+		"replaces it and `terraform destroy` removes it."
 }
 
 func (r *DatabaseBindingResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {

@@ -8,6 +8,9 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
+
+	"github.com/kupecloud/terraform-provider-kupe/internal/client"
 )
 
 // testAccDatabaseBindingConfig renders an unprotected database plus one
@@ -165,6 +168,202 @@ func TestParseDatabaseBindingImportID(t *testing.T) {
 			if ok != tt.wantOK || database != tt.wantDatabase || name != tt.wantName {
 				t.Errorf("parseDatabaseBindingImportID(%q) = (%q, %q, %v), want (%q, %q, %v)",
 					tt.id, database, name, ok, tt.wantDatabase, tt.wantName, tt.wantOK)
+			}
+		})
+	}
+}
+
+// testAccBindingConflictMessage is the message the platform sets on a binding
+// whose Service or Secret name a tenant object already holds.
+const testAccBindingConflictMessage = "the namespace already has a Service or Secret of the binding's name that " +
+	"the platform did not create; remove it, or bind with another secretName"
+
+// testAccBindingConflictStatus is the status of such a binding: Failed, with
+// Ready False and Conflict True.
+func testAccBindingConflictStatus() map[string]any {
+	return map[string]any{
+		"phase":   "Failed",
+		"message": testAccBindingConflictMessage,
+		"conditions": []any{
+			map[string]any{"type": "Ready", "status": "False", "reason": "SyncConflict", "message": testAccBindingConflictMessage},
+			map[string]any{"type": "Conflict", "status": "True", "reason": "SyncConflict", "message": testAccBindingConflictMessage},
+		},
+	}
+}
+
+// testAccCheckBindingGets checks how many binding GETs the mock served.
+func testAccCheckBindingGets(mock *mockKupeAPI, check func(gets int) error) resource.TestCheckFunc {
+	return func(*terraform.State) error {
+		mock.mu.Lock()
+		defer mock.mu.Unlock()
+		return check(mock.databaseBindingGets)
+	}
+}
+
+// TestAccDatabaseBindingResource_CreateWait: Create returns once the binding
+// is Ready, and keeps waiting while it is Pending, ending the apply without
+// an error when the timeout fires.
+func TestAccDatabaseBindingResource_CreateWait(t *testing.T) {
+	shrinkPollInterval(t)
+	const addr = "kupe_database_binding.test"
+	tests := []struct {
+		name      string
+		status    map[string]any
+		wantPhase string
+		wantGets  func(gets int) error
+	}{
+		{
+			name: "ready returns at the first check", wantPhase: "Ready",
+			wantGets: func(gets int) error {
+				if gets != 1 {
+					return fmt.Errorf("binding GETs = %d, want 1", gets)
+				}
+				return nil
+			},
+		},
+		{
+			name:      "pending keeps waiting until the timeout",
+			status:    map[string]any{"phase": "Pending", "message": "cluster prod does not exist"},
+			wantPhase: "Pending",
+			wantGets: func(gets int) error {
+				if gets < 2 {
+					return fmt.Errorf("binding GETs = %d, want the wait to keep polling", gets)
+				}
+				return nil
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := newMockKupeAPI()
+			defer mock.close()
+			mock.setState(func(m *mockKupeAPI) { m.databaseBindingStatus = tt.status })
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+				CheckDestroy:             testAccCheckNoDatabases(mock),
+				Steps: []resource.TestStep{
+					{
+						Config: testAccDatabaseBindingConfig(mock.url(), "prod", "api", "app", `  timeouts = { create = "1s" }`),
+						Check: resource.ComposeAggregateTestCheckFunc(
+							resource.TestCheckResourceAttr(addr, "phase", tt.wantPhase),
+							testAccCheckBindingGets(mock, tt.wantGets),
+						),
+					},
+				},
+			})
+		})
+	}
+}
+
+// TestAccDatabaseBindingResource_FailedCreate: a Failed binding ends Create
+// at once with an error that says what to change, and stays in state marked
+// tainted, so a later apply replaces it and destroy removes it.
+func TestAccDatabaseBindingResource_FailedCreate(t *testing.T) {
+	shrinkPollInterval(t)
+	const addr = "kupe_database_binding.test"
+	// A 1m timeout the fix never waits for: a Failed binding taken for in
+	// progress would poll for a minute and then only warn.
+	config := func(host string) string {
+		return testAccDatabaseBindingConfig(host, "prod", "api", "app", `  timeouts = { create = "1m" }`)
+	}
+	wantErr := regexp.MustCompile(`(?s)database binding failed.*` + wrappedText(testAccBindingConflictMessage) +
+		`.*` + wrappedText(`Namespace "api" of cluster "prod" already has a Service named "orders-db" or a Secret named "orders-db-app"`) +
+		`.*` + wrappedText("Rename or remove that object, or, if the Secret is the clash, set a different `secret_name`.") +
+		`.*` + wrappedText("marked tainted"))
+
+	t.Run("a fix and apply replaces the binding", func(t *testing.T) {
+		mock := newMockKupeAPI()
+		defer mock.close()
+		mock.setState(func(m *mockKupeAPI) { m.databaseBindingStatus = testAccBindingConflictStatus() })
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+			CheckDestroy:             testAccCheckNoDatabases(mock),
+			Steps: []resource.TestStep{
+				{Config: config(mock.url()), ExpectError: wantErr},
+				{
+					PreConfig: func() {
+						mock.setState(func(m *mockKupeAPI) {
+							if m.databaseBindingGets != 1 {
+								t.Errorf("binding GETs before the error = %d, want 1: Create must stop at the first Failed", m.databaseBindingGets)
+							}
+							// The tenant removed the conflicting object.
+							m.databaseBindingStatus = nil
+						})
+					},
+					// The same config plans a replacement: the failed binding
+					// is in state, and tainted.
+					Config: config(mock.url()),
+					ConfigPlanChecks: resource.ConfigPlanChecks{
+						PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(addr, plancheck.ResourceActionDestroyBeforeCreate)},
+					},
+					Check: resource.TestCheckResourceAttr(addr, "phase", "Ready"),
+				},
+			},
+		})
+	})
+
+	t.Run("destroy removes the failed binding", func(t *testing.T) {
+		mock := newMockKupeAPI()
+		defer mock.close()
+		// The database is outside the config: deleting a database deletes
+		// its bindings, which would hide a binding Terraform lost track of.
+		mock.setState(func(m *mockKupeAPI) {
+			m.databases["orders-db"] = map[string]any{"name": "orders-db"}
+			m.databaseBindingStatus = testAccBindingConflictStatus()
+		})
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+			Steps: []resource.TestStep{{
+				Config: testAccProviderConfig(mock.url()) + `
+resource "kupe_database_binding" "test" {
+  database  = "orders-db"
+  cluster   = "prod"
+  namespace = "api"
+  role      = "app"
+  timeouts  = { create = "1m" }
+}
+`,
+				ExpectError: wantErr,
+			}},
+		})
+		// The test case destroys what its state holds, while the binding is
+		// still Failed. Not CheckDestroy: it is skipped when the state is
+		// empty, which is the failure this guards against.
+		mock.setState(func(m *mockKupeAPI) {
+			if len(m.databaseBindings) != 0 {
+				t.Errorf("bindings left after destroy: %d; the failed binding was not in state", len(m.databaseBindings))
+			}
+		})
+	})
+}
+
+func TestDatabaseBindingConflicted(t *testing.T) {
+	tests := []struct {
+		name   string
+		status *client.DatabaseBindingStatus
+		want   bool
+	}{
+		{name: "no status", status: nil, want: false},
+		{name: "no conditions", status: &client.DatabaseBindingStatus{Phase: "Failed"}, want: false},
+		{
+			name: "conflict true",
+			status: &client.DatabaseBindingStatus{Conditions: []client.Condition{
+				{Type: "Ready", Status: "False", Reason: "SyncConflict"}, {Type: "Conflict", Status: "True", Reason: "SyncConflict"},
+			}},
+			want: true,
+		},
+		{
+			name: "conflict false",
+			status: &client.DatabaseBindingStatus{Conditions: []client.Condition{
+				{Type: "Conflict", Status: "False", Reason: "NoConflict"},
+			}},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := databaseBindingConflicted(tt.status); got != tt.want {
+				t.Errorf("databaseBindingConflicted() = %v, want %v", got, tt.want)
 			}
 		})
 	}

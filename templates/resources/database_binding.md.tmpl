@@ -21,6 +21,12 @@ The example below is illustrative. It uses the [hashicorp/kubernetes](https://re
 
 {{ tffile "examples/resources/kupe_database_binding/kubernetes-secret.tf" }}
 
+### When a binding waits or fails
+
+A binding is `Pending` while its database or cluster does not exist yet, is not running yet or is being deleted. Create keeps waiting until its timeout, then warns. The Kupe platform keeps trying, and the binding becomes `Ready` once both are running.
+
+A binding is `Failed` when the namespace already has a Service named after the database, or a Secret named `secret_name`, that the Kupe platform did not create. The binding does not replace that object. Create stops at once with an error that names both. Terraform keeps the failed binding in state, marked tainted: rename or remove the object, or set a different `secret_name`, then run `terraform apply` to replace the binding. `terraform destroy` removes it.
+
 {{ .SchemaMarkdown | trimspace }}
 
 ## Import
