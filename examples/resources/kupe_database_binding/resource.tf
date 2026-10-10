@@ -6,11 +6,12 @@ resource "kupe_database_binding" "api" {
   role      = "app"
 }
 
-# Schema migrations run with the owner role, under their own Secret name.
+# Schema migrations run with the owner role in a namespace of their own, so no
+# pod in api can mount the owner credentials.
 resource "kupe_database_binding" "migrations" {
   database    = kupe_database.orders.name
   cluster     = kupe_cluster.production.name
-  namespace   = "api"
+  namespace   = "api-migrations"
   role        = "owner"
   secret_name = "orders-db-migrations"
 }
