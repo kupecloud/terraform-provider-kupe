@@ -8,6 +8,8 @@ repos:
     rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c
     hooks:
       - id: detect-private-key
+        # PUBLISHING.md quotes the PGP armour header as prose, not a key.
+        exclude: ^PUBLISHING\.md$
       - id: check-added-large-files
       - id: check-json
       - id: check-merge-conflict
