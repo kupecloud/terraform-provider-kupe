@@ -93,7 +93,7 @@ func New(baseURL, tenant, token string) *Client {
 	// IsConflict / IsPreconditionFailed keep working after retries.
 	rc.ErrorHandler = retryablehttp.PassthroughErrorHandler
 	// 30s is a per-attempt ceiling on a single HTTP call. It is distinct
-	// from the resource-level `timeouts` blocks (e.g. cluster create 15m),
+	// from the resource-level `timeouts` attributes (e.g. cluster create 15m),
 	// which bound the readiness POLL loop, not an individual request.
 	// kupe-api returns immediately (201/202) and provisioning is async, so
 	// no single request should approach this. If a future endpoint can

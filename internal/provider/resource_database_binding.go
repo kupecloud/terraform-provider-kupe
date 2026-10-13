@@ -78,8 +78,8 @@ func (r *DatabaseBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 			"opens the network path; other namespaces see neither. Create waits for phase=Ready, and fails at once " +
 			"if the binding is Failed: the namespace already has a Service named after the database, or a Secret " +
 			"named `secret_name`, that the platform did not create. The failed binding stays in state, marked " +
-			"tainted. Delete waits until the binding is gone. Timeouts are configurable via the `timeouts` block " +
-			"(defaults: create/delete 5m).\n\n" +
+			"tainted. Delete waits until the binding is gone. Set timeouts with the `timeouts` attribute, for " +
+			"example `timeouts = { create = \"10m\" }` (defaults: create/delete 5m).\n\n" +
 			"Bindings cannot be changed: changing any argument replaces the binding. Removing a binding removes the " +
 			"Service, the Secret and the network path, but not knowledge of the password; rotate the role's " +
 			"credentials if that matters.",
@@ -284,7 +284,7 @@ func (r *DatabaseBindingResource) Read(ctx context.Context, req resource.ReadReq
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-// Update only runs when the `timeouts` block changes: every other argument
+// Update only runs when the `timeouts` attribute changes: every other argument
 // requires replacement. It refreshes the binding and records the new timeouts.
 func (r *DatabaseBindingResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan DatabaseBindingResourceModel

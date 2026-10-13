@@ -40,7 +40,7 @@ var defaultPollInterval = 2 * time.Second
 // `errors.Is(err, context.DeadlineExceeded)` and decide whether to fail
 // or warn. The caller passes a context with whatever timeout is
 // appropriate for the resource type (cluster create: 15m via the
-// user-overridable timeouts block; secret create: 2m; etc.).
+// user-overridable timeouts attribute; secret create: 2m; etc.).
 //
 // fn is also responsible for capturing observed state — typically by
 // writing into the framework's `resp.State` from the surrounding

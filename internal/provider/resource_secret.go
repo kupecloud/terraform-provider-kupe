@@ -26,7 +26,7 @@ import (
 const secretPhaseActive = "Active"
 
 // Default timeouts for secret operations. Users can override via the
-// resource's `timeouts` block. Sync to target clusters typically
+// resource's `timeouts` attribute. Sync to target clusters typically
 // completes in seconds; 2 min is comfortable headroom.
 const (
 	defaultSecretCreateTimeout = 2 * time.Minute
@@ -71,8 +71,8 @@ func (r *SecretResource) Schema(ctx context.Context, _ resource.SchemaRequest, r
 	resp.Schema = schema.Schema{
 		Description: "Manages a Kupe Cloud secret definition and its sync targets. Create and " +
 			"Update wait for the secret to reach phase=Active before returning; Delete waits for " +
-			"the underlying ManagedSecret CR to finish terminating. Timeouts are configurable via " +
-			"the `timeouts` block (defaults: create/update/delete 2m).",
+			"the underlying ManagedSecret CR to finish terminating. Set timeouts with the `timeouts` " +
+			"attribute, for example `timeouts = { create = \"5m\" }` (defaults: create/update/delete 2m).",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
 				Description: "Secret name (immutable after creation).",

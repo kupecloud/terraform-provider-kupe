@@ -31,8 +31,8 @@ import (
 const clusterPhaseRunning = "Running"
 
 // Default timeouts for cluster operations. Users can override via the
-// resource's `timeouts` block in HCL; these are the framework defaults
-// applied when the block is omitted. Provisioning typically takes 3-8
+// resource's `timeouts` attribute in HCL; these are the framework defaults
+// applied when the attribute is omitted. Provisioning typically takes 3-8
 // minutes on dev; 15 min covers worst-case vCluster start-up plus
 // add-on reconcile headroom.
 const (
@@ -89,8 +89,8 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 	resp.Schema = schema.Schema{
 		Description: "Manages a Kupe cluster for a tenant. Create and Update wait for the " +
 			"cluster to reach phase=Running before returning; Delete waits for the cluster " +
-			"to finish terminating. Timeouts are configurable via the " +
-			"`timeouts` block (defaults: create/update 15m, delete 10m).\n\n" +
+			"to finish terminating. Set timeouts with the `timeouts` attribute, for example " +
+			"`timeouts = { create = \"30m\" }` (defaults: create/update 15m, delete 10m).\n\n" +
 			"### Destroy semantics\n\n" +
 			"`terraform destroy` (or removing this resource from configuration) is **non-recoverable**. " +
 			"When the cluster is deleted, the Kupe platform will:\n\n" +

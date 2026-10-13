@@ -2,13 +2,13 @@
 page_title: "kupe_database_binding Resource - kupe"
 subcategory: ""
 description: |-
-  Binds a Kupe database into one namespace of one cluster for one role. The Kupe platform delivers a Service named after the database and a credentials Secret into that namespace and opens the network path; other namespaces see neither. Create waits for phase=Ready, and fails at once if the binding is Failed: the namespace already has a Service named after the database, or a Secret named secret_name, that the platform did not create. The failed binding stays in state, marked tainted. Delete waits until the binding is gone. Timeouts are configurable via the timeouts block (defaults: create/delete 5m).
+  Binds a Kupe database into one namespace of one cluster for one role. The Kupe platform delivers a Service named after the database and a credentials Secret into that namespace and opens the network path; other namespaces see neither. Create waits for phase=Ready, and fails at once if the binding is Failed: the namespace already has a Service named after the database, or a Secret named secret_name, that the platform did not create. The failed binding stays in state, marked tainted. Delete waits until the binding is gone. Set timeouts with the timeouts attribute, for example timeouts = { create = "10m" } (defaults: create/delete 5m).
   Bindings cannot be changed: changing any argument replaces the binding. Removing a binding removes the Service, the Secret and the network path, but not knowledge of the password; rotate the role's credentials if that matters.
 ---
 
 # kupe_database_binding (Resource)
 
-Binds a Kupe database into one namespace of one cluster for one role. The Kupe platform delivers a Service named after the database and a credentials Secret into that namespace and opens the network path; other namespaces see neither. Create waits for phase=Ready, and fails at once if the binding is Failed: the namespace already has a Service named after the database, or a Secret named `secret_name`, that the platform did not create. The failed binding stays in state, marked tainted. Delete waits until the binding is gone. Timeouts are configurable via the `timeouts` block (defaults: create/delete 5m).
+Binds a Kupe database into one namespace of one cluster for one role. The Kupe platform delivers a Service named after the database and a credentials Secret into that namespace and opens the network path; other namespaces see neither. Create waits for phase=Ready, and fails at once if the binding is Failed: the namespace already has a Service named after the database, or a Secret named `secret_name`, that the platform did not create. The failed binding stays in state, marked tainted. Delete waits until the binding is gone. Set timeouts with the `timeouts` attribute, for example `timeouts = { create = "10m" }` (defaults: create/delete 5m).
 
 Bindings cannot be changed: changing any argument replaces the binding. Removing a binding removes the Service, the Secret and the network path, but not knowledge of the password; rotate the role's credentials if that matters.
 
