@@ -123,7 +123,8 @@ func (r *DatabaseBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 			},
 			"secret_name": schema.StringAttribute{
 				Description: "Name of the credentials Secret in the namespace. Defaults to `{database}-{role}`. " +
-					"The Secret holds `host`, `port`, `database`, `username`, `password`, `sslmode`, `ca.crt` and `uri`.",
+					"The Secret holds `type`, `provider`, `host`, `port`, `database`, `username`, `password`, `sslmode`, " +
+					"`ca.crt` and `uri`; mount it at `/bindings/<secret_name>`, where `uri` expects `ca.crt`.",
 				Optional: true,
 				Computed: true,
 				PlanModifiers: []planmodifier.String{

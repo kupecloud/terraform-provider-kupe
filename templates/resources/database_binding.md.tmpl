@@ -15,9 +15,11 @@ description: |-
 
 ### Using the credentials Secret
 
-Inside the cluster, the bound namespace sees a Service named after the database and the Secret named by `secret_name`, with the keys `host`, `port`, `database`, `username`, `password`, `sslmode`, `ca.crt` and `uri`.
+Inside the cluster, the bound namespace sees a Service named after the database and the Secret named by `secret_name`, with the keys `type`, `provider`, `host`, `port`, `database`, `username`, `password`, `sslmode`, `ca.crt` and `uri`. `type` is `postgresql` and `provider` is `kupe`.
 
-The example below is illustrative. It uses the [hashicorp/kubernetes](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs) provider, configured against the bound cluster, to pass the connection URI to a Deployment and to read the Secret from the bound namespace.
+Mount the Secret as a volume at `/bindings/<secret_name>` and set `SERVICE_BINDING_ROOT=/bindings`. `uri` is a `postgresql://` connection string with `sslmode=verify-full` and `sslrootcert=/bindings/<secret_name>/ca.crt`, so it only connects from that mount path. Mounted elsewhere, build the connection from `host`, `port`, `database`, `username`, `password`, `sslmode` and `ca.crt` instead.
+
+The example below is illustrative. It uses the [hashicorp/kubernetes](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs) provider, configured against the bound cluster, to mount the Secret into a Deployment and to read the Secret from the bound namespace.
 
 {{ tffile "examples/resources/kupe_database_binding/kubernetes-secret.tf" }}
 
