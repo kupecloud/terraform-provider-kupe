@@ -128,31 +128,8 @@ func (r *DatabaseResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 						"Keep the current version, or create a new database with the version you need and migrate the data."),
 				},
 			},
-			"resources": schema.SingleNestedAttribute{
-				Description: "Per-instance resources in Kubernetes quantity format. Billing uses these requested " +
-					"values. A high-availability database runs two instances of this size.",
-				Required: true,
-				Attributes: map[string]schema.Attribute{
-					"cpu": schema.StringAttribute{
-						Description: "CPU without a unit, e.g. `500m` or `2`.",
-						Required:    true,
-						Validators:  cpuQuantityValidators(),
-					},
-					"memory": schema.StringAttribute{
-						Description: "Memory with a unit, e.g. `1Gi` or `512Mi`.",
-						Required:    true,
-						Validators:  sizeQuantityValidators(),
-					},
-					"storage": schema.StringAttribute{
-						Description: "Storage with a unit, e.g. `10Gi`. Storage can only grow: a smaller value fails the plan.",
-						Required:    true,
-						Validators:  sizeQuantityValidators(),
-						PlanModifiers: []planmodifier.String{
-							storageNeverShrinks(),
-						},
-					},
-				},
-			},
+			"resources": requiredResourcesAttribute("Per-instance resources in Kubernetes quantity format. Billing " +
+				"uses these requested values. A high-availability database runs two instances of this size."),
 			"high_availability": schema.BoolAttribute{
 				Description: "Run two instances with a synchronous standby. Can be turned on or off in place. Default `false`.",
 				Optional:    true,
@@ -174,19 +151,8 @@ func (r *DatabaseResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 				Description: "Full engine version running, e.g. `18.0`.",
 				Computed:    true,
 			},
-			"etag": schema.StringAttribute{
-				// No UseStateForUnknown: it changes on every write, so the
-				// plan honestly says "known after apply" on any update.
-				Description: "Resource version used for optimistic locking during updates.",
-				Computed:    true,
-			},
-			"created_at": schema.StringAttribute{
-				Description: "Timestamp when the database was created.",
-				Computed:    true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
+			"etag":       etagAttribute(),
+			"created_at": createdAtAttribute("the database"),
 			"timeouts": timeouts.Attributes(ctx, timeouts.Opts{
 				Create: true,
 				Update: true,
@@ -401,13 +367,6 @@ func settingsChanged(prior *databaseModel, current databaseModel) []string {
 		changed = append(changed, "deletion_protection")
 	}
 	return changed
-}
-
-func resourcesEqual(a, b *ResourcesModel) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return a.CPU.Equal(b.CPU) && a.Memory.Equal(b.Memory) && a.Storage.Equal(b.Storage)
 }
 
 func (r *DatabaseResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {

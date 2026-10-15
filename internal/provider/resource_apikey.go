@@ -103,13 +103,7 @@ func (r *APIKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
-			"created_at": schema.StringAttribute{
-				Description: "Timestamp when the key was created.",
-				Computed:    true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
+			"created_at": createdAtAttribute("the key"),
 		},
 	}
 }

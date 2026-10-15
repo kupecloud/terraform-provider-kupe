@@ -71,12 +71,6 @@ type ClusterResourceModel struct {
 	Timeouts              timeouts.Value  `tfsdk:"timeouts"`
 }
 
-type ResourcesModel struct {
-	CPU     types.String `tfsdk:"cpu"`
-	Memory  types.String `tfsdk:"memory"`
-	Storage types.String `tfsdk:"storage"`
-}
-
 func NewClusterResource() resource.Resource {
 	return &ClusterResource{}
 }
@@ -244,20 +238,8 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				Description: "Target HA etcd replica count (3 when `high_availability = true`, 0 otherwise).",
 				Computed:    true,
 			},
-			"etag": schema.StringAttribute{
-				// etag intentionally has no UseStateForUnknown: it changes on
-				// every PATCH/PUT and we want the plan to honestly say
-				// "known after apply" on any update.
-				Description: "Resource version used for optimistic locking during updates.",
-				Computed:    true,
-			},
-			"created_at": schema.StringAttribute{
-				Description: "Timestamp when the cluster was created.",
-				Computed:    true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
+			"etag":       etagAttribute(),
+			"created_at": createdAtAttribute("the cluster"),
 			"timeouts": timeouts.Attributes(ctx, timeouts.Opts{
 				Create: true,
 				Update: true,
@@ -600,31 +582,4 @@ func mapClusterToState(c *client.Cluster, etag string, state *ClusterResourceMod
 	default:
 		state.Resources = nil
 	}
-}
-
-// resourcesFromPlan builds a ResourceQuantities only including
-// non-null fields so omitted nested values are absent from the JSON body
-// rather than sent as empty strings.
-func resourcesFromPlan(m *ResourcesModel) *client.ResourceQuantities {
-	r := &client.ResourceQuantities{}
-	if !m.CPU.IsNull() && !m.CPU.IsUnknown() {
-		r.CPU = m.CPU.ValueString()
-	}
-	if !m.Memory.IsNull() && !m.Memory.IsUnknown() {
-		r.Memory = m.Memory.ValueString()
-	}
-	if !m.Storage.IsNull() && !m.Storage.IsUnknown() {
-		r.Storage = m.Storage.ValueString()
-	}
-	return r
-}
-
-// stringOrNull returns types.StringNull for empty API values so terraform
-// state doesn't contain "" for fields the user never set — that prevents
-// perpetual diffs on partial resources blocks (e.g., memory-only).
-func stringOrNull(s string) types.String {
-	if s == "" {
-		return types.StringNull()
-	}
-	return types.StringValue(s)
 }

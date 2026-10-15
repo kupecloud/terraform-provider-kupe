@@ -112,20 +112,8 @@ func (r *SecretResource) Schema(ctx context.Context, _ resource.SchemaRequest, r
 				Description: "Current sync phase for the managed secret.",
 				Computed:    true,
 			},
-			"etag": schema.StringAttribute{
-				// etag intentionally has no UseStateForUnknown: it changes on
-				// every PATCH and we want the plan to honestly say "known
-				// after apply" on any update.
-				Description: "Resource version used for optimistic locking during updates.",
-				Computed:    true,
-			},
-			"created_at": schema.StringAttribute{
-				Description: "Timestamp when the managed secret definition was created.",
-				Computed:    true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
+			"etag":       etagAttribute(),
+			"created_at": createdAtAttribute("the managed secret definition"),
 			"timeouts": timeouts.Attributes(ctx, timeouts.Opts{
 				Create: true,
 				Update: true,
