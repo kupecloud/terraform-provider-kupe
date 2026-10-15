@@ -187,3 +187,25 @@ func TestWarningRoundTrip(t *testing.T) {
 		t.Fatalf("round trip mismatch: %+v vs %+v", in, out)
 	}
 }
+
+func TestErrorCode(t *testing.T) {
+	coded := &APIError{StatusCode: http.StatusConflict, Code: CodeTerminating}
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "coded", err: coded, want: CodeTerminating},
+		{name: "wrapped", err: fmt.Errorf("deleting: %w", coded), want: CodeTerminating},
+		{name: "no code", err: &APIError{StatusCode: http.StatusConflict}, want: ""},
+		{name: "not an API error", err: errors.New("connection refused"), want: ""},
+		{name: "nil", err: nil, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ErrorCode(tt.err); got != tt.want {
+				t.Errorf("ErrorCode() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

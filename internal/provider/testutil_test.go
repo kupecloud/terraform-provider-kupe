@@ -55,6 +55,9 @@ type mockKupeAPI struct {
 	// databaseGets counts database GETs.
 	databaseStatuses []map[string]any
 	databaseGets     int
+	// databaseRefusals, keyed by method (POST, PATCH), refuse the next
+	// database request of that method like kupe-api does, then clear.
+	databaseRefusals map[string]mockRefusal
 	// databaseStatusesOnPatch, when set, become databaseStatuses once a
 	// PATCH succeeds, so the statuses play out after the update.
 	databaseStatusesOnPatch []map[string]any
@@ -673,6 +676,11 @@ func (m *mockKupeAPI) serveDatabases(w http.ResponseWriter, r *http.Request) {
 		mockError(w, http.StatusNotFound, client.CodeDatabasesUnavailable, "managed databases are not enabled")
 		return
 	}
+	if refusal, ok := m.databaseRefusals[r.Method]; ok && len(segs) <= 1 {
+		delete(m.databaseRefusals, r.Method)
+		mockError(w, refusal.status, refusal.code, refusal.message)
+		return
+	}
 	switch {
 	case len(segs) == 0 && r.Method == http.MethodPost:
 		m.createDatabase(w, r)
@@ -936,6 +944,12 @@ func (m *mockKupeAPI) deleteDatabaseBinding(w http.ResponseWriter, database, nam
 	}
 	delete(m.databaseBindings, key)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// mockRefusal is an error envelope the mock answers with.
+type mockRefusal struct {
+	status        int
+	code, message string
 }
 
 // mockDatabaseStatus is a database status for databaseStatuses: phase, and

@@ -2,6 +2,7 @@ package provider
 
 import (
 	"fmt"
+	"net/http"
 	"regexp"
 	"testing"
 	"time"
@@ -9,6 +10,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+
+	"github.com/kupecloud/terraform-provider-kupe/internal/client"
 )
 
 // setDegradedGrace shortens or lengthens databaseDegradedGrace for one test.
@@ -196,5 +199,43 @@ func TestAccDatabaseResource_CreateWait(t *testing.T) {
 				Check:  resource.TestCheckResourceAttr(addr, "phase", "Provisioning"),
 			}},
 		})
+	})
+}
+
+// TestAccDatabaseResource_CodedRefusals: a refusal kupe-api names with a
+// code gets that code's remedy, not the generic "name already exists" hint.
+func TestAccDatabaseResource_CodedRefusals(t *testing.T) {
+	shrinkPollInterval(t)
+	mock := newMockKupeAPI()
+	defer mock.close()
+	config := testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false)})
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		CheckDestroy:             testAccCheckNoDatabases(mock),
+		Steps: []resource.TestStep{
+			{
+				PreConfig: func() {
+					mock.setState(func(m *mockKupeAPI) {
+						m.databaseRefusals = map[string]mockRefusal{"POST": {http.StatusConflict, client.CodePaymentSetupRequired,
+							"tenant acme is awaiting payment setup; add a payment method before creating databases"}}
+					})
+				},
+				Config: config,
+				ExpectError: regexp.MustCompile(`(?s)failed to create database.*Error code: payment_setup_required.*` +
+					wrappedText("Add a payment method on the Billing page of the Kupe Console")),
+			},
+			{Config: config},
+			{
+				PreConfig: func() {
+					mock.setState(func(m *mockKupeAPI) {
+						m.databaseRefusals = map[string]mockRefusal{"PATCH": {http.StatusConflict, client.CodeTerminating,
+							`database "orders-db" is being deleted`}}
+					})
+				},
+				Config: testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false), cpu: "1"}),
+				ExpectError: regexp.MustCompile(`(?s)failed to update database.*Error code: terminating.*` +
+					wrappedText("It is being deleted, so it can no longer be changed or bound.")),
+			},
+		},
 	})
 }

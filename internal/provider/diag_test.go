@@ -143,6 +143,69 @@ func TestAPIErrorDetail(t *testing.T) {
 			wantSubstr: []string{"kupe API returned 404", "terraform refresh"},
 		},
 		{
+			name:       "plain 409 keeps the name-or-concurrent-change hint",
+			err:        &client.APIError{StatusCode: http.StatusConflict, Message: `database "orders-db" already exists`},
+			wantSubstr: []string{"a resource with this name already exists"},
+		},
+		{
+			name: "409 terminating says it is being deleted, not that the name is taken",
+			err: &client.APIError{
+				StatusCode: http.StatusConflict, Code: client.CodeTerminating,
+				Message: `database "orders-db" is being deleted`,
+			},
+			wantSubstr:   []string{"Error code: terminating", "It is being deleted, so it can no longer be changed or bound."},
+			wantNoSubstr: []string{"already exists"},
+		},
+		{
+			name: "409 tenant_terminating",
+			err: &client.APIError{
+				StatusCode: http.StatusConflict, Code: client.CodeTenantTerminating,
+				Message: "tenant acme is being deleted; cannot create new databases",
+			},
+			wantSubstr:   []string{"Your tenant is being deleted, so it cannot take new or larger clusters or databases."},
+			wantNoSubstr: []string{"already exists"},
+		},
+		{
+			name: "409 tenant_suspended points at support",
+			err: &client.APIError{
+				StatusCode: http.StatusConflict, Code: client.CodeTenantSuspended,
+				Message: "tenant acme is suspended; contact support before growing databases",
+			},
+			wantSubstr:   []string{"Contact Kupe Cloud support to lift the suspension."},
+			wantNoSubstr: []string{"already exists"},
+		},
+		{
+			name: "409 payment_setup_required points at the Billing page",
+			err: &client.APIError{
+				StatusCode: http.StatusConflict, Code: client.CodePaymentSetupRequired,
+				Message: "tenant acme is awaiting payment setup; add a payment method before creating databases",
+			},
+			wantSubstr:   []string{"Add a payment method on the Billing page of the Kupe Console"},
+			wantNoSubstr: []string{"already exists"},
+		},
+		{
+			name:         "409 with a code this provider does not know shows the API's words only",
+			err:          &client.APIError{StatusCode: http.StatusConflict, Code: "something_new", Message: "refused"},
+			wantSubstr:   []string{"kupe API returned 409: refused", "Error code: something_new"},
+			wantNoSubstr: []string{"already exists"},
+		},
+		{
+			name: "400 plan_limit_reached says delete one or upgrade",
+			err: &client.APIError{
+				StatusCode: http.StatusBadRequest, Code: client.CodePlanLimitReached,
+				Message: "maximum database limit reached: your plan allows 2 databases",
+			},
+			wantSubstr: []string{"Error code: plan_limit_reached", "Delete one you no longer need or upgrade your plan"},
+		},
+		{
+			name: "503 while the tenant's limit is being set up gets the retry hint",
+			err: &client.APIError{
+				StatusCode: http.StatusServiceUnavailable,
+				Message:    "the tenant's database limit is still being set up; retry in a few seconds",
+			},
+			wantSubstr: []string{"still being set up", "Retry the operation after a short delay"},
+		},
+		{
 			name: "wrapped api error is unwrapped",
 			err: fmt.Errorf("client: %w", &client.APIError{
 				StatusCode: http.StatusForbidden,
@@ -402,6 +465,7 @@ func TestWaitForCondition_DeletePredicate(t *testing.T) {
 func TestDeleteUntilAccepted(t *testing.T) {
 	conflict := fakeAPIError(http.StatusConflict, "the object has been modified")
 	protected := &client.APIError{StatusCode: http.StatusConflict, Code: client.CodeDeletionProtected}
+	terminating := &client.APIError{StatusCode: http.StatusConflict, Code: client.CodeTerminating}
 	tests := []struct {
 		name      string
 		responses []error // one per attempt; the last repeats
@@ -412,6 +476,7 @@ func TestDeleteUntilAccepted(t *testing.T) {
 		{name: "already gone", responses: []error{fakeAPIError(http.StatusNotFound, "not found")}, wantCalls: 1},
 		{name: "conflicts are retried", responses: []error{conflict, conflict, nil}, wantCalls: 3},
 		{name: "deletion protection is returned at once", responses: []error{protected}, wantErr: protected, wantCalls: 1},
+		{name: "any coded refusal is returned at once", responses: []error{terminating}, wantErr: terminating, wantCalls: 1},
 		{name: "a persistent conflict returns the last refusal", responses: []error{conflict}, wantErr: conflict},
 		{name: "a persistent conflict is marked not accepted", responses: []error{conflict}, wantErr: errDeleteNotAccepted},
 	}

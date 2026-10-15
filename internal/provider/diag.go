@@ -113,10 +113,11 @@ func waitForDeletion(ctx context.Context, timeout time.Duration, get func(contex
 var errDeleteNotAccepted = errors.New("delete not accepted before the timeout")
 
 // deleteUntilAccepted sends del until the API accepts it or reports the
-// resource already gone. A 409 conflict (the resource kept changing while
-// the delete was being admitted) is retried until the timeout, after which
-// the last refusal is returned wrapped in errDeleteNotAccepted. A
-// deletion-protection refusal and permanent API errors are returned at once.
+// resource already gone. A plain 409 conflict (the resource kept changing
+// while the delete was being admitted) is retried until the timeout, after
+// which the last refusal is returned wrapped in errDeleteNotAccepted. A 409
+// with an error code (deletion protection, for one) is a decided refusal and,
+// like permanent API errors, is returned at once.
 func deleteUntilAccepted(ctx context.Context, timeout time.Duration, del func(context.Context) error) error {
 	var lastErr error
 	err := pollUntil(ctx, timeout, func(c context.Context) (bool, error) {
@@ -129,7 +130,7 @@ func deleteUntilAccepted(ctx context.Context, timeout time.Duration, del func(co
 		switch {
 		case err == nil || client.IsNotFound(err):
 			return true, nil
-		case client.IsDeletionProtected(err):
+		case client.ErrorCode(err) != "":
 			return true, err
 		}
 		return false, err
@@ -227,6 +228,9 @@ func apiErrorDetail(err error) string {
 				"Existing resources are not affected. Run `terraform apply` again later."
 		case client.CodeStorageShrinkUnsupported:
 			return base + "\n\nDatabase storage can only grow. Keep the current size or set a larger one."
+		case client.CodePlanLimitReached:
+			return base + "\n\nYour plan has no room for another one, so nothing was created. Delete one you no " +
+				"longer need or upgrade your plan, then run `terraform apply` again."
 		}
 		// 400 covers two server-side outcomes that surface here:
 		// (a) the request body failed schema decoding (typo in
@@ -256,7 +260,25 @@ func apiErrorDetail(err error) string {
 		}
 		return base + "\n\nThe resource does not exist on the server. If you expected it to exist it may have been deleted out-of-band; run `terraform refresh` to reconcile or `terraform import` to re-attach."
 	case http.StatusConflict:
-		return base + "\n\nThe operation conflicts with current server state. Usually means a resource with this name already exists on the tenant or is being modified concurrently."
+		// A code names the refusal; only a plain conflict is about the name
+		// or a concurrent change. The tenant refusals are shared by
+		// clusters and databases, so their text names neither.
+		switch apiErr.Code {
+		case "":
+			return base + "\n\nThe operation conflicts with current server state. Usually means a resource with this name already exists on the tenant or is being modified concurrently."
+		case client.CodeTerminating:
+			return base + "\n\nIt is being deleted, so it can no longer be changed or bound. Once it is gone, " +
+				"`terraform apply` creates it again; remove it from the configuration if that is not wanted."
+		case client.CodeTenantTerminating:
+			return base + "\n\nYour tenant is being deleted, so it cannot take new or larger clusters or databases."
+		case client.CodeTenantSuspended:
+			return base + "\n\nYour tenant is suspended, so it cannot take new or larger clusters or databases. " +
+				"Contact Kupe Cloud support to lift the suspension."
+		case client.CodePaymentSetupRequired:
+			return base + "\n\nAdd a payment method on the Billing page of the Kupe Console, then run " +
+				"`terraform apply` again."
+		}
+		return base
 	case http.StatusPreconditionFailed:
 		return base + "\n\nThe server-side state changed while this apply was running (ETag/If-Match mismatch). Another client modified the same resource concurrently — refresh and re-apply."
 	case http.StatusTooManyRequests:
