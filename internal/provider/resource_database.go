@@ -2,21 +2,16 @@ package provider
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
-	"github.com/hashicorp/terraform-plugin-framework/diag"
-	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/kupecloud/terraform-provider-kupe/internal/client"
@@ -45,11 +40,14 @@ const (
 
 var (
 	_ resource.Resource                = &DatabaseResource{}
+	_ resource.ResourceWithConfigure   = &DatabaseResource{}
 	_ resource.ResourceWithImportState = &DatabaseResource{}
 )
 
+// DatabaseResource is kupe_database. Read, Delete, Configure and
+// ImportState come from managedResource.
 type DatabaseResource struct {
-	client *client.Client
+	managedResource[DatabaseResourceModel, client.Database]
 }
 
 // databaseModel holds the attributes the kupe_database resource and data
@@ -73,7 +71,50 @@ type DatabaseResourceModel struct {
 }
 
 func NewDatabaseResource() resource.Resource {
-	return &DatabaseResource{}
+	return &DatabaseResource{managedResource[DatabaseResourceModel, client.Database]{kind: &databaseKind}}
+}
+
+// databaseKind is the database's lifecycle for managedResource.
+var databaseKind = serviceKind[DatabaseResourceModel, client.Database]{
+	noun: "database",
+	name: func(m *DatabaseResourceModel) string { return m.Name.ValueString() },
+	get: func(ctx context.Context, c *client.Client, m *DatabaseResourceModel) (*client.Database, string, error) {
+		return c.GetDatabase(ctx, m.Name.ValueString())
+	},
+	del: func(ctx context.Context, c *client.Client, m *DatabaseResourceModel) error {
+		return c.DeleteDatabase(ctx, m.Name.ValueString())
+	},
+	mapToState: mapDatabaseToState,
+	timeoutsOf: func(m *DatabaseResourceModel) timeouts.Value { return m.Timeouts },
+	defaults: operationTimeouts{
+		create: defaultDatabaseCreateTimeout,
+		update: defaultDatabaseUpdateTimeout,
+		delete: defaultDatabaseDeleteTimeout,
+	},
+	ready: readiness[DatabaseResourceModel, client.Database]{
+		target:    databasePhaseRunning,
+		phase:     databasePhase,
+		converged: databaseConverged,
+	},
+	settingsChanged: func(prior *DatabaseResourceModel, current *client.Database) []string {
+		return settingsChanged(&prior.databaseModel, databaseModelFromAPI(current))
+	},
+	deleteRefused: func(m *DatabaseResourceModel, err error) (string, string, bool) {
+		if !client.IsDeletionProtected(err) {
+			return "", "", false
+		}
+		return "database has deletion protection enabled",
+			fmt.Sprintf("Database %q was not deleted because deletion protection is enabled. To delete it, set "+
+				"`deletion_protection = false` on the resource, run `terraform apply`, then destroy it again. %s",
+				m.Name.ValueString(), databaseDeleteNotice), true
+	},
+	stillDeleting: func(m *DatabaseResourceModel) string {
+		return fmt.Sprintf("DELETE was accepted but database %q is still terminating after the configured delete "+
+			"timeout. Terraform has removed it from state; the Kupe platform finishes the teardown in the "+
+			"background, and the name stays reserved until then (creating a database with the same name may "+
+			"fail with a conflict). If it stays in this state, check it in the Kupe Console or contact Kupe "+
+			"Cloud support. Override with `timeouts.delete = \"30m\"`.", m.Name.ValueString())
+	},
 }
 
 func (r *DatabaseResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -162,10 +203,6 @@ func (r *DatabaseResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 	}
 }
 
-func (r *DatabaseResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
-	r.client = configureClient(req.ProviderData, &resp.Diagnostics)
-}
-
 func (r *DatabaseResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan DatabaseResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -186,42 +223,7 @@ func (r *DatabaseResource) Create(ctx context.Context, req resource.CreateReques
 		resp.Diagnostics.AddError("failed to create database", apiErrorDetail(err))
 		return
 	}
-
-	// Record the database before waiting so an interrupted apply still
-	// tracks it.
-	mapDatabaseToState(db, etag, &plan)
-	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	timeout, diags := plan.Timeouts.Create(ctx, defaultDatabaseCreateTimeout)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	r.waitForDatabaseRunning(ctx, timeout, &plan, &resp.State, &resp.Diagnostics, "create")
-}
-
-func (r *DatabaseResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var state DatabaseResourceModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	db, etag, err := r.client.GetDatabase(ctx, state.Name.ValueString())
-	if err != nil {
-		if client.IsNotFound(err) {
-			resp.State.RemoveResource(ctx)
-			return
-		}
-		resp.Diagnostics.AddError("failed to read database", apiErrorDetail(err))
-		return
-	}
-
-	mapDatabaseToState(db, etag, &state)
-	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+	r.created(ctx, db, etag, &plan, &resp.State, &resp.Diagnostics)
 }
 
 func (r *DatabaseResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
@@ -232,54 +234,14 @@ func (r *DatabaseResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	patch, hasChanges := databasePatch(&plan, &state)
-	name := plan.Name.ValueString()
-	if !hasChanges {
-		// Only provider-side settings (timeouts) changed: refresh.
-		db, etag, err := r.client.GetDatabase(ctx, name)
-		if err != nil {
-			resp.Diagnostics.AddError("failed to read database", apiErrorDetail(err))
-			return
+	var send patchFunc[client.Database]
+	if patch, hasChanges := databasePatch(&plan, &state); hasChanges {
+		name := plan.Name.ValueString()
+		send = func(ctx context.Context, etag string) (*client.Database, string, error) {
+			return r.client.UpdateDatabase(ctx, name, etag, patch)
 		}
-		mapDatabaseToState(db, etag, &plan)
-		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
-		return
 	}
-
-	db, etag, err := r.updateDatabase(ctx, &state, patch)
-	var changed *concurrentChangeError
-	if errors.As(err, &changed) {
-		resp.Diagnostics.AddError("database changed outside this apply",
-			fmt.Sprintf("Database %q was changed by another client since Terraform last read it (%s now differs "+
-				"from state), so the update was not applied. Run `terraform plan` to review the current values, then "+
-				"apply again.", name, strings.Join(changed.fields, ", ")))
-		return
-	}
-	var apiErr *client.APIError
-	if client.IsPreconditionFailed(err) && errors.As(err, &apiErr) {
-		// Only reached after the retry: the database kept changing between
-		// the re-read and the second attempt.
-		resp.Diagnostics.AddError("failed to update database", apiErrorSummary(apiErr)+
-			"\n\nThe database kept changing while the update was being sent, so it was not applied. Run "+
-			"`terraform apply` again.")
-		return
-	}
-	if err != nil {
-		resp.Diagnostics.AddError("failed to update database", apiErrorDetail(err))
-		return
-	}
-	mapDatabaseToState(db, etag, &plan)
-	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	timeout, diags := plan.Timeouts.Update(ctx, defaultDatabaseUpdateTimeout)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	r.waitForDatabaseRunning(ctx, timeout, &plan, &resp.State, &resp.Diagnostics, "update")
+	r.update(ctx, &plan, &state, state.ETag.ValueString(), send, true, &resp.State, &resp.Diagnostics)
 }
 
 // databasePatch builds the merge patch for the fields that differ between
@@ -314,42 +276,6 @@ func databasePatch(plan, state *DatabaseResourceModel) (client.PatchDatabaseRequ
 	return patch, hasChanges
 }
 
-// concurrentChangeError reports the fields another client changed while an
-// update was in flight.
-type concurrentChangeError struct {
-	fields []string
-}
-
-func (e *concurrentChangeError) Error() string {
-	return "database changed concurrently: " + strings.Join(e.fields, ", ")
-}
-
-// updateDatabase sends patch with the ETag from state. The ETag changes on
-// every write, including the platform's own status updates, so a 412 often
-// means only the status moved. On a 412 it re-reads the database: when its
-// settings still match state, nobody else changed them and the patch is sent
-// once more with the fresh ETag; otherwise it returns a
-// *concurrentChangeError. Every setting is compared, not only the patched
-// ones, because the response to the retried patch becomes the new state and
-// must match the plan.
-func (r *DatabaseResource) updateDatabase(
-	ctx context.Context, state *DatabaseResourceModel, patch client.PatchDatabaseRequest,
-) (*client.Database, string, error) {
-	name := state.Name.ValueString()
-	db, etag, err := r.client.UpdateDatabase(ctx, name, state.ETag.ValueString(), patch)
-	if !client.IsPreconditionFailed(err) {
-		return db, etag, err
-	}
-	current, currentETag, getErr := r.client.GetDatabase(ctx, name)
-	if getErr != nil {
-		return nil, "", fmt.Errorf("re-reading database after a stale update: %w", getErr)
-	}
-	if fields := settingsChanged(&state.databaseModel, databaseModelFromAPI(current)); len(fields) > 0 {
-		return nil, "", &concurrentChangeError{fields: fields}
-	}
-	return r.client.UpdateDatabase(ctx, name, currentETag, patch)
-}
-
 // settingsChanged lists, by attribute name, the settings an update can
 // change whose current value differs from prior.
 func settingsChanged(prior *databaseModel, current databaseModel) []string {
@@ -369,100 +295,6 @@ func settingsChanged(prior *databaseModel, current databaseModel) []string {
 	return changed
 }
 
-func (r *DatabaseResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-	var state DatabaseResourceModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	timeout, diags := state.Timeouts.Delete(ctx, defaultDatabaseDeleteTimeout)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	// One deadline covers both sending the delete and waiting for it.
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	name := state.Name.ValueString()
-	err := deleteUntilAccepted(ctx, timeout, func(c context.Context) error {
-		return r.client.DeleteDatabase(c, name)
-	})
-	if client.IsDeletionProtected(err) {
-		resp.Diagnostics.AddError("database has deletion protection enabled",
-			fmt.Sprintf("Database %q was not deleted because deletion protection is enabled. To delete it, set "+
-				"`deletion_protection = false` on the resource, run `terraform apply`, then destroy it again. %s",
-				name, databaseDeleteNotice))
-		return
-	}
-	if err != nil {
-		resp.Diagnostics.AddError("failed to delete database", deleteErrorDetail(err))
-		return
-	}
-
-	err = waitForDeletion(ctx, timeout, func(c context.Context) error {
-		_, _, err := r.client.GetDatabase(c, name)
-		return err
-	})
-	switch {
-	case err == nil:
-		// confirmed gone
-	case isTerminalAPIError(err):
-		resp.Diagnostics.AddError("failed to confirm database deletion", apiErrorDetail(err))
-	default:
-		resp.Diagnostics.AddWarning(
-			"database still terminating",
-			fmt.Sprintf("DELETE was accepted but database %q is still terminating after the configured delete "+
-				"timeout. Terraform has removed it from state; the Kupe platform finishes the teardown in the "+
-				"background, and the name stays reserved until then (creating a database with the same name may "+
-				"fail with a conflict). If it stays in this state, check it in the Kupe Console or contact Kupe "+
-				"Cloud support. Override with `timeouts.delete = \"30m\"`.", name),
-		)
-	}
-}
-
-func (r *DatabaseResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resource.ImportStatePassthroughID(ctx, path.Root("name"), req, resp)
-}
-
-// waitForDatabaseRunning polls until databaseConverged or the timeout,
-// saving each observation to state. kind ("create" or "update") names the
-// operation in diagnostics.
-func (r *DatabaseResource) waitForDatabaseRunning(
-	ctx context.Context,
-	timeout time.Duration,
-	plan *DatabaseResourceModel,
-	state *tfsdk.State,
-	diags *diag.Diagnostics,
-	kind string,
-) {
-	name := plan.Name.ValueString()
-	err := pollUntil(ctx, timeout, func(c context.Context) (bool, error) {
-		db, etag, err := r.client.GetDatabase(c, name)
-		if err != nil {
-			return false, err
-		}
-		mapDatabaseToState(db, etag, plan)
-		diags.Append(state.Set(c, plan)...)
-		return databaseConverged(db), nil
-	})
-	switch {
-	case err == nil:
-		// converged
-	case isTerminalAPIError(err):
-		diags.AddError(fmt.Sprintf("database %s failed while waiting for Running", kind), apiErrorDetail(err))
-	default:
-		diags.AddWarning(
-			fmt.Sprintf("database %s timed out before reaching Running", kind),
-			fmt.Sprintf("Database %q was at phase=%q when the %s timeout fired. The Kupe platform continues in "+
-				"the background; re-run `terraform apply` later and it will be a no-op once the database is "+
-				"Running. If it stays in this phase, check it in the Kupe Console or contact Kupe Cloud support. "+
-				"Override with `timeouts.%s = \"60m\"`.", name, plan.Phase.ValueString(), kind, kind),
-		)
-	}
-}
-
 // databaseConverged reports whether the database is Running with its latest
 // spec applied. Phase alone is not enough: a change that keeps the database
 // Running (deletion protection, or the moment before a resize starts) is
@@ -471,6 +303,14 @@ func databaseConverged(db *client.Database) bool {
 	return db.Status != nil &&
 		db.Status.Phase == databasePhaseRunning &&
 		db.Status.ObservedGeneration >= db.Generation
+}
+
+// databasePhase is db's phase, "" when it has no status yet.
+func databasePhase(db *client.Database) string {
+	if db == nil || db.Status == nil {
+		return ""
+	}
+	return db.Status.Phase
 }
 
 func mapDatabaseToState(db *client.Database, etag string, state *DatabaseResourceModel) {

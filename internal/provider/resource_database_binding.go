@@ -42,11 +42,14 @@ const (
 
 var (
 	_ resource.Resource                = &DatabaseBindingResource{}
+	_ resource.ResourceWithConfigure   = &DatabaseBindingResource{}
 	_ resource.ResourceWithImportState = &DatabaseBindingResource{}
 )
 
+// DatabaseBindingResource is kupe_database_binding. Read, Delete and
+// Configure come from managedResource; it imports by "<database>/<binding>".
 type DatabaseBindingResource struct {
-	client *client.Client
+	managedResource[DatabaseBindingResourceModel, client.DatabaseBinding]
 }
 
 type DatabaseBindingResourceModel struct {
@@ -62,7 +65,69 @@ type DatabaseBindingResourceModel struct {
 }
 
 func NewDatabaseBindingResource() resource.Resource {
-	return &DatabaseBindingResource{}
+	return &DatabaseBindingResource{
+		managedResource[DatabaseBindingResourceModel, client.DatabaseBinding]{kind: &databaseBindingKind},
+	}
+}
+
+// databaseBindingKind is the binding's lifecycle for managedResource. A
+// binding has no ETag and cannot be updated, so nothing is retried on a 412.
+var databaseBindingKind = serviceKind[DatabaseBindingResourceModel, client.DatabaseBinding]{
+	noun: "database binding",
+	name: func(m *DatabaseBindingResourceModel) string { return m.Name.ValueString() },
+	get: func(ctx context.Context, c *client.Client, m *DatabaseBindingResourceModel) (*client.DatabaseBinding, string, error) {
+		b, err := c.GetDatabaseBinding(ctx, m.Database.ValueString(), m.Name.ValueString())
+		return b, "", err
+	},
+	del: func(ctx context.Context, c *client.Client, m *DatabaseBindingResourceModel) error {
+		return c.DeleteDatabaseBinding(ctx, m.Database.ValueString(), m.Name.ValueString())
+	},
+	mapToState: func(b *client.DatabaseBinding, _ string, m *DatabaseBindingResourceModel) {
+		mapDatabaseBindingToState(b, m)
+	},
+	timeoutsOf: func(m *DatabaseBindingResourceModel) timeouts.Value { return m.Timeouts },
+	defaults: operationTimeouts{
+		create: defaultDatabaseBindingCreateTimeout,
+		delete: defaultDatabaseBindingDeleteTimeout,
+	},
+	ready: readiness[DatabaseBindingResourceModel, client.DatabaseBinding]{
+		target: databaseBindingPhaseReady,
+		phase:  databaseBindingPhase,
+		converged: func(b *client.DatabaseBinding) bool {
+			return databaseBindingPhase(b) == databaseBindingPhaseReady
+		},
+		// Waiting does not clear Failed: the tenant has to act.
+		failed: func(b *client.DatabaseBinding) (time.Duration, bool) {
+			return 0, databaseBindingPhase(b) == databaseBindingPhaseFailed
+		},
+		// Terraform taints a resource whose Create returns an error along
+		// with a state, so the failed binding stays tracked: `terraform
+		// destroy` removes it and the next apply replaces it.
+		failedDetail: func(m *DatabaseBindingResourceModel, b *client.DatabaseBinding) string {
+			return databaseBindingFailedDetail(m, b.Status)
+		},
+		timedOutDetail: func(m *DatabaseBindingResourceModel, b *client.DatabaseBinding) string {
+			detail := fmt.Sprintf(" If the cluster %q does not exist yet, the binding becomes Ready once it does.",
+				m.Cluster.ValueString())
+			if b != nil && b.Status != nil && b.Status.Message != "" {
+				detail += "\n\nStatus message: " + b.Status.Message
+			}
+			return detail
+		},
+	},
+	stillDeleting: func(m *DatabaseBindingResourceModel) string {
+		return fmt.Sprintf("DELETE was accepted but binding %q is still being removed after the configured delete "+
+			"timeout. Terraform has removed it from state; the Kupe platform finishes removing the Service, "+
+			"Secret and network access in the background.", m.Name.ValueString())
+	},
+}
+
+// databaseBindingPhase is b's phase, "" when it has no status yet.
+func databaseBindingPhase(b *client.DatabaseBinding) string {
+	if b == nil || b.Status == nil {
+		return ""
+	}
+	return b.Status.Phase
 }
 
 func (r *DatabaseBindingResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -149,10 +214,6 @@ func (r *DatabaseBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 	}
 }
 
-func (r *DatabaseBindingResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
-	r.client = configureClient(req.ProviderData, &resp.Diagnostics)
-}
-
 func (r *DatabaseBindingResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan DatabaseBindingResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -169,58 +230,12 @@ func (r *DatabaseBindingResource) Create(ctx context.Context, req resource.Creat
 	if !plan.SecretName.IsUnknown() {
 		createReq.SecretName = plan.SecretName.ValueString()
 	}
-	database := plan.Database.ValueString()
-	binding, err := r.client.CreateDatabaseBinding(ctx, database, createReq)
+	binding, err := r.client.CreateDatabaseBinding(ctx, plan.Database.ValueString(), createReq)
 	if err != nil {
 		resp.Diagnostics.AddError("failed to create database binding", apiErrorDetail(err))
 		return
 	}
-
-	// Record the binding before waiting so an interrupted apply still
-	// tracks it.
-	mapDatabaseBindingToState(binding, &plan)
-	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	timeout, diags := plan.Timeouts.Create(ctx, defaultDatabaseBindingCreateTimeout)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	status := binding.Status
-	err = pollUntil(ctx, timeout, func(c context.Context) (bool, error) {
-		observed, err := r.client.GetDatabaseBinding(c, database, binding.Name)
-		if err != nil {
-			return false, err
-		}
-		mapDatabaseBindingToState(observed, &plan)
-		resp.Diagnostics.Append(resp.State.Set(c, &plan)...)
-		status = observed.Status
-		phase := plan.Phase.ValueString()
-		return phase == databaseBindingPhaseReady || phase == databaseBindingPhaseFailed, nil
-	})
-	switch {
-	case err == nil && plan.Phase.ValueString() == databaseBindingPhaseFailed:
-		// Terraform taints a resource whose Create returns an error along
-		// with a state, so the binding saved above stays tracked: `terraform
-		// destroy` removes it and the next apply replaces it.
-		resp.Diagnostics.AddError("database binding failed", databaseBindingFailedDetail(&plan, status))
-	case err == nil:
-		// Ready
-	case isTerminalAPIError(err):
-		resp.Diagnostics.AddError("database binding failed while waiting for Ready", apiErrorDetail(err))
-	default:
-		detail := fmt.Sprintf("Binding %q was at phase=%q when the create timeout fired. The Kupe platform "+
-			"keeps reconciling it; re-run `terraform apply` later to record the Ready state. If the cluster %q "+
-			"does not exist yet, the binding becomes Ready once it does.",
-			binding.Name, plan.Phase.ValueString(), plan.Cluster.ValueString())
-		if status != nil && status.Message != "" {
-			detail += "\n\nStatus message: " + status.Message
-		}
-		resp.Diagnostics.AddWarning("database binding create timed out before reaching Ready", detail)
-	}
+	r.created(ctx, binding, "", &plan, &resp.State, &resp.Diagnostics)
 }
 
 // databaseBindingConflicted reports whether the binding's Conflict condition
@@ -255,27 +270,6 @@ func databaseBindingFailedDetail(b *DatabaseBindingResourceModel, status *client
 		"replaces it and `terraform destroy` removes it."
 }
 
-func (r *DatabaseBindingResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var state DatabaseBindingResourceModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	binding, err := r.client.GetDatabaseBinding(ctx, state.Database.ValueString(), state.Name.ValueString())
-	if err != nil {
-		if client.IsNotFound(err) {
-			resp.State.RemoveResource(ctx)
-			return
-		}
-		resp.Diagnostics.AddError("failed to read database binding", apiErrorDetail(err))
-		return
-	}
-
-	mapDatabaseBindingToState(binding, &state)
-	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
-}
-
 // Update only runs when the `timeouts` attribute changes: every other argument
 // requires replacement. It refreshes the binding and records the new timeouts.
 func (r *DatabaseBindingResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
@@ -284,57 +278,7 @@ func (r *DatabaseBindingResource) Update(ctx context.Context, req resource.Updat
 	if resp.Diagnostics.HasError() {
 		return
 	}
-
-	binding, err := r.client.GetDatabaseBinding(ctx, plan.Database.ValueString(), plan.Name.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("failed to read database binding", apiErrorDetail(err))
-		return
-	}
-	mapDatabaseBindingToState(binding, &plan)
-	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
-}
-
-func (r *DatabaseBindingResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-	var state DatabaseBindingResourceModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	timeout, diags := state.Timeouts.Delete(ctx, defaultDatabaseBindingDeleteTimeout)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	// One deadline covers both sending the delete and waiting for it.
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	database, name := state.Database.ValueString(), state.Name.ValueString()
-	if err := deleteUntilAccepted(ctx, timeout, func(c context.Context) error {
-		return r.client.DeleteDatabaseBinding(c, database, name)
-	}); err != nil {
-		resp.Diagnostics.AddError("failed to delete database binding", deleteErrorDetail(err))
-		return
-	}
-
-	err := waitForDeletion(ctx, timeout, func(c context.Context) error {
-		_, err := r.client.GetDatabaseBinding(c, database, name)
-		return err
-	})
-	switch {
-	case err == nil:
-		// confirmed gone
-	case isTerminalAPIError(err):
-		resp.Diagnostics.AddError("failed to confirm database binding deletion", apiErrorDetail(err))
-	default:
-		resp.Diagnostics.AddWarning(
-			"database binding still terminating",
-			fmt.Sprintf("DELETE was accepted but binding %q is still being removed after the configured delete "+
-				"timeout. Terraform has removed it from state; the Kupe platform finishes removing the Service, "+
-				"Secret and network access in the background.", name),
-		)
-	}
+	r.update(ctx, &plan, nil, "", nil, false, &resp.State, &resp.Diagnostics)
 }
 
 // ImportState accepts "<database>/<binding>".
