@@ -17,20 +17,12 @@ type ClusterDataSource struct {
 }
 
 type ClusterDataSourceModel struct {
-	Name                  types.String `tfsdk:"name"`
-	DisplayName           types.String `tfsdk:"display_name"`
-	Type                  types.String `tfsdk:"type"`
-	Version               types.String `tfsdk:"version"`
-	HighAvailability      types.Bool   `tfsdk:"high_availability"`
-	Phase                 types.String `tfsdk:"phase"`
-	Endpoint              types.String `tfsdk:"endpoint"`
-	HAConfigured          types.Bool   `tfsdk:"ha_configured"`
-	HAEnabledAt           types.String `tfsdk:"ha_enabled_at"`
-	HAPhase               types.String `tfsdk:"ha_phase"`
-	HAReplicasReady       types.Int64  `tfsdk:"ha_replicas_ready"`
-	HAReplicasDesired     types.Int64  `tfsdk:"ha_replicas_desired"`
-	HAEtcdReplicasReady   types.Int64  `tfsdk:"ha_etcd_replicas_ready"`
-	HAEtcdReplicasDesired types.Int64  `tfsdk:"ha_etcd_replicas_desired"`
+	Name             types.String `tfsdk:"name"`
+	DisplayName      types.String `tfsdk:"display_name"`
+	Type             types.String `tfsdk:"type"`
+	Version          types.String `tfsdk:"version"`
+	HighAvailability types.Bool   `tfsdk:"high_availability"`
+	clusterStatusModel
 }
 
 func NewClusterDataSource() datasource.DataSource {
@@ -133,26 +125,6 @@ func (d *ClusterDataSource) Read(ctx context.Context, req datasource.ReadRequest
 	state.Type = types.StringValue(cluster.Type)
 	state.Version = types.StringValue(cluster.Version)
 	state.HighAvailability = types.BoolValue(cluster.HighAvailability)
-	if cluster.Status != nil {
-		state.Phase = types.StringValue(cluster.Status.Phase)
-		state.Endpoint = types.StringValue(cluster.Status.Endpoint)
-		state.HAConfigured = types.BoolValue(cluster.Status.HAConfigured)
-		state.HAEnabledAt = types.StringValue(cluster.Status.HAEnabledAt)
-		state.HAPhase = types.StringValue(cluster.Status.HAPhase)
-		state.HAReplicasReady = types.Int64Value(int64(cluster.Status.HAReplicasReady))
-		state.HAReplicasDesired = types.Int64Value(int64(cluster.Status.HAReplicasDesired))
-		state.HAEtcdReplicasReady = types.Int64Value(int64(cluster.Status.HAEtcdReplicasReady))
-		state.HAEtcdReplicasDesired = types.Int64Value(int64(cluster.Status.HAEtcdReplicasDesired))
-	} else {
-		state.Phase = types.StringValue("")
-		state.Endpoint = types.StringValue("")
-		state.HAConfigured = types.BoolValue(false)
-		state.HAEnabledAt = types.StringValue("")
-		state.HAPhase = types.StringValue("")
-		state.HAReplicasReady = types.Int64Value(0)
-		state.HAReplicasDesired = types.Int64Value(0)
-		state.HAEtcdReplicasReady = types.Int64Value(0)
-		state.HAEtcdReplicasDesired = types.Int64Value(0)
-	}
+	state.clusterStatusModel = clusterStatusFromAPI(cluster.Status)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }

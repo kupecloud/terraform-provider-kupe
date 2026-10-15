@@ -36,6 +36,14 @@ type mockKupeAPI struct {
 	amRoutes    []map[string]any
 	amGlobal    map[string]any
 	amETag      string
+	// clusterStatuses, clusterStatusesOnPatch, clusterBeforePatch and
+	// clusterDeleteConflicts do for clusters what the database fields of
+	// the same names do for databases; clusterGets counts cluster GETs.
+	clusterStatuses        []map[string]any
+	clusterStatusesOnPatch []map[string]any
+	clusterBeforePatch     []func(c map[string]any)
+	clusterDeleteConflicts int
+	clusterGets            int
 	// Managed databases keyed by name; bindings keyed by "{database}/{name}".
 	databases        map[string]map[string]any
 	databaseBindings map[string]map[string]any
@@ -218,7 +226,8 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 			"type": body["type"], "version": strOrEmpty(body["version"]),
 			"resources":        body["resources"],
 			"highAvailability": body["highAvailability"] == true,
-			"status":           map[string]any{"phase": "Pending"},
+			"generation":       1,
+			"status":           map[string]any{"phase": "Pending", "observedGeneration": 0},
 			"resourceVersion":  rv, "createdAt": "2024-01-01T00:00:00Z",
 		}
 		m.clusters[name] = cluster
@@ -229,19 +238,23 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 	case r.Method == "GET" && matchPath(r.URL.Path, "/api/v1/tenants/acme/clusters/"):
 		name := lastSegment(r.URL.Path)
 		if c, ok := m.clusters[name]; ok {
-			// Simulate the operator advancing the cluster from Pending
-			// to Running on first observation so the provider's
-			// Create/Update polling loop converges quickly in tests.
-			// Real reconciliation is multi-stage (Pending →
-			// Provisioning → Running); collapsing it to a single tick
-			// keeps acceptance tests fast without changing the
-			// production behaviour we're verifying — that the provider
-			// blocks until phase reaches Running.
-			if status, ok := c["status"].(map[string]any); ok {
-				if status["phase"] == "Pending" {
-					status["phase"] = "Running"
+			// Simulate the operator bringing the cluster to Running with
+			// its latest spec applied on first observation, so the
+			// provider's Create/Update polling loop converges quickly in
+			// tests. Real reconciliation is multi-stage (Pending →
+			// Provisioning → Running); clusterStatuses scripts the stages
+			// a test needs.
+			m.clusterGets++
+			status := map[string]any{"phase": "Running", "observedGeneration": c["generation"]}
+			if len(m.clusterStatuses) > 0 {
+				for k, v := range m.clusterStatuses[0] {
+					status[k] = v
+				}
+				if len(m.clusterStatuses) > 1 {
+					m.clusterStatuses = m.clusterStatuses[1:]
 				}
 			}
+			c["status"] = status
 			w.Header().Set("ETag", `"`+c["resourceVersion"].(string)+`"`)
 			mustEncodeJSON(w, c)
 		} else {
@@ -257,6 +270,15 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 			mustEncodeJSON(w, map[string]string{"error": "not found"})
 			return
 		}
+		if len(m.clusterBeforePatch) > 0 {
+			m.clusterBeforePatch[0](c)
+			m.clusterBeforePatch = m.clusterBeforePatch[1:]
+			c["resourceVersion"] = m.nextRV()
+		}
+		if ifMatch := r.Header.Get("If-Match"); ifMatch != "" && strings.Trim(ifMatch, `"`) != c["resourceVersion"] {
+			mockError(w, http.StatusPreconditionFailed, "", "resource has been modified (ETag mismatch)")
+			return
+		}
 		var body map[string]any
 		mustDecodeJSON(r, &body)
 		if v, ok := body["version"]; ok {
@@ -265,14 +287,23 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 		if v, ok := body["resources"]; ok {
 			c["resources"] = v
 		}
+		c["generation"] = c["generation"].(int) + 1
 		rv := m.nextRV()
 		c["resourceVersion"] = rv
+		if m.clusterStatusesOnPatch != nil {
+			m.clusterStatuses = m.clusterStatusesOnPatch
+		}
 		w.Header().Set("ETag", `"`+rv+`"`)
 		mustEncodeJSON(w, c)
 
 	case r.Method == "DELETE" && matchPath(r.URL.Path, "/api/v1/tenants/acme/clusters/"):
 		name := lastSegment(r.URL.Path)
 		if _, ok := m.clusters[name]; ok {
+			if m.clusterDeleteConflicts > 0 {
+				m.clusterDeleteConflicts--
+				mockError(w, http.StatusConflict, "", "the cluster changed while it was being deleted, retry")
+				return
+			}
 			delete(m.clusters, name)
 			w.WriteHeader(204)
 		} else {

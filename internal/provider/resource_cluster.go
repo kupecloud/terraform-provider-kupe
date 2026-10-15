@@ -7,8 +7,6 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
-	"github.com/hashicorp/terraform-plugin-framework/diag"
-	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
@@ -16,18 +14,20 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
-	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/kupecloud/terraform-provider-kupe/internal/client"
 )
 
-// Cluster phase the provider considers "ready" — Create and Update wait
-// for this value before returning. All other observed phases (Pending,
-// Provisioning, Upgrading, Degraded) are treated as in-progress and
-// keep the poll going until either Running is reached or the
-// user-configured Create/Update timeout fires.
-const clusterPhaseRunning = "Running"
+// Cluster phases Create and Update act on. Running is the one they wait
+// for; Pending, Provisioning and Upgrading are in progress; Degraded and
+// Terminating end the wait at once, as in kupe-cli. The platform already
+// reports a running cluster's short blips as Running (a 2 minute grace), and
+// a new cluster turns Degraded only when its deployment has failed.
+const (
+	clusterPhaseRunning  = "Running"
+	clusterPhaseDegraded = "Degraded"
+)
 
 // Default timeouts for cluster operations. Users can override via the
 // resource's `timeouts` attribute in HCL; these are the framework defaults
@@ -42,36 +42,94 @@ const (
 
 var (
 	_ resource.Resource                = &ClusterResource{}
+	_ resource.ResourceWithConfigure   = &ClusterResource{}
 	_ resource.ResourceWithImportState = &ClusterResource{}
 )
 
+// ClusterResource is kupe_cluster. Read, Delete, Configure and ImportState
+// come from managedResource.
 type ClusterResource struct {
-	client *client.Client
+	managedResource[ClusterResourceModel, client.Cluster]
+}
+
+// clusterStatusModel holds the status attributes the kupe_cluster resource
+// and data source share.
+type clusterStatusModel struct {
+	Phase                 types.String `tfsdk:"phase"`
+	Endpoint              types.String `tfsdk:"endpoint"`
+	HAConfigured          types.Bool   `tfsdk:"ha_configured"`
+	HAEnabledAt           types.String `tfsdk:"ha_enabled_at"`
+	HAPhase               types.String `tfsdk:"ha_phase"`
+	HAReplicasReady       types.Int64  `tfsdk:"ha_replicas_ready"`
+	HAReplicasDesired     types.Int64  `tfsdk:"ha_replicas_desired"`
+	HAEtcdReplicasReady   types.Int64  `tfsdk:"ha_etcd_replicas_ready"`
+	HAEtcdReplicasDesired types.Int64  `tfsdk:"ha_etcd_replicas_desired"`
 }
 
 type ClusterResourceModel struct {
-	Name                  types.String    `tfsdk:"name"`
-	DisplayName           types.String    `tfsdk:"display_name"`
-	Type                  types.String    `tfsdk:"type"`
-	Version               types.String    `tfsdk:"version"`
-	Resources             *ResourcesModel `tfsdk:"resources"`
-	HighAvailability      types.Bool      `tfsdk:"high_availability"`
-	Phase                 types.String    `tfsdk:"phase"`
-	Endpoint              types.String    `tfsdk:"endpoint"`
-	HAConfigured          types.Bool      `tfsdk:"ha_configured"`
-	HAEnabledAt           types.String    `tfsdk:"ha_enabled_at"`
-	HAPhase               types.String    `tfsdk:"ha_phase"`
-	HAReplicasReady       types.Int64     `tfsdk:"ha_replicas_ready"`
-	HAReplicasDesired     types.Int64     `tfsdk:"ha_replicas_desired"`
-	HAEtcdReplicasReady   types.Int64     `tfsdk:"ha_etcd_replicas_ready"`
-	HAEtcdReplicasDesired types.Int64     `tfsdk:"ha_etcd_replicas_desired"`
-	ETag                  types.String    `tfsdk:"etag"`
-	CreatedAt             types.String    `tfsdk:"created_at"`
-	Timeouts              timeouts.Value  `tfsdk:"timeouts"`
+	Name             types.String    `tfsdk:"name"`
+	DisplayName      types.String    `tfsdk:"display_name"`
+	Type             types.String    `tfsdk:"type"`
+	Version          types.String    `tfsdk:"version"`
+	Resources        *ResourcesModel `tfsdk:"resources"`
+	HighAvailability types.Bool      `tfsdk:"high_availability"`
+	clusterStatusModel
+	ETag      types.String   `tfsdk:"etag"`
+	CreatedAt types.String   `tfsdk:"created_at"`
+	Timeouts  timeouts.Value `tfsdk:"timeouts"`
 }
 
 func NewClusterResource() resource.Resource {
-	return &ClusterResource{}
+	return &ClusterResource{managedResource[ClusterResourceModel, client.Cluster]{kind: &clusterKind}}
+}
+
+// clusterKind is the cluster's lifecycle for managedResource.
+var clusterKind = serviceKind[ClusterResourceModel, client.Cluster]{
+	noun: "cluster",
+	name: func(m *ClusterResourceModel) string { return m.Name.ValueString() },
+	get: func(ctx context.Context, c *client.Client, m *ClusterResourceModel) (*client.Cluster, string, error) {
+		return c.GetCluster(ctx, m.Name.ValueString())
+	},
+	del: func(ctx context.Context, c *client.Client, m *ClusterResourceModel) error {
+		return c.DeleteCluster(ctx, m.Name.ValueString())
+	},
+	mapToState: mapClusterToState,
+	timeoutsOf: func(m *ClusterResourceModel) timeouts.Value { return m.Timeouts },
+	// Provisioning typically takes 3-8 minutes; 15 covers a slow vCluster
+	// start-up plus add-on reconcile headroom.
+	defaults: operationTimeouts{
+		create: defaultClusterCreateTimeout,
+		update: defaultClusterUpdateTimeout,
+		delete: defaultClusterDeleteTimeout,
+	},
+	ready: readiness[ClusterResourceModel, client.Cluster]{
+		target:    clusterPhaseRunning,
+		phase:     clusterPhase,
+		converged: clusterConverged,
+		failed: func(c *client.Cluster) (time.Duration, bool) {
+			switch clusterPhase(c) {
+			case clusterPhaseDegraded, phaseTerminating:
+				return 0, true
+			}
+			return 0, false
+		},
+		message: func(c *client.Cluster) string {
+			if c == nil || c.Status == nil {
+				return ""
+			}
+			return client.ConditionMessage(c.Status.Conditions, client.ConditionReady)
+		},
+	},
+	settingsChanged: clusterSettingsChanged,
+	stillDeleting: func(m *ClusterResourceModel) string {
+		return fmt.Sprintf("DELETE was accepted but cluster %q is still terminating after the configured "+
+			"delete timeout. Terraform has removed the cluster from state; the Kupe platform "+
+			"continues teardown of the underlying resources in the background, and the cluster "+
+			"name stays reserved until that completes (creating a cluster with the same name may "+
+			"409 until then). If the cluster stays in this state, check it in the Kupe Console or "+
+			"contact Kupe Cloud support. Override with `timeouts.delete = \"30m\"` for clusters "+
+			"with heavier teardown.", m.Name.ValueString())
+	},
 }
 
 func (r *ClusterResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -81,8 +139,8 @@ func (r *ClusterResource) Metadata(_ context.Context, req resource.MetadataReque
 func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Manages a Kupe cluster for a tenant. Create and Update wait for the " +
-			"cluster to reach phase=Running before returning; Delete waits for the cluster " +
-			"to finish terminating. Set timeouts with the `timeouts` attribute, for example " +
+			"cluster to reach phase=Running with the change applied, and fail if it turns Degraded or is " +
+			"being deleted; Delete waits for the cluster to finish terminating. Set timeouts with the `timeouts` attribute, for example " +
 			"`timeouts = { create = \"30m\" }` (defaults: create/update 15m, delete 10m).\n\n" +
 			"### Destroy semantics\n\n" +
 			"`terraform destroy` (or removing this resource from configuration) is **non-recoverable**. " +
@@ -254,10 +312,6 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 	}
 }
 
-func (r *ClusterResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
-	r.client = configureClient(req.ProviderData, &resp.Diagnostics)
-}
-
 func (r *ClusterResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan ClusterResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -296,50 +350,12 @@ func (r *ClusterResource) Create(ctx context.Context, req resource.CreateRequest
 		resp.Diagnostics.AddWarning(w.Code, detail)
 	}
 
-	// Persist the freshly-accepted state immediately so a Ctrl-C
-	// during the wait below leaves Terraform with the resource on
-	// record (with phase=Pending or whatever the API just returned)
-	// rather than orphaning it.
-	mapClusterToState(cluster, etag, &plan)
-	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	// Block until the operator finishes provisioning. The API
-	// returns 201 the moment the K8s CR is accepted (phase=Pending);
-	// real readiness — kubeconfig endpoint populated, vCluster
-	// reachable — happens asynchronously over a few minutes. Without
-	// this wait, downstream resources that reference
-	// kupe_cluster.foo.endpoint get an empty string at apply time.
-	// User-overridable via the `timeouts.create` block (default 15m).
-	timeout, diags := plan.Timeouts.Create(ctx, defaultClusterCreateTimeout)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	r.waitForClusterReady(ctx, timeout, plan.Name.ValueString(), &plan, &resp.State, &resp.Diagnostics, "create")
-}
-
-func (r *ClusterResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var state ClusterResourceModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	cluster, etag, err := r.client.GetCluster(ctx, state.Name.ValueString())
-	if err != nil {
-		if client.IsNotFound(err) {
-			resp.State.RemoveResource(ctx)
-			return
-		}
-		resp.Diagnostics.AddError("failed to read cluster", apiErrorDetail(err))
-		return
-	}
-
-	mapClusterToState(cluster, etag, &state)
-	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+	// The API returns 201 the moment the cluster is accepted
+	// (phase=Pending); the endpoint is populated and the vCluster
+	// reachable a few minutes later. Without the wait, downstream
+	// resources that reference kupe_cluster.foo.endpoint would get an
+	// empty string at apply time.
+	r.created(ctx, cluster, etag, &plan, &resp.State, &resp.Diagnostics)
 }
 
 func (r *ClusterResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
@@ -351,6 +367,22 @@ func (r *ClusterResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 
+	var send patchFunc[client.Cluster]
+	if patch, hasChanges := clusterPatch(&plan, &state); hasChanges {
+		name := plan.Name.ValueString()
+		send = func(ctx context.Context, etag string) (*client.Cluster, string, error) {
+			return r.client.UpdateCluster(ctx, name, etag, patch)
+		}
+	}
+	// A version bump rolls the vCluster (Running, Upgrading, Running) and a
+	// resources change is applied in place: either way the wait ends once
+	// the cluster is Running at the post-PATCH generation.
+	r.update(ctx, &plan, &state, state.ETag.ValueString(), send, true, &resp.State, &resp.Diagnostics)
+}
+
+// clusterPatch builds the merge patch for the fields that differ between
+// plan and state.
+func clusterPatch(plan, state *ClusterResourceModel) (client.PatchClusterRequest, bool) {
 	patchReq := client.PatchClusterRequest{}
 	hasChanges := false
 
@@ -387,145 +419,64 @@ func (r *ClusterResource) Update(ctx context.Context, req resource.UpdateRequest
 
 	// HA changes are handled by RequiresReplace on the high_availability
 	// attribute — Terraform will destroy + recreate the cluster rather
-	// than Update, so this branch never sees an HA diff.
-
-	if hasChanges {
-		cluster, etag, err := r.client.UpdateCluster(ctx, plan.Name.ValueString(), state.ETag.ValueString(), patchReq)
-		if err != nil {
-			resp.Diagnostics.AddError("failed to update cluster", apiErrorDetail(err))
-			return
-		}
-		mapClusterToState(cluster, etag, &plan)
-	} else {
-		// No API changes but always refresh computed fields
-		cluster, etag, err := r.client.GetCluster(ctx, plan.Name.ValueString())
-		if err != nil {
-			resp.Diagnostics.AddError("failed to read cluster", apiErrorDetail(err))
-			return
-		}
-		mapClusterToState(cluster, etag, &plan)
-	}
-
-	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
-	if resp.Diagnostics.HasError() || !hasChanges {
-		return
-	}
-
-	// Version bumps and resource changes trigger a rolling upgrade
-	// via the operator (Running → Upgrading → Running). Wait for
-	// the cluster to settle back at Running so downstream resources
-	// see the upgraded version, not the still-rolling intermediate
-	// state. User-overridable via `timeouts.update` (default 15m).
-	timeout, diags := plan.Timeouts.Update(ctx, defaultClusterUpdateTimeout)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	r.waitForClusterReady(ctx, timeout, plan.Name.ValueString(), &plan, &resp.State, &resp.Diagnostics, "update")
+	// than Update, so this never sees an HA diff.
+	return patchReq, hasChanges
 }
 
-func (r *ClusterResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-	var state ClusterResourceModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
-	if resp.Diagnostics.HasError() {
-		return
+// clusterPhase is c's phase, "" when it has no status yet.
+func clusterPhase(c *client.Cluster) string {
+	if c == nil || c.Status == nil {
+		return ""
 	}
+	return c.Status.Phase
+}
 
-	name := state.Name.ValueString()
-	if err := r.client.DeleteCluster(ctx, name); err != nil && !client.IsNotFound(err) {
-		resp.Diagnostics.AddError("failed to delete cluster", apiErrorDetail(err))
-		return
-	}
+// clusterConverged reports whether the cluster is Running with its latest
+// spec applied: observedGeneration has reached generation. A resources
+// change is applied in place and never leaves Running, so the phase alone
+// would end the wait before the platform saw the change. A kupe-api that
+// sends no generation (0) leaves the phase as the only signal.
+func clusterConverged(c *client.Cluster) bool {
+	return c.Status != nil &&
+		c.Status.Phase == clusterPhaseRunning &&
+		c.Status.ObservedGeneration >= c.Generation
+}
 
-	// Poll until the ManagedCluster CR is genuinely gone. kupe-api's
-	// DELETE returns 204 once K8s accepts the request, but the
-	// operator's finalizer drives a multi-minute teardown (vCluster
-	// stop, namespace cleanup). Without this wait, an immediate
-	// re-apply with the same cluster name 409s on the still-
-	// terminating CR. User-overridable via `timeouts.delete` (default
-	// 10m). On timeout we surface a warning so users can re-run
-	// destroy or manually intervene without the apply itself failing.
-	timeout, diags := state.Timeouts.Delete(ctx, defaultClusterDeleteTimeout)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
+// clusterSettingsChanged lists, by attribute name, the settings an update
+// can change whose value in current differs from prior.
+func clusterSettingsChanged(prior *ClusterResourceModel, current *client.Cluster) []string {
+	var changed []string
+	if !types.StringValue(current.Version).Equal(prior.Version) {
+		changed = append(changed, "version")
 	}
-	err := waitForDeletion(ctx, timeout, func(c context.Context) error {
-		_, _, err := r.client.GetCluster(c, name)
-		return err
-	})
-	switch {
-	case err == nil:
-		// confirmed gone
-	case isTerminalAPIError(err):
-		resp.Diagnostics.AddError("failed to confirm cluster deletion", apiErrorDetail(err))
-	default:
-		resp.Diagnostics.AddWarning(
-			"cluster still terminating",
-			fmt.Sprintf("DELETE was accepted but cluster %q is still terminating after the configured "+
-				"delete timeout. Terraform has removed the cluster from state; the Kupe platform "+
-				"continues teardown of the underlying resources in the background, and the cluster "+
-				"name stays reserved until that completes (creating a cluster with the same name may "+
-				"409 until then). If the cluster stays in this state, check it in the Kupe Console or "+
-				"contact Kupe Cloud support. Override with `timeouts.delete = \"30m\"` for clusters "+
-				"with heavier teardown.", name),
-		)
+	if !resourcesEqual(nonEmptyResources(prior.Resources), clusterResourcesFromAPI(current)) {
+		changed = append(changed, "resources")
+	}
+	if !types.BoolValue(current.HighAvailability).Equal(prior.HighAvailability) {
+		changed = append(changed, "high_availability")
+	}
+	return changed
+}
+
+// clusterResourcesFromAPI is the cluster's limits, nil when it has none.
+func clusterResourcesFromAPI(c *client.Cluster) *ResourcesModel {
+	if c.Resources == nil || (c.Resources.CPU == "" && c.Resources.Memory == "" && c.Resources.Storage == "") {
+		return nil
+	}
+	return &ResourcesModel{
+		CPU:     stringOrNull(c.Resources.CPU),
+		Memory:  stringOrNull(c.Resources.Memory),
+		Storage: stringOrNull(c.Resources.Storage),
 	}
 }
 
-// waitForClusterReady polls GetCluster until the observed phase is
-// "Running" or the context expires. Refreshes the resource's framework
-// state on every poll so an interrupted apply leaves Terraform with the
-// latest observed values rather than the initial Create/Update response.
-// kind is "create" or "update", surfaced in the warning so users can
-// distinguish the two paths.
-func (r *ClusterResource) waitForClusterReady(
-	ctx context.Context,
-	timeout time.Duration,
-	name string,
-	plan *ClusterResourceModel,
-	state *tfsdk.State,
-	diags *diag.Diagnostics,
-	kind string,
-) {
-	err := pollUntil(ctx, timeout, func(c context.Context) (bool, error) {
-		cluster, etag, err := r.client.GetCluster(c, name)
-		if err != nil {
-			return false, err
-		}
-		mapClusterToState(cluster, etag, plan)
-		// Persist what we just observed so a Ctrl-C between polls
-		// doesn't lose the most recent phase/endpoint.
-		diags.Append(state.Set(c, plan)...)
-		phase := ""
-		if cluster.Status != nil {
-			phase = cluster.Status.Phase
-		}
-		return phase == clusterPhaseRunning, nil
-	})
-	switch {
-	case err == nil:
-		// converged
-	case isTerminalAPIError(err):
-		diags.AddError(
-			fmt.Sprintf("cluster %s failed while waiting for Running", kind),
-			apiErrorDetail(err),
-		)
-	default:
-		diags.AddWarning(
-			fmt.Sprintf("cluster %s timed out before reaching Running", kind),
-			fmt.Sprintf("cluster %q only reached phase=%q when the %s timeout fired. Wait a few minutes "+
-				"and re-run `terraform apply` to pick up the Running state — provisioning continues "+
-				"in the background and a subsequent apply will be a no-op once the cluster is ready. "+
-				"If the cluster stays in this phase for longer than expected, check the cluster status "+
-				"in the Kupe Console or contact Kupe Cloud support. Override with "+
-				"`timeouts.%s = \"30m\"` for slow environments.", name, plan.Phase.ValueString(), kind, kind),
-		)
+// nonEmptyResources is m, or nil when m sets no limit: an empty
+// `resources = {}` block and no block both mean no limits.
+func nonEmptyResources(m *ResourcesModel) *ResourcesModel {
+	if m == nil || (m.CPU.IsNull() && m.Memory.IsNull() && m.Storage.IsNull()) {
+		return nil
 	}
-}
-
-func (r *ClusterResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resource.ImportStatePassthroughID(ctx, path.Root("name"), req, resp)
+	return m
 }
 
 func mapClusterToState(c *client.Cluster, etag string, state *ClusterResourceModel) {
@@ -539,40 +490,16 @@ func mapClusterToState(c *client.Cluster, etag string, state *ClusterResourceMod
 	state.ETag = types.StringValue(etag)
 	state.CreatedAt = types.StringValue(c.CreatedAt)
 
-	if c.Status != nil {
-		state.Phase = types.StringValue(c.Status.Phase)
-		state.Endpoint = types.StringValue(c.Status.Endpoint)
-		state.HAConfigured = types.BoolValue(c.Status.HAConfigured)
-		state.HAEnabledAt = types.StringValue(c.Status.HAEnabledAt)
-		state.HAPhase = types.StringValue(c.Status.HAPhase)
-		state.HAReplicasReady = types.Int64Value(int64(c.Status.HAReplicasReady))
-		state.HAReplicasDesired = types.Int64Value(int64(c.Status.HAReplicasDesired))
-		state.HAEtcdReplicasReady = types.Int64Value(int64(c.Status.HAEtcdReplicasReady))
-		state.HAEtcdReplicasDesired = types.Int64Value(int64(c.Status.HAEtcdReplicasDesired))
-	} else {
-		state.Phase = types.StringValue("")
-		state.Endpoint = types.StringValue("")
-		state.HAConfigured = types.BoolValue(false)
-		state.HAEnabledAt = types.StringValue("")
-		state.HAPhase = types.StringValue("")
-		state.HAReplicasReady = types.Int64Value(0)
-		state.HAReplicasDesired = types.Int64Value(0)
-		state.HAEtcdReplicasReady = types.Int64Value(0)
-		state.HAEtcdReplicasDesired = types.Int64Value(0)
-	}
+	state.clusterStatusModel = clusterStatusFromAPI(c.Status)
 
 	// state.Resources still holds the planned (Create/Update) or prior
 	// (Read) block at this point — this is the last field we map. Use it
 	// to disambiguate "user never set a resources block" from "user wrote
 	// `resources = {}` to clear the limits", because the server echoes an
 	// empty `{}` for both.
-	switch {
-	case c.Resources != nil && (c.Resources.CPU != "" || c.Resources.Memory != "" || c.Resources.Storage != ""):
-		state.Resources = &ResourcesModel{
-			CPU:     stringOrNull(c.Resources.CPU),
-			Memory:  stringOrNull(c.Resources.Memory),
-			Storage: stringOrNull(c.Resources.Storage),
-		}
+	switch limits := clusterResourcesFromAPI(c); {
+	case limits != nil:
+		state.Resources = limits
 	case state.Resources != nil:
 		// The server reports no limits, but the plan/prior state carried a
 		// (now-empty) `resources` block. Collapsing to nil here would turn
@@ -586,5 +513,24 @@ func mapClusterToState(c *client.Cluster, etag string, state *ClusterResourceMod
 		}
 	default:
 		state.Resources = nil
+	}
+}
+
+// clusterStatusFromAPI maps a cluster's status; no status yet reads as
+// empty values.
+func clusterStatusFromAPI(status *client.ClusterStatus) clusterStatusModel {
+	if status == nil {
+		status = &client.ClusterStatus{}
+	}
+	return clusterStatusModel{
+		Phase:                 types.StringValue(status.Phase),
+		Endpoint:              types.StringValue(status.Endpoint),
+		HAConfigured:          types.BoolValue(status.HAConfigured),
+		HAEnabledAt:           types.StringValue(status.HAEnabledAt),
+		HAPhase:               types.StringValue(status.HAPhase),
+		HAReplicasReady:       types.Int64Value(int64(status.HAReplicasReady)),
+		HAReplicasDesired:     types.Int64Value(int64(status.HAReplicasDesired)),
+		HAEtcdReplicasReady:   types.Int64Value(int64(status.HAEtcdReplicasReady)),
+		HAEtcdReplicasDesired: types.Int64Value(int64(status.HAEtcdReplicasDesired)),
 	}
 }

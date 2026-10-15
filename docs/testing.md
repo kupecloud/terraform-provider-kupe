@@ -40,7 +40,7 @@ go test -run TestAccCluster ./internal/provider/...   # narrow to one
 
 | Resource | Test file | Lifecycle | Import | Notes |
 |---|---|---|---|---|
-| `kupe_cluster` | [resource_cluster_test.go](../internal/provider/resource_cluster_test.go) | create, update version | ✓ verify | display_name + resources updates not yet covered |
+| `kupe_cluster` | [resource_cluster_test.go](../internal/provider/resource_cluster_test.go) | create, update version | ✓ verify | display_name updates not yet covered; the Create/Update wait, ETag retry and delete ([resource_cluster_wait_test.go](../internal/provider/resource_cluster_wait_test.go)): resources update waits for the post-PATCH generation and through Upgrading, fails at once on Degraded and Terminating, a Degraded create is tainted and replaced, a stale ETag is retried once when only status moved and a concurrent spec change is reported, a delete is retried on 409 and times out with the delete hint; high_availability kept when unset ([resource_database_wait_test.go](../internal/provider/resource_database_wait_test.go)) |
 | `kupe_secret` | [resource_secret_test.go](../internal/provider/resource_secret_test.go) | create, update sync target | ✓ verify | multi-target lists + reordering not covered |
 | `kupe_api_key` | [resource_apikey_test.go](../internal/provider/resource_apikey_test.go) | create (admin + expires_at) | ✓ verify (key field skipped — write-once on create) | readonly role + no-expires-at variants not covered |
 | `kupe_tenant_member` | [resource_member_test.go](../internal/provider/resource_member_test.go) | create, role update | ✓ verify | — |

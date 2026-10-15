@@ -196,3 +196,31 @@ func TestDeleteCluster_NotFound(t *testing.T) {
 		t.Errorf("expected not found, got %v", err)
 	}
 }
+
+// TestGetCluster_GenerationAndConditions decodes kupe-api's cluster shape:
+// generation beside the spec, observedGeneration and conditions in status.
+func TestGetCluster_GenerationAndConditions(t *testing.T) {
+	mock := newMockAPI()
+	defer mock.close()
+	mock.onJSON("GET", "/api/v1/tenants/acme/clusters/prod", http.StatusOK, map[string]any{
+		"name": "prod", "type": "shared", "version": "1.35", "generation": 4,
+		"status": map[string]any{
+			"phase": "Degraded", "observedGeneration": 3,
+			"conditions": []any{map[string]any{
+				"type": "Ready", "status": "False", "reason": "ReconcileFailed",
+				"message": "the cluster could not be reconciled; retrying",
+			}},
+		},
+	})
+
+	cluster, _, err := mock.client("acme").GetCluster(context.Background(), "prod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cluster.Generation != 4 || cluster.Status.ObservedGeneration != 3 {
+		t.Errorf("generation %d, observedGeneration %d; want 4, 3", cluster.Generation, cluster.Status.ObservedGeneration)
+	}
+	if got := ConditionMessage(cluster.Status.Conditions, ConditionReady); got != "the cluster could not be reconciled; retrying" {
+		t.Errorf("Ready message = %q", got)
+	}
+}

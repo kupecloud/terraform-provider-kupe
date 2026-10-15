@@ -15,8 +15,12 @@ type Cluster struct {
 	Alerts           any                 `json:"alerts,omitempty"`
 	HighAvailability bool                `json:"highAvailability,omitempty"`
 	Status           *ClusterStatus      `json:"status,omitempty"`
-	ResourceVersion  string              `json:"resourceVersion"`
-	CreatedAt        string              `json:"createdAt"`
+	// Generation increments on every spec change; the operator has applied
+	// a change once Status.ObservedGeneration catches up with it. 0 from a
+	// kupe-api that predates it.
+	Generation      int64  `json:"generation"`
+	ResourceVersion string `json:"resourceVersion"`
+	CreatedAt       string `json:"createdAt"`
 	// Warnings is advisory; today populated only on POST /clusters
 	// responses (e.g. HA_K8S_VERSION_RETIRING). Receive-only — no
 	// omitempty so the decoder happily accepts the always-present empty
@@ -43,9 +47,10 @@ type ResourceQuantities struct {
 
 // ClusterStatus contains cluster status fields.
 type ClusterStatus struct {
-	Phase             string `json:"phase"`
-	KubernetesVersion string `json:"kubernetesVersion"`
-	Endpoint          string `json:"endpoint"`
+	ObservedGeneration int64  `json:"observedGeneration"`
+	Phase              string `json:"phase"`
+	KubernetesVersion  string `json:"kubernetesVersion"`
+	Endpoint           string `json:"endpoint"`
 	// HAConfigured flips true once the operator confirms both 3/3 apiserver replicas
 	// AND 3/3 deployed-etcd replicas are Ready. Etcd readiness is required because
 	// the OSS deployed-etcd path runs etcd in its own StatefulSet — quorum loss with
@@ -67,6 +72,8 @@ type ClusterStatus struct {
 	// etcd quorum loss blocks writes.
 	HAEtcdReplicasReady   int32 `json:"haEtcdReplicasReady,omitempty"`
 	HAEtcdReplicasDesired int32 `json:"haEtcdReplicasDesired,omitempty"`
+	// Conditions carry the reason behind the phase.
+	Conditions []Condition `json:"conditions"`
 }
 
 // CreateClusterRequest is the body for creating a cluster.
