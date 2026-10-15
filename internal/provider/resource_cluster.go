@@ -243,7 +243,8 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				Description: "Enable a 3-replica HA control plane with HA etcd (chart-managed external etcd StatefulSet), " +
 					"hard anti-affinity, and encrypted-at-rest etcd via a per-cluster AES-CBC key. " +
 					"Adds an hourly charge — see `data.kupe_plan` for the rate. When unset, a new cluster is created " +
-					"without HA and an existing or imported cluster keeps its current setting.\n\n" +
+					"without HA and an existing or imported cluster keeps its current setting, so removing the " +
+					"attribute from configuration does not turn HA off.\n\n" +
 					"**Create-time-only.** This attribute is effectively immutable: changing it on an existing resource forces " +
 					"Terraform to **replace** the cluster (destroy + create). The operator rejects both directions of the " +
 					"toggle with canonical error codes (`HA_ENABLE_ON_EXISTING_UNSUPPORTED`, `HA_DISABLE_UNSUPPORTED`) — " +

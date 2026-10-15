@@ -206,7 +206,8 @@ func (r *DatabaseResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 			"high_availability": schema.BoolAttribute{
 				Description: "Run two instances with a synchronous standby. Can be turned on or off in place. When " +
 					"unset, a new database is created without it and an existing or imported database keeps its " +
-					"current setting.",
+					"current setting, so removing the attribute from configuration does not turn HA off: set it to " +
+					"`false` to do that.",
 				Optional: true,
 				Computed: true,
 				// No default: a schema default would apply to an unset
