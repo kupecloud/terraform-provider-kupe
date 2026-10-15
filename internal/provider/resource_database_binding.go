@@ -317,7 +317,14 @@ func mapDatabaseBindingToState(b *client.DatabaseBinding, state *DatabaseBinding
 			secretName = b.Status.SecretName
 		}
 	}
+	if secretName == "" {
+		// Neither says yet (the platform has not reconciled the binding):
+		// the effective name is the platform's default. Leaving it null
+		// would let a later plan see it unknown and, through
+		// RequiresReplace, replace the binding.
+		secretName = b.Database + "-" + b.Role
+	}
 	state.Phase = types.StringValue(phase)
 	state.Host = types.StringValue(host)
-	state.SecretName = stringOrNull(secretName)
+	state.SecretName = types.StringValue(secretName)
 }

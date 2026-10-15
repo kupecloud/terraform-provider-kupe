@@ -368,3 +368,46 @@ func TestDatabaseBindingConflicted(t *testing.T) {
 		})
 	}
 }
+
+// TestMapDatabaseBindingSecretName: secret_name is never null in state. It
+// is the requested name, else the platform's effective name, else, before
+// the platform has reconciled the binding, its default "{database}-{role}".
+func TestMapDatabaseBindingSecretName(t *testing.T) {
+	tests := []struct {
+		name    string
+		binding client.DatabaseBinding
+		want    string
+	}{
+		{
+			name:    "requested",
+			binding: client.DatabaseBinding{Database: "orders-db", Role: "app", SecretName: "orders-creds"},
+			want:    "orders-creds",
+		},
+		{
+			name: "effective, from status",
+			binding: client.DatabaseBinding{Database: "orders-db", Role: "app",
+				Status: &client.DatabaseBindingStatus{SecretName: "orders-db-app"}},
+			want: "orders-db-app",
+		},
+		{
+			name:    "not reconciled yet",
+			binding: client.DatabaseBinding{Database: "orders-db", Role: "owner"},
+			want:    "orders-db-owner",
+		},
+		{
+			name: "status without a name yet",
+			binding: client.DatabaseBinding{Database: "orders-db", Role: "app",
+				Status: &client.DatabaseBindingStatus{Phase: "Pending"}},
+			want: "orders-db-app",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var state DatabaseBindingResourceModel
+			mapDatabaseBindingToState(&tt.binding, &state)
+			if state.SecretName.IsNull() || state.SecretName.ValueString() != tt.want {
+				t.Errorf("secret_name = %v, want %q", state.SecretName, tt.want)
+			}
+		})
+	}
+}
