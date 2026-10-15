@@ -103,7 +103,7 @@ func TestAccClusterResource_UpdateWait(t *testing.T) {
 			name: "fails once Degraded at the new generation outlasts the grace", grace: 0,
 			statuses: []map[string]any{degradedBefore, degradedSeen},
 			wantErr: `(?s)cluster degraded.*` + wrappedText(`Cluster "wait" is Degraded, so the update did not complete.`) +
-				`.*` + wrappedText("Status message: cluster deployment sync failed"),
+				`.*` + wrappedText("Status message: cluster deployment sync failed") + `.*` + wrappedText(changeRecordedNotice),
 		},
 		{
 			name: "a timeout while still Degraded is an error", grace: time.Hour, updateTimeout: "1s",
@@ -120,7 +120,7 @@ func TestAccClusterResource_UpdateWait(t *testing.T) {
 			wantErr: `(?s)cluster update not applied.*` +
 				wrappedText(`The Kupe platform has not applied the change to cluster "wait"`) +
 				`.*` + wrappedText("Status message: the cluster could not be reconciled; retrying") +
-				`.*` + wrappedText("The change is recorded in Terraform state, so running `terraform apply` again plans no change"),
+				`.*` + wrappedText(changeRecordedNotice),
 		},
 		{
 			name: "fails at once on a cluster being deleted", grace: time.Hour,

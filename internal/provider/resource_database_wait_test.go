@@ -75,7 +75,8 @@ func TestAccDatabaseResource_UpdateWait(t *testing.T) {
 			name: "fails once Degraded outlasts the grace", grace: 0,
 			statuses: []map[string]any{degraded},
 			wantErr: `(?s)database degraded.*` + wrappedText(`Database "orders-db" is Degraded, so the update did not complete.`) +
-				`.*` + wrappedText("Status message: Waiting for the instances to become active (0 instances ready)"),
+				`.*` + wrappedText("Status message: Waiting for the instances to become active (0 instances ready)") +
+				`.*` + wrappedText(changeRecordedNotice),
 		},
 		{
 			name: "fails at once on a database being deleted", grace: time.Hour,
@@ -103,7 +104,8 @@ func TestAccDatabaseResource_UpdateWait(t *testing.T) {
 			}}}},
 			wantErr: `(?s)database update not applied.*` +
 				wrappedText(`The Kupe platform has not applied the change to database "orders-db"`) +
-				`.*` + wrappedText("Status message: the database could not be reconciled; retrying"),
+				`.*` + wrappedText("Status message: the database could not be reconciled; retrying") +
+				`.*` + wrappedText(changeRecordedNotice),
 		},
 	}
 	for _, tt := range tests {

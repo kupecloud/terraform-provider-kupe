@@ -343,12 +343,24 @@ func (r *managedResource[M, A]) failedDetail(op string, m *M, obj *A) string {
 	}
 	detail += "\n\nThe Kupe platform keeps trying to recover it. If it stays in this phase, check it in the " +
 		"Kupe Console or contact Kupe Cloud support."
-	if op == "create" {
+	switch op {
+	case "create":
 		detail += fmt.Sprintf("\n\nTerraform keeps the %s in state, marked tainted, so the next `terraform apply` "+
 			"plans to replace it. To keep it instead, run `terraform untaint` on it.", r.kind.noun)
+	case "update":
+		detail += "\n\n" + changeRecordedNotice
 	}
 	return detail
 }
+
+// changeRecordedNotice tells the user that an update which failed or did not
+// finish is already in state: Update records what the API accepted before it
+// waits, so the next plan shows nothing to do and the change is not sent
+// again. The platform holds the change too, so a refresh does not bring the
+// old value back.
+const changeRecordedNotice = "The change was accepted and is recorded in Terraform state, so running " +
+	"`terraform apply` again plans no change and does not send it again. To back the change out, set the " +
+	"previous value in the configuration and apply."
 
 // notAppliedDetail explains an update the platform was still failing to
 // apply when the timeout fired.
@@ -361,10 +373,8 @@ func (r *managedResource[M, A]) notAppliedDetail(m *M, obj *A) string {
 			detail += "\n\nStatus message: " + msg
 		}
 	}
-	return detail + "\n\nThe change is recorded in Terraform state, so running `terraform apply` again plans " +
-		"no change and does not send it again; the platform keeps retrying it. If it is not applied, check the " +
-		r.kind.noun + " in the Kupe Console or contact Kupe Cloud support. To back the change out, set the " +
-		"previous value in the configuration and apply."
+	return detail + "\n\nThe Kupe platform keeps retrying it. If it is not applied, check the " + r.kind.noun +
+		" in the Kupe Console or contact Kupe Cloud support.\n\n" + changeRecordedNotice
 }
 
 func (r *managedResource[M, A]) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
