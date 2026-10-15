@@ -17,10 +17,11 @@ type PlanDataSource struct {
 }
 
 type PlanDataSourceModel struct {
-	Name        types.String `tfsdk:"name"`
-	DisplayName types.String `tfsdk:"display_name"`
-	PlatformFee types.String `tfsdk:"platform_fee"`
-	MaxClusters types.Int64  `tfsdk:"max_clusters"`
+	Name         types.String `tfsdk:"name"`
+	DisplayName  types.String `tfsdk:"display_name"`
+	PlatformFee  types.String `tfsdk:"platform_fee"`
+	MaxClusters  types.Int64  `tfsdk:"max_clusters"`
+	MaxDatabases types.Int64  `tfsdk:"max_databases"`
 }
 
 func NewPlanDataSource() datasource.DataSource {
@@ -48,7 +49,11 @@ func (d *PlanDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, r
 				Computed:    true,
 			},
 			"max_clusters": schema.Int64Attribute{
-				Description: "Maximum number of clusters allowed on the plan.",
+				Description: "Maximum number of clusters allowed on the plan. `0` means unlimited.",
+				Computed:    true,
+			},
+			"max_databases": schema.Int64Attribute{
+				Description: "Maximum number of databases allowed on the plan. `0` means unlimited. Null when the API does not report a database limit for the plan.",
 				Computed:    true,
 			},
 		},
@@ -75,5 +80,6 @@ func (d *PlanDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 	state.DisplayName = types.StringValue(plan.DisplayName)
 	state.PlatformFee = types.StringValue(plan.PlatformFee)
 	state.MaxClusters = types.Int64Value(plan.MaxClusters)
+	state.MaxDatabases = types.Int64PointerValue(plan.MaxDatabases)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }

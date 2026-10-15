@@ -28,5 +28,6 @@ data "kupe_plan" "pro" {
 ### Read-Only
 
 - `display_name` (String) Human-readable plan name.
-- `max_clusters` (Number) Maximum number of clusters allowed on the plan.
+- `max_clusters` (Number) Maximum number of clusters allowed on the plan. `0` means unlimited.
+- `max_databases` (Number) Maximum number of databases allowed on the plan. `0` means unlimited. Null when the API does not report a database limit for the plan.
 - `platform_fee` (String) Base monthly platform fee for the plan.

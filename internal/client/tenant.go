@@ -38,6 +38,9 @@ type Plan struct {
 	ResourcePool      any    `json:"resourcePool,omitempty"`
 	ObservabilityPool any    `json:"observabilityPool,omitempty"`
 	MaxClusters       int64  `json:"maxClusters"`
+	// MaxDatabases is nil when the API does not report a database limit
+	// (an older kupe-api, or a plan that does not set one).
+	MaxDatabases *int64 `json:"maxDatabases,omitempty"`
 }
 
 // GetPlan returns a platform plan.

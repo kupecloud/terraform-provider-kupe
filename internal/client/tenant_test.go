@@ -57,6 +57,38 @@ func TestGetPlan(t *testing.T) {
 	}
 }
 
+func TestGetPlan_DatabaseLimit(t *testing.T) {
+	tests := []struct {
+		name string
+		body map[string]any
+		want *int64
+	}{
+		{name: "limited", body: map[string]any{"name": "pro", "maxClusters": 5, "maxDatabases": 5}, want: new(int64(5))},
+		{name: "unlimited", body: map[string]any{"name": "enterprise", "maxClusters": 0, "maxDatabases": 0}, want: new(int64(0))},
+		{name: "not reported", body: map[string]any{"name": "pro", "maxClusters": 5}, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := newMockAPI()
+			defer mock.close()
+			mock.onJSON("GET", "/api/v1/plans/pro", http.StatusOK, tt.body)
+
+			plan, err := mock.client("acme").GetPlan(context.Background(), "pro")
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch {
+			case tt.want == nil && plan.MaxDatabases != nil:
+				t.Errorf("MaxDatabases = %d, want nil", *plan.MaxDatabases)
+			case tt.want != nil && plan.MaxDatabases == nil:
+				t.Errorf("MaxDatabases = nil, want %d", *tt.want)
+			case tt.want != nil && *plan.MaxDatabases != *tt.want:
+				t.Errorf("MaxDatabases = %d, want %d", *plan.MaxDatabases, *tt.want)
+			}
+		})
+	}
+}
+
 func TestGetPlan_NotFound(t *testing.T) {
 	mock := newMockAPI()
 	defer mock.close()
