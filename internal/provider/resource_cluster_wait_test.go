@@ -50,8 +50,8 @@ func testAccCheckClusterStatusesPlayed(mock *mockKupeAPI) resource.TestCheckFunc
 }
 
 // TestAccClusterResource_UpdateWait: Update waits until the cluster is
-// Running at the post-PATCH generation and fails at once when it turns
-// Degraded or starts being deleted (kupe-cli's rule for clusters).
+// Running at the post-PATCH generation and fails at once when it is
+// Degraded at that generation or starts being deleted.
 func TestAccClusterResource_UpdateWait(t *testing.T) {
 	shrinkPollInterval(t)
 	const addr = "kupe_cluster.test"
@@ -68,9 +68,18 @@ func TestAccClusterResource_UpdateWait(t *testing.T) {
 			statuses: []map[string]any{stale, {"phase": "Upgrading", "observedGeneration": 2}, converged},
 		},
 		{
-			name: "fails at once on Degraded",
+			// The first poll reads the status from before the PATCH: a
+			// cluster Degraded then gets the chance to recover with the
+			// change.
+			name: "Degraded from before the change is not a failure",
+			statuses: []map[string]any{
+				{"phase": "Degraded", "observedGeneration": 1}, {"phase": "Degraded", "observedGeneration": 1}, converged,
+			},
+		},
+		{
+			name: "fails at once on Degraded once the change is seen",
 			statuses: []map[string]any{{
-				"phase": "Degraded", "observedGeneration": 1,
+				"phase": "Degraded", "observedGeneration": 2,
 				"conditions": []any{map[string]any{"type": "Ready", "status": "False", "message": "cluster deployment sync failed"}},
 			}},
 			wantErr: `(?s)cluster degraded.*` + wrappedText(`Cluster "wait" is Degraded, so the update did not complete.`) +

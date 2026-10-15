@@ -20,8 +20,9 @@ import (
 )
 
 // Cluster phases Create and Update act on. Running is the one they wait
-// for; Pending, Provisioning and Upgrading are in progress; Degraded and
-// Terminating end the wait at once, as in kupe-cli. The platform already
+// for; Pending, Provisioning and Upgrading are in progress; Terminating ends
+// the wait at once, and so does Degraded once the platform has seen the
+// change (observedGeneration caught up with generation). The platform already
 // reports a running cluster's short blips as Running (a 2 minute grace), and
 // a new cluster turns Degraded only when its deployment has failed.
 const (
@@ -108,8 +109,13 @@ var clusterKind = serviceKind[ClusterResourceModel, client.Cluster]{
 		converged: clusterConverged,
 		failed: func(c *client.Cluster) (time.Duration, bool) {
 			switch clusterPhase(c) {
-			case clusterPhaseDegraded, phaseTerminating:
+			case phaseTerminating:
 				return 0, true
+			case clusterPhaseDegraded:
+				// Only once the platform has seen the change: a cluster that
+				// was Degraded before it (a failed deployment sync, which a
+				// spec change retries) must get the chance to recover.
+				return 0, c.Status.ObservedGeneration >= c.Generation
 			}
 			return 0, false
 		},

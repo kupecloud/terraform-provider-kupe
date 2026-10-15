@@ -64,6 +64,14 @@ func TestAccDatabaseResource_UpdateWait(t *testing.T) {
 			statuses: []map[string]any{degraded, degraded, ready}, wantPhase: "Running",
 		},
 		{
+			// observedGeneration 1 is the spec before the PATCH (generation 2).
+			name: "Degraded from before the change is not a failure", grace: 0,
+			statuses: []map[string]any{
+				{"phase": "Degraded", "observedGeneration": 1}, {"phase": "Degraded", "observedGeneration": 1}, ready,
+			},
+			wantPhase: "Running",
+		},
+		{
 			name: "fails once Degraded outlasts the grace", grace: 0,
 			statuses: []map[string]any{degraded},
 			wantErr: `(?s)database degraded.*` + wrappedText(`Database "orders-db" is Degraded, so the update did not complete.`) +

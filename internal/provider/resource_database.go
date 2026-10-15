@@ -20,7 +20,8 @@ import (
 
 // Database phases Create and Update act on. Running is the one they wait
 // for; Pending and Provisioning are in progress; Terminating ends the wait
-// at once and Degraded once it has lasted databaseDegradedGrace.
+// at once and Degraded, once the platform has seen the change, after it has
+// lasted databaseDegradedGrace.
 const (
 	databasePhaseRunning  = "Running"
 	databasePhaseDegraded = "Degraded"
@@ -111,7 +112,9 @@ var databaseKind = serviceKind[DatabaseResourceModel, client.Database]{
 			case phaseTerminating:
 				return 0, true
 			case databasePhaseDegraded:
-				return databaseDegradedGrace, true
+				// Degraded from before the change (the first poll reads the
+				// status the PATCH found) is not a verdict on it.
+				return databaseDegradedGrace, db.Status.ObservedGeneration >= db.Generation
 			}
 			return 0, false
 		},
