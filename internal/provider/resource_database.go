@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -199,14 +200,23 @@ func (r *DatabaseResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 			"resources": requiredResourcesAttribute("Per-instance resources in Kubernetes quantity format. Billing " +
 				"uses these requested values. A high-availability database runs two instances of this size."),
 			"high_availability": schema.BoolAttribute{
-				Description: "Run two instances with a synchronous standby. Can be turned on or off in place. Default `false`.",
-				Optional:    true,
-				Computed:    true,
-				Default:     booldefault.StaticBool(false),
+				Description: "Run two instances with a synchronous standby. Can be turned on or off in place. When " +
+					"unset, a new database is created without it and an existing or imported database keeps its " +
+					"current setting.",
+				Optional: true,
+				Computed: true,
+				// No default: a schema default would apply to an unset
+				// attribute even when state holds a value, so importing an
+				// HA database would plan turning HA off. Create sends no
+				// value and the API defaults it to false.
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"deletion_protection": schema.BoolAttribute{
 				Description: "While `true`, the Kupe platform refuses to delete the database. Set it to `false` and " +
-					"apply before destroying. Default `true`.",
+					"apply before destroying. Default `true`, also for an existing database: importing an unprotected " +
+					"database without this attribute in configuration plans turning protection on.",
 				Optional: true,
 				Computed: true,
 				Default:  booldefault.StaticBool(true),

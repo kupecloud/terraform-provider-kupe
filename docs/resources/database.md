@@ -77,9 +77,9 @@ Grant access with [`kupe_database_binding`](database_binding.md). Each binding p
 
 ### Optional
 
-- `deletion_protection` (Boolean) While `true`, the Kupe platform refuses to delete the database. Set it to `false` and apply before destroying. Default `true`.
+- `deletion_protection` (Boolean) While `true`, the Kupe platform refuses to delete the database. Set it to `false` and apply before destroying. Default `true`, also for an existing database: importing an unprotected database without this attribute in configuration plans turning protection on.
 - `engine` (String) Database engine. Only `postgres` is supported, and it is the default. The engine of an existing database cannot change: a different value fails the plan instead of replacing the database.
-- `high_availability` (Boolean) Run two instances with a synchronous standby. Can be turned on or off in place. Default `false`.
+- `high_availability` (Boolean) Run two instances with a synchronous standby. Can be turned on or off in place. When unset, a new database is created without it and an existing or imported database keeps its current setting.
 - `timeouts` (Attributes) (see [below for nested schema](#nestedatt--timeouts))
 - `version` (String) Engine major version, e.g. `18`. When unset, the platform default is used and recorded here. Major version upgrades are not available yet, so changing the version of an existing database fails the plan.
 

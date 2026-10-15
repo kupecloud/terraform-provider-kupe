@@ -216,9 +216,10 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 		cluster := map[string]any{
 			"name": name, "displayName": name,
 			"type": body["type"], "version": strOrEmpty(body["version"]),
-			"resources":       body["resources"],
-			"status":          map[string]any{"phase": "Pending"},
-			"resourceVersion": rv, "createdAt": "2024-01-01T00:00:00Z",
+			"resources":        body["resources"],
+			"highAvailability": body["highAvailability"] == true,
+			"status":           map[string]any{"phase": "Pending"},
+			"resourceVersion":  rv, "createdAt": "2024-01-01T00:00:00Z",
 		}
 		m.clusters[name] = cluster
 		w.Header().Set("ETag", `"`+rv+`"`)

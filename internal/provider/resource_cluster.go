@@ -11,7 +11,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
@@ -179,7 +178,8 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 			"high_availability": schema.BoolAttribute{
 				Description: "Enable a 3-replica HA control plane with HA etcd (chart-managed external etcd StatefulSet), " +
 					"hard anti-affinity, and encrypted-at-rest etcd via a per-cluster AES-CBC key. " +
-					"Adds an hourly charge — see `data.kupe_plan` for the rate. Default `false`.\n\n" +
+					"Adds an hourly charge — see `data.kupe_plan` for the rate. When unset, a new cluster is created " +
+					"without HA and an existing or imported cluster keeps its current setting.\n\n" +
 					"**Create-time-only.** This attribute is effectively immutable: changing it on an existing resource forces " +
 					"Terraform to **replace** the cluster (destroy + create). The operator rejects both directions of the " +
 					"toggle with canonical error codes (`HA_ENABLE_ON_EXISTING_UNSUPPORTED`, `HA_DISABLE_UNSUPPORTED`) — " +
@@ -188,8 +188,13 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 					"then destroy the old.",
 				Optional: true,
 				Computed: true,
-				Default:  booldefault.StaticBool(false),
+				// No default: a schema default would apply to an unset
+				// attribute even when state holds a value, so importing an
+				// HA cluster would plan replacing it. Keeping the state value
+				// first means only a written change replaces the cluster.
+				// Create sends no value and the API defaults it to false.
 				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.UseStateForUnknown(),
 					boolplanmodifier.RequiresReplace(),
 				},
 			},

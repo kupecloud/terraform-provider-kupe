@@ -239,3 +239,73 @@ func TestAccDatabaseResource_CodedRefusals(t *testing.T) {
 		},
 	})
 }
+
+// TestAccHighAvailabilityKeptWhenUnset: high_availability has no default,
+// so a configuration without it keeps what the resource has. Removing it
+// from configuration stands in for importing an HA resource into a
+// configuration without it: both plan with the attribute null and true in
+// state. A default used to plan HA off for a database and a replacement for
+// a cluster.
+func TestAccHighAvailabilityKeptWhenUnset(t *testing.T) {
+	shrinkPollInterval(t)
+	emptyPlan := resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()}}
+
+	t.Run("database", func(t *testing.T) {
+		mock := newMockKupeAPI()
+		defer mock.close()
+		const addr = "kupe_database.test"
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+			CheckDestroy:             testAccCheckNoDatabases(mock),
+			Steps: []resource.TestStep{
+				{
+					Config: testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false), highAvailability: boolPtr(true)}),
+					Check:  resource.TestCheckResourceAttr(addr, "high_availability", "true"),
+				},
+				{
+					Config:           testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false)}),
+					ConfigPlanChecks: emptyPlan,
+					Check:            resource.TestCheckResourceAttr(addr, "high_availability", "true"),
+				},
+			},
+		})
+	})
+
+	t.Run("cluster", func(t *testing.T) {
+		mock := newMockKupeAPI()
+		defer mock.close()
+		const addr = "kupe_cluster.test"
+		withHA := testAccClusterConfigNoDisplayName(mock.url(), "ha-test")
+		withHA = withHA[:len(withHA)-len("}\n")] + "  high_availability = true\n}\n"
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+			Steps: []resource.TestStep{
+				{
+					Config: withHA,
+					Check:  resource.TestCheckResourceAttr(addr, "high_availability", "true"),
+				},
+				{
+					Config:           testAccClusterConfigNoDisplayName(mock.url(), "ha-test"),
+					ConfigPlanChecks: emptyPlan,
+					Check:            resource.TestCheckResourceAttr(addr, "high_availability", "true"),
+				},
+			},
+		})
+	})
+
+	t.Run("a new database or cluster without it is created without HA", func(t *testing.T) {
+		mock := newMockKupeAPI()
+		defer mock.close()
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+			Steps: []resource.TestStep{{
+				Config: testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false)}) +
+					`resource "kupe_cluster" "test" { name = "no-ha" }`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("kupe_database.test", "high_availability", "false"),
+					resource.TestCheckResourceAttr("kupe_cluster.test", "high_availability", "false"),
+				),
+			}},
+		})
+	})
+}
