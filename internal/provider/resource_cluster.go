@@ -159,8 +159,13 @@ func (r *ClusterResource) Metadata(_ context.Context, req resource.MetadataReque
 func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Manages a Kupe cluster for a tenant. Create and Update wait for the " +
-			"cluster to reach phase=Running with the change applied, and fail if it turns Degraded or is " +
-			"being deleted; Delete waits for the cluster to finish terminating. Set timeouts with the `timeouts` attribute, for example " +
+			"cluster to reach phase=Running with the change applied. They fail at once if the cluster is being " +
+			"deleted (Terminating), and after 2 minutes if it stays Degraded once the platform has picked up the " +
+			"change; a cluster that was Degraded before the change gets the chance to recover with it. If " +
+			"the timeout fires first, the apply fails while the cluster is Degraded with the change picked up, or " +
+			"on Update while the platform is failing to apply the change; otherwise it ends with a warning and the " +
+			"platform carries on in the background. Delete waits for the cluster to finish terminating. Set " +
+			"timeouts with the `timeouts` attribute, for example " +
 			"`timeouts = { create = \"30m\" }` (defaults: create/update 15m, delete 10m).\n\n" +
 			"### Destroy semantics\n\n" +
 			"`terraform destroy` (or removing this resource from configuration) is **non-recoverable**. " +
@@ -278,7 +283,7 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				},
 			},
 			"phase": schema.StringAttribute{
-				Description: "Current cluster phase, for example Pending, Provisioning, Running, Upgrading, or Degraded.",
+				Description: "Current cluster phase, for example Pending, Provisioning, Running, Upgrading, Degraded or Terminating.",
 				Computed:    true,
 			},
 			"endpoint": schema.StringAttribute{

@@ -61,7 +61,7 @@ func (d *ClusterDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 				Computed:    true,
 			},
 			"phase": schema.StringAttribute{
-				Description: "Current cluster phase, for example Pending, Provisioning, Running, Upgrading, or Degraded.",
+				Description: "Current cluster phase, for example Pending, Provisioning, Running, Upgrading, Degraded or Terminating.",
 				Computed:    true,
 			},
 			"endpoint": schema.StringAttribute{

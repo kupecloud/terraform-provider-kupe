@@ -3,7 +3,7 @@
 page_title: "kupe_cluster Resource - kupe"
 subcategory: ""
 description: |-
-  Manages a Kupe cluster for a tenant. Create and Update wait for the cluster to reach phase=Running with the change applied, and fail if it turns Degraded or is being deleted; Delete waits for the cluster to finish terminating. Set timeouts with the timeouts attribute, for example timeouts = { create = "30m" } (defaults: create/update 15m, delete 10m).
+  Manages a Kupe cluster for a tenant. Create and Update wait for the cluster to reach phase=Running with the change applied. They fail at once if the cluster is being deleted (Terminating), and after 2 minutes if it stays Degraded once the platform has picked up the change; a cluster that was Degraded before the change gets the chance to recover with it. If the timeout fires first, the apply fails while the cluster is Degraded with the change picked up, or on Update while the platform is failing to apply the change; otherwise it ends with a warning and the platform carries on in the background. Delete waits for the cluster to finish terminating. Set timeouts with the timeouts attribute, for example timeouts = { create = "30m" } (defaults: create/update 15m, delete 10m).
   Destroy semantics
   terraform destroy (or removing this resource from configuration) is non-recoverable. When the cluster is deleted, the Kupe platform will:
   Permanently remove every workload running inside the cluster, along with its storage.Remove the cluster's public DNS endpoint.
@@ -12,7 +12,7 @@ description: |-
 
 # kupe_cluster (Resource)
 
-Manages a Kupe cluster for a tenant. Create and Update wait for the cluster to reach phase=Running with the change applied, and fail if it turns Degraded or is being deleted; Delete waits for the cluster to finish terminating. Set timeouts with the `timeouts` attribute, for example `timeouts = { create = "30m" }` (defaults: create/update 15m, delete 10m).
+Manages a Kupe cluster for a tenant. Create and Update wait for the cluster to reach phase=Running with the change applied. They fail at once if the cluster is being deleted (Terminating), and after 2 minutes if it stays Degraded once the platform has picked up the change; a cluster that was Degraded before the change gets the chance to recover with it. If the timeout fires first, the apply fails while the cluster is Degraded with the change picked up, or on Update while the platform is failing to apply the change; otherwise it ends with a warning and the platform carries on in the background. Delete waits for the cluster to finish terminating. Set timeouts with the `timeouts` attribute, for example `timeouts = { create = "30m" }` (defaults: create/update 15m, delete 10m).
 
 ### Destroy semantics
 
@@ -100,7 +100,7 @@ output "prod_eu1_ha_ready" {
 - `ha_phase` (String) Consumer-friendly HA rollup. One of `pending`, `ha-healthy`, `ha-degraded`, `ha-unavailable`. Empty for non-HA clusters. Use this in downstream automation to branch on operational state without inspecting individual conditions.
 - `ha_replicas_desired` (Number) Target HA replica count (3 when `high_availability = true`, 0 otherwise).
 - `ha_replicas_ready` (Number) Count of HA control-plane (apiserver) replicas currently `Ready`. Zero for non-HA clusters.
-- `phase` (String) Current cluster phase, for example Pending, Provisioning, Running, Upgrading, or Degraded.
+- `phase` (String) Current cluster phase, for example Pending, Provisioning, Running, Upgrading, Degraded or Terminating.
 
 <a id="nestedatt--resources"></a>
 ### Nested Schema for `resources`
