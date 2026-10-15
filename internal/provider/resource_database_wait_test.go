@@ -1,0 +1,200 @@
+package provider
+
+import (
+	"fmt"
+	"regexp"
+	"testing"
+	"time"
+
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
+)
+
+// setDegradedGrace shortens or lengthens databaseDegradedGrace for one test.
+func setDegradedGrace(t *testing.T, grace time.Duration) {
+	t.Helper()
+	prev := databaseDegradedGrace
+	databaseDegradedGrace = grace
+	t.Cleanup(func() { databaseDegradedGrace = prev })
+}
+
+// testAccCheckDatabaseStatusesPlayed checks the wait read every scripted
+// status: only the last, repeating one is left.
+func testAccCheckDatabaseStatusesPlayed(mock *mockKupeAPI) resource.TestCheckFunc {
+	return func(*terraform.State) error {
+		mock.mu.Lock()
+		defer mock.mu.Unlock()
+		if len(mock.databaseStatuses) != 1 {
+			return fmt.Errorf("%d scripted statuses left, want only the last: the wait returned early", len(mock.databaseStatuses))
+		}
+		return nil
+	}
+}
+
+// TestAccDatabaseResource_UpdateWait: Update waits until the change is in
+// effect on every instance (Running, observedGeneration caught up and Ready
+// True), rides out Degraded for databaseDegradedGrace, fails on Terminating
+// and on Degraded beyond the grace, and only warns when the timeout fires on
+// a change still rolling out.
+func TestAccDatabaseResource_UpdateWait(t *testing.T) {
+	shrinkPollInterval(t)
+	const addr = "kupe_database.test"
+	rolling := mockDatabaseStatus("Running", false, "applying changes: Cluster in healthy state (1 instances ready)")
+	degraded := mockDatabaseStatus("Degraded", false, "Waiting for the instances to become active (0 instances ready)")
+	terminating := mockDatabaseStatus("Terminating", false, "the database is being deleted")
+	ready := mockDatabaseStatus("Running", true, "1 of 1 instances ready")
+	tests := []struct {
+		name          string
+		grace         time.Duration
+		updateTimeout string
+		statuses      []map[string]any
+		wantErr       string // empty: the update applies
+		wantPhase     string
+	}{
+		{
+			name: "waits while the instances roll onto the change", grace: time.Hour,
+			statuses: []map[string]any{rolling, rolling, ready}, wantPhase: "Running",
+		},
+		{
+			name: "rides out Degraded within the grace", grace: time.Hour,
+			statuses: []map[string]any{degraded, degraded, ready}, wantPhase: "Running",
+		},
+		{
+			name: "fails once Degraded outlasts the grace", grace: 0,
+			statuses: []map[string]any{degraded},
+			wantErr: `(?s)database degraded.*` + wrappedText(`Database "orders-db" is Degraded, so the update did not complete.`) +
+				`.*` + wrappedText("Status message: Waiting for the instances to become active (0 instances ready)"),
+		},
+		{
+			name: "fails at once on a database being deleted", grace: time.Hour,
+			statuses: []map[string]any{terminating},
+			wantErr: `(?s)database terminating.*` + wrappedText(`Database "orders-db" is Terminating`) +
+				`.*` + wrappedText("It is being deleted, so it can no longer change."),
+		},
+		{
+			name: "a timeout while still Degraded is an error", grace: time.Hour, updateTimeout: "1s",
+			statuses: []map[string]any{degraded},
+			wantErr:  `(?s)database degraded.*` + wrappedText("The update timeout fired while it was Degraded."),
+		},
+		{
+			name: "a timeout while still rolling out only warns", updateTimeout: "1s",
+			statuses: []map[string]any{rolling}, wantPhase: "Running",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setDegradedGrace(t, tt.grace)
+			mock := newMockKupeAPI()
+			defer mock.close()
+			base := testDatabase{protection: boolPtr(false), updateTimeout: tt.updateTimeout}
+			resized := base
+			resized.cpu = "1"
+			step := resource.TestStep{
+				PreConfig: func() {
+					mock.setState(func(m *mockKupeAPI) { m.databaseStatusesOnPatch = tt.statuses })
+				},
+				Config: testAccDatabaseConfig(mock.url(), resized),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(addr, "resources.cpu", "1"),
+					resource.TestCheckResourceAttr(addr, "phase", tt.wantPhase),
+					testAccCheckDatabaseStatusesPlayed(mock),
+				),
+			}
+			if tt.wantErr != "" {
+				step.Check, step.ExpectError = nil, regexp.MustCompile(tt.wantErr)
+			}
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+				CheckDestroy:             testAccCheckNoDatabases(mock),
+				Steps:                    []resource.TestStep{{Config: testAccDatabaseConfig(mock.url(), base)}, step},
+			})
+		})
+	}
+}
+
+// TestAccDatabaseResource_ProtectionChangeNotWaited: a change to
+// deletion_protection alone is in effect once the PATCH is accepted, so
+// Update does not wait, even on a database that would fail the wait.
+func TestAccDatabaseResource_ProtectionChangeNotWaited(t *testing.T) {
+	shrinkPollInterval(t)
+	setDegradedGrace(t, 0)
+	mock := newMockKupeAPI()
+	defer mock.close()
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		CheckDestroy:             testAccCheckNoDatabases(mock),
+		Steps: []resource.TestStep{
+			{Config: testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(true)})},
+			{
+				PreConfig: func() {
+					mock.setState(func(m *mockKupeAPI) {
+						m.databaseStatusesOnPatch = []map[string]any{
+							mockDatabaseStatus("Degraded", false, "Waiting for the instances to become active"),
+						}
+					})
+				},
+				Config: testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false)}),
+				Check:  resource.TestCheckResourceAttr("kupe_database.test", "deletion_protection", "false"),
+			},
+			{
+				// The same database fails a change that is waited for.
+				Config:      testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false), cpu: "1"}),
+				ExpectError: regexp.MustCompile(`database degraded`),
+			},
+		},
+	})
+}
+
+// TestAccDatabaseResource_CreateWait: Create fails on a database that ends
+// Degraded, keeping it in state marked tainted, and only warns when the
+// timeout fires while it is still provisioning.
+func TestAccDatabaseResource_CreateWait(t *testing.T) {
+	shrinkPollInterval(t)
+	const addr = "kupe_database.test"
+
+	t.Run("Degraded fails the create and taints the database", func(t *testing.T) {
+		setDegradedGrace(t, 0)
+		mock := newMockKupeAPI()
+		defer mock.close()
+		mock.setState(func(m *mockKupeAPI) {
+			m.databaseStatuses = []map[string]any{mockDatabaseStatus("Degraded", false, "")}
+		})
+		config := testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false)})
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+			CheckDestroy:             testAccCheckNoDatabases(mock),
+			Steps: []resource.TestStep{
+				{
+					Config: config,
+					ExpectError: regexp.MustCompile(`(?s)database degraded.*` +
+						wrappedText(`Database "orders-db" is Degraded, so the create did not complete.`) +
+						`.*` + wrappedText("marked tainted, so the next `terraform apply` plans to replace it.")),
+				},
+				{
+					PreConfig: func() { mock.setState(func(m *mockKupeAPI) { m.databaseStatuses = nil }) },
+					Config:    config,
+					// The tainted database is replaced.
+					ConfigPlanChecks: expectAction(plancheck.ResourceActionDestroyBeforeCreate),
+					Check:            resource.TestCheckResourceAttr(addr, "phase", "Running"),
+				},
+			},
+		})
+	})
+
+	t.Run("a timeout while provisioning only warns", func(t *testing.T) {
+		mock := newMockKupeAPI()
+		defer mock.close()
+		mock.setState(func(m *mockKupeAPI) {
+			m.databaseStatuses = []map[string]any{mockDatabaseStatus("Provisioning", false, "creating the database")}
+		})
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+			CheckDestroy:             testAccCheckNoDatabases(mock),
+			Steps: []resource.TestStep{{
+				Config: testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false), createTimeout: "1s"}),
+				Check:  resource.TestCheckResourceAttr(addr, "phase", "Provisioning"),
+			}},
+		})
+	})
+}

@@ -49,6 +49,15 @@ type mockKupeAPI struct {
 	// databaseDeleteConflicts is how many upcoming database DELETEs are
 	// refused with a plain 409, like a concurrent change does.
 	databaseDeleteConflicts int
+	// databaseStatuses, when set, are the statuses the next database GETs
+	// report in turn, the last one repeating; each is laid over a converged
+	// status (Running, observedGeneration caught up, Ready True).
+	// databaseGets counts database GETs.
+	databaseStatuses []map[string]any
+	databaseGets     int
+	// databaseStatusesOnPatch, when set, become databaseStatuses once a
+	// PATCH succeeds, so the statuses play out after the update.
+	databaseStatusesOnPatch []map[string]any
 	// databaseBeforePatch is applied, one per PATCH, to the database just
 	// before the next PATCHes check If-Match: a write landing between the
 	// provider's read and its update.
@@ -757,10 +766,22 @@ func (m *mockKupeAPI) getDatabase(w http.ResponseWriter, name string) {
 		mockError(w, http.StatusNotFound, "", "not found")
 		return
 	}
-	status := db["status"].(map[string]any)
-	status["phase"] = "Running"
-	status["observedGeneration"] = db["generation"]
-	status["currentVersion"] = db["version"].(string) + ".0"
+	m.databaseGets++
+	status := map[string]any{
+		"phase":              "Running",
+		"observedGeneration": db["generation"],
+		"currentVersion":     db["version"].(string) + ".0",
+		"conditions":         []any{map[string]any{"type": "Ready", "status": "True", "reason": "Healthy"}},
+	}
+	if len(m.databaseStatuses) > 0 {
+		for k, v := range m.databaseStatuses[0] {
+			status[k] = v
+		}
+		if len(m.databaseStatuses) > 1 {
+			m.databaseStatuses = m.databaseStatuses[1:]
+		}
+	}
+	db["status"] = status
 	w.Header().Set("ETag", `"`+db["resourceVersion"].(string)+`"`)
 	mustEncodeJSON(w, db)
 }
@@ -819,6 +840,9 @@ func (m *mockKupeAPI) patchDatabase(w http.ResponseWriter, r *http.Request, name
 	db["generation"] = db["generation"].(int) + 1
 	rv := m.nextRV()
 	db["resourceVersion"] = rv
+	if m.databaseStatusesOnPatch != nil {
+		m.databaseStatuses = m.databaseStatusesOnPatch
+	}
 	w.Header().Set("ETag", `"`+rv+`"`)
 	mustEncodeJSON(w, db)
 }
@@ -912,6 +936,19 @@ func (m *mockKupeAPI) deleteDatabaseBinding(w http.ResponseWriter, database, nam
 	}
 	delete(m.databaseBindings, key)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// mockDatabaseStatus is a database status for databaseStatuses: phase, and
+// the Ready condition with message.
+func mockDatabaseStatus(phase string, ready bool, message string) map[string]any {
+	status := "False"
+	if ready {
+		status = "True"
+	}
+	return map[string]any{
+		"phase":      phase,
+		"conditions": []any{map[string]any{"type": "Ready", "status": status, "reason": "NotHealthy", "message": message}},
+	}
 }
 
 // setState changes the mock's state under its lock, for tests that

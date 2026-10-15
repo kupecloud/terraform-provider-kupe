@@ -15,7 +15,13 @@ func TestGetDatabase(t *testing.T) {
 		"name": "orders-db", "engine": "postgres", "version": "18",
 		"resources":          map[string]any{"cpu": "500m", "memory": "1Gi", "storage": "10Gi"},
 		"deletionProtection": true, "generation": 3,
-		"status": map[string]any{"phase": "Running", "observedGeneration": 3, "currentVersion": "18.0"},
+		"status": map[string]any{
+			"phase": "Running", "observedGeneration": 3, "currentVersion": "18.0",
+			"conditions": []any{
+				map[string]any{"type": "Provisioned", "status": "True"},
+				map[string]any{"type": "Ready", "status": "False", "reason": "NotHealthy", "message": "applying changes"},
+			},
+		},
 	})
 
 	db, etag, err := mock.client("acme").GetDatabase(context.Background(), "orders-db")
@@ -30,6 +36,21 @@ func TestGetDatabase(t *testing.T) {
 	}
 	if db.Status.CurrentVersion != "18.0" || db.Status.ObservedGeneration != 3 {
 		t.Errorf("unexpected status: %+v", db.Status)
+	}
+	if db.Status.Ready() || ConditionMessage(db.Status.Conditions, ConditionReady) != "applying changes" {
+		t.Errorf("Ready() = %v, message %q; want false, \"applying changes\"",
+			db.Status.Ready(), ConditionMessage(db.Status.Conditions, ConditionReady))
+	}
+}
+
+func TestConditionTrue(t *testing.T) {
+	conditions := []Condition{{Type: "Provisioned", Status: "True"}, {Type: "Ready", Status: "False"}}
+	if !ConditionTrue(conditions, "Provisioned") || ConditionTrue(conditions, "Ready") || ConditionTrue(conditions, "Missing") {
+		t.Errorf("ConditionTrue gave the wrong answer for %+v", conditions)
+	}
+	var status *DatabaseStatus
+	if status.Ready() {
+		t.Error("a database with no status reads Ready")
 	}
 }
 

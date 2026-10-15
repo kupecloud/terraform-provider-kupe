@@ -17,9 +17,19 @@ import (
 	"github.com/kupecloud/terraform-provider-kupe/internal/client"
 )
 
-// databasePhaseRunning is the phase Create and Update wait for. Every other
-// phase (Pending, Provisioning, Upgrading, Degraded) is in progress.
-const databasePhaseRunning = "Running"
+// Database phases Create and Update act on. Running is the one they wait
+// for; Pending and Provisioning are in progress; Terminating ends the wait
+// at once and Degraded once it has lasted databaseDegradedGrace.
+const (
+	databasePhaseRunning  = "Running"
+	databasePhaseDegraded = "Degraded"
+)
+
+// databaseDegradedGrace is how long Create and Update ride out a Degraded
+// database before failing. A single-instance database is Degraded while its
+// only instance restarts to apply a CPU or memory change; kupe-cli waits
+// the same 5 minutes. A var so tests can shorten it.
+var databaseDegradedGrace = 5 * time.Minute
 
 // databaseEngine is the only engine kupe offers today, and the default.
 const databaseEngine = "postgres"
@@ -95,6 +105,21 @@ var databaseKind = serviceKind[DatabaseResourceModel, client.Database]{
 		target:    databasePhaseRunning,
 		phase:     databasePhase,
 		converged: databaseConverged,
+		failed: func(db *client.Database) (time.Duration, bool) {
+			switch databasePhase(db) {
+			case phaseTerminating:
+				return 0, true
+			case databasePhaseDegraded:
+				return databaseDegradedGrace, true
+			}
+			return 0, false
+		},
+		message: func(db *client.Database) string {
+			if db == nil || db.Status == nil {
+				return ""
+			}
+			return client.ConditionMessage(db.Status.Conditions, client.ConditionReady)
+		},
 	},
 	settingsChanged: func(prior *DatabaseResourceModel, current *client.Database) []string {
 		return settingsChanged(&prior.databaseModel, databaseModelFromAPI(current))
@@ -124,7 +149,9 @@ func (r *DatabaseResource) Metadata(_ context.Context, req resource.MetadataRequ
 func (r *DatabaseResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Manages a Kupe PostgreSQL database. Create and Update wait for the database to " +
-			"reach phase=Running with the change applied; Delete waits until the database is gone. Set timeouts " +
+			"reach phase=Running with the change in effect on every instance, and fail if it is being deleted or " +
+			"stays Degraded for more than 5 minutes; a change to `deletion_protection` alone takes effect at once " +
+			"and is not waited for. Delete waits until the database is gone. Set timeouts " +
 			"with the `timeouts` attribute, for example `timeouts = { create = \"45m\" }` (defaults: " +
 			"create/update 30m, delete 15m).\n\n" +
 			"Applications reach the database through `kupe_database_binding`, which places a Service and a " +
@@ -235,13 +262,23 @@ func (r *DatabaseResource) Update(ctx context.Context, req resource.UpdateReques
 	}
 
 	var send patchFunc[client.Database]
-	if patch, hasChanges := databasePatch(&plan, &state); hasChanges {
+	patch, hasChanges := databasePatch(&plan, &state)
+	if hasChanges {
 		name := plan.Name.ValueString()
 		send = func(ctx context.Context, etag string) (*client.Database, string, error) {
 			return r.client.UpdateDatabase(ctx, name, etag, patch)
 		}
 	}
-	r.update(ctx, &plan, &state, state.ETag.ValueString(), send, true, &resp.State, &resp.Diagnostics)
+	r.update(ctx, &plan, &state, state.ETag.ValueString(), send, !protectionOnly(patch), &resp.State, &resp.Diagnostics)
+}
+
+// protectionOnly reports whether patch changes deletion protection and
+// nothing else. kupe-api and the platform read deletion protection from the
+// spec when a delete arrives, so it is in effect as soon as the PATCH is
+// accepted: Update does not wait for it.
+func protectionOnly(patch client.PatchDatabaseRequest) bool {
+	return patch.DeletionProtection != nil &&
+		patch.Version == nil && patch.Resources == nil && patch.HighAvailability == nil
 }
 
 // databasePatch builds the merge patch for the fields that differ between
@@ -296,13 +333,15 @@ func settingsChanged(prior *databaseModel, current databaseModel) []string {
 }
 
 // databaseConverged reports whether the database is Running with its latest
-// spec applied. Phase alone is not enough: a change that keeps the database
-// Running (deletion protection, or the moment before a resize starts) is
-// only applied once observedGeneration reaches generation.
+// spec in effect. Phase alone is not enough: the platform marks a change
+// applied (observedGeneration reaches generation) as soon as it hands it to
+// the instances, and the phase stays Running while they roll onto it, with
+// the Ready condition False until they have.
 func databaseConverged(db *client.Database) bool {
 	return db.Status != nil &&
 		db.Status.Phase == databasePhaseRunning &&
-		db.Status.ObservedGeneration >= db.Generation
+		db.Status.ObservedGeneration >= db.Generation &&
+		db.Status.Ready()
 }
 
 // databasePhase is db's phase, "" when it has no status yet.

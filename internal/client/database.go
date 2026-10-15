@@ -51,6 +51,14 @@ type DatabaseStatus struct {
 	Phase              string `json:"phase"`
 	// CurrentVersion is the full engine version running, e.g. "18.0".
 	CurrentVersion string `json:"currentVersion"`
+	// Conditions carry the reason behind the phase. Ready is False while
+	// a change rolls through the instances, though the phase stays Running.
+	Conditions []Condition `json:"conditions"`
+}
+
+// Ready reports whether the database's Ready condition is True.
+func (s *DatabaseStatus) Ready() bool {
+	return s != nil && ConditionTrue(s.Conditions, ConditionReady)
 }
 
 // CreateDatabaseRequest is the body for creating a database.
@@ -108,6 +116,31 @@ type Condition struct {
 	Status  string `json:"status"`
 	Reason  string `json:"reason"`
 	Message string `json:"message"`
+}
+
+// ConditionReady is the condition that is True once a cluster or database
+// runs with its latest change in effect.
+const ConditionReady = "Ready"
+
+// ConditionTrue reports whether the condition of type t is True.
+func ConditionTrue(conditions []Condition, t string) bool {
+	for _, c := range conditions {
+		if c.Type == t {
+			return c.Status == "True"
+		}
+	}
+	return false
+}
+
+// ConditionMessage is the message of the condition of type t, "" when
+// there is none.
+func ConditionMessage(conditions []Condition, t string) string {
+	for _, c := range conditions {
+		if c.Type == t {
+			return c.Message
+		}
+	}
+	return ""
 }
 
 // CreateDatabaseBindingRequest is the body for creating a binding. The

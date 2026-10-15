@@ -84,7 +84,10 @@ type readiness[M, A any] struct {
 	// failed, when set, reports a state waiting is not expected to clear,
 	// and how long it is ridden out before it ends the wait (0: at once).
 	failed func(obj *A) (grace time.Duration, failed bool)
-	// failedDetail explains a failure.
+	// message, when set, is what obj's status says about its phase.
+	message func(obj *A) string
+	// failedDetail, when set, explains a failure instead of
+	// managedResource.failedDetail.
 	failedDetail func(m *M, obj *A) string
 	// timedOutDetail, when set, is added to the warning given when the
 	// timeout fires first.
@@ -275,9 +278,14 @@ func (r *managedResource[M, A]) waitForReady(
 	case err == nil:
 		// ready
 	case errors.Is(err, errReadyFailed):
-		diags.AddError(r.kind.noun+" "+strings.ToLower(phase), ready.failedDetail(m, last))
+		diags.AddError(r.kind.noun+" "+strings.ToLower(phase), r.failedDetail(op, m, last))
 	case isTerminalAPIError(err):
 		diags.AddError(fmt.Sprintf("%s %s failed while waiting for %s", r.kind.noun, op, ready.target), apiErrorDetail(err))
+	case !failingSince.IsZero():
+		// The timeout fired within the grace: the resource is still in a
+		// failed state, which is not progress.
+		diags.AddError(r.kind.noun+" "+strings.ToLower(phase), r.failedDetail(op, m, last)+
+			fmt.Sprintf("\n\nThe %s timeout fired while it was %s.", op, phase))
 	default:
 		detail := fmt.Sprintf("%s %q was at phase=%q when the %s timeout fired. The Kupe platform continues in "+
 			"the background; re-run `terraform apply` later and it will be a no-op once the %s is %s. If it stays "+
@@ -290,6 +298,37 @@ func (r *managedResource[M, A]) waitForReady(
 		}
 		diags.AddWarning(fmt.Sprintf("%s %s timed out before reaching %s", r.kind.noun, op, ready.target), detail)
 	}
+}
+
+// phaseTerminating is the phase of a resource being deleted.
+const phaseTerminating = "Terminating"
+
+// failedDetail explains why waiting for obj ended in failure: its phase and
+// status message, what to do, and on create that Terraform keeps it in
+// state, marked tainted.
+func (r *managedResource[M, A]) failedDetail(op string, m *M, obj *A) string {
+	ready := r.kind.ready
+	if ready.failedDetail != nil {
+		return ready.failedDetail(m, obj)
+	}
+	phase := ready.phase(obj)
+	detail := fmt.Sprintf("%s %q is %s, so the %s did not complete.", capitalise(r.kind.noun), r.kind.name(m), phase, op)
+	if ready.message != nil {
+		if msg := ready.message(obj); msg != "" {
+			detail += "\n\nStatus message: " + msg
+		}
+	}
+	if phase == phaseTerminating {
+		return detail + "\n\nIt is being deleted, so it can no longer change. Once it is gone, " +
+			"`terraform apply` creates it again; remove it from the configuration if that is not wanted."
+	}
+	detail += "\n\nThe Kupe platform keeps trying to recover it. If it stays in this phase, check it in the " +
+		"Kupe Console or contact Kupe Cloud support."
+	if op == "create" {
+		detail += fmt.Sprintf("\n\nTerraform keeps the %s in state, marked tainted, so the next `terraform apply` "+
+			"plans to replace it. To keep it instead, run `terraform untaint` on it.", r.kind.noun)
+	}
+	return detail
 }
 
 func (r *managedResource[M, A]) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {

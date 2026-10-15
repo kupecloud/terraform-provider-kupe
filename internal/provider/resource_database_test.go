@@ -21,6 +21,7 @@ type testDatabase struct {
 	name, engine, version        string
 	cpu, memory, storage         string
 	highAvailability, protection *bool
+	createTimeout, updateTimeout string
 	deleteTimeout                string
 }
 
@@ -53,8 +54,16 @@ func (d testDatabase) hcl() string {
 	if d.protection != nil {
 		attrs += fmt.Sprintf("  deletion_protection = %t\n", *d.protection)
 	}
-	if d.deleteTimeout != "" {
-		attrs += fmt.Sprintf("  timeouts = { delete = %q }\n", d.deleteTimeout)
+	var timeouts []string
+	for _, t := range []struct{ op, value string }{
+		{"create", d.createTimeout}, {"update", d.updateTimeout}, {"delete", d.deleteTimeout},
+	} {
+		if t.value != "" {
+			timeouts = append(timeouts, fmt.Sprintf("%s = %q", t.op, t.value))
+		}
+	}
+	if len(timeouts) > 0 {
+		attrs += fmt.Sprintf("  timeouts = { %s }\n", strings.Join(timeouts, ", "))
 	}
 	return fmt.Sprintf(`
 resource "kupe_database" "test" {
@@ -511,6 +520,8 @@ data "kupe_database" "test" {
 }
 
 func TestDatabaseConverged(t *testing.T) {
+	ready := []client.Condition{{Type: "Ready", Status: "True"}}
+	rolling := []client.Condition{{Type: "Ready", Status: "False", Message: "applying changes"}}
 	tests := []struct {
 		name string
 		db   client.Database
@@ -524,13 +535,23 @@ func TestDatabaseConverged(t *testing.T) {
 		},
 		{
 			name: "running but the latest change is not applied",
-			db:   client.Database{Generation: 3, Status: &client.DatabaseStatus{Phase: "Running", ObservedGeneration: 2}},
+			db:   client.Database{Generation: 3, Status: &client.DatabaseStatus{Phase: "Running", ObservedGeneration: 2, Conditions: ready}},
 			want: false,
 		},
 		{
-			name: "running with the latest change applied",
-			db:   client.Database{Generation: 3, Status: &client.DatabaseStatus{Phase: "Running", ObservedGeneration: 3}},
+			name: "running with the change applied while the instances roll onto it",
+			db:   client.Database{Generation: 3, Status: &client.DatabaseStatus{Phase: "Running", ObservedGeneration: 3, Conditions: rolling}},
+			want: false,
+		},
+		{
+			name: "running with the latest change in effect",
+			db:   client.Database{Generation: 3, Status: &client.DatabaseStatus{Phase: "Running", ObservedGeneration: 3, Conditions: ready}},
 			want: true,
+		},
+		{
+			name: "degraded with a stale Ready condition",
+			db:   client.Database{Generation: 3, Status: &client.DatabaseStatus{Phase: "Degraded", ObservedGeneration: 3, Conditions: ready}},
+			want: false,
 		},
 	}
 	for _, tt := range tests {
