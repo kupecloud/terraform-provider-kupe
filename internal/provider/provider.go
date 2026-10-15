@@ -122,6 +122,21 @@ func (p *KupeProvider) Configure(ctx context.Context, req provider.ConfigureRequ
 	resp.ResourceData = c
 }
 
+// configureClient is the Configure of every resource and data source: the
+// client the provider's Configure built, or nil before the provider is
+// configured (the framework calls Configure early with no data).
+func configureClient(providerData any, diags *diag.Diagnostics) *client.Client {
+	if providerData == nil {
+		return nil
+	}
+	c, ok := providerData.(*client.Client)
+	if !ok {
+		diags.AddError("unexpected provider data type", fmt.Sprintf("expected *client.Client, got %T", providerData))
+		return nil
+	}
+	return c
+}
+
 func (p *KupeProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		NewClusterResource,

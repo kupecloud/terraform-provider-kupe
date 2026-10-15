@@ -95,15 +95,7 @@ func (r *AlertmanagerGlobalResource) Schema(_ context.Context, _ resource.Schema
 }
 
 func (r *AlertmanagerGlobalResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
-	if req.ProviderData == nil {
-		return
-	}
-	c, ok := req.ProviderData.(*client.Client)
-	if !ok {
-		resp.Diagnostics.AddError("unexpected provider data type", fmt.Sprintf("expected *client.Client, got %T", req.ProviderData))
-		return
-	}
-	r.client = c
+	r.client = configureClient(req.ProviderData, &resp.Diagnostics)
 }
 
 func parseGlobal(raw string) (client.AlertmanagerGlobal, error) {

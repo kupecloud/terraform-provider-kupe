@@ -5,6 +5,8 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/kupecloud/terraform-provider-kupe/internal/client"
 )
 
 func TestStringValueOrEnv(t *testing.T) {
@@ -90,6 +92,30 @@ func TestNew(t *testing.T) {
 	if p == nil {
 		t.Fatal("expected non-nil provider")
 	}
+}
+
+func TestConfigureClient(t *testing.T) {
+	t.Run("nil before the provider is configured", func(t *testing.T) {
+		var diags diag.Diagnostics
+		if c := configureClient(nil, &diags); c != nil || diags.HasError() {
+			t.Fatalf("expected nil and no error, got %v, %v", c, diags)
+		}
+	})
+
+	t.Run("returns the provider's client", func(t *testing.T) {
+		var diags diag.Diagnostics
+		want := client.New("https://api.example.com", "acme", "token")
+		if c := configureClient(want, &diags); c != want || diags.HasError() {
+			t.Fatalf("expected the provider's client and no error, got %v, %v", c, diags)
+		}
+	})
+
+	t.Run("errors on other provider data", func(t *testing.T) {
+		var diags diag.Diagnostics
+		if c := configureClient("not a client", &diags); c != nil || !diags.HasError() {
+			t.Fatalf("expected nil and an error, got %v, %v", c, diags)
+		}
+	})
 }
 
 func TestSelectAuthToken(t *testing.T) {
