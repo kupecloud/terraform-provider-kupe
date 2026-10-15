@@ -135,7 +135,7 @@ A binding is `Failed` when the namespace already has a Service named after the d
 ### Optional
 
 - `name` (String) Binding name. Defaults to `{database}-{cluster}-{namespace}-{role}`; set it explicitly if that is longer than 63 characters.
-- `secret_name` (String) Name of the credentials Secret in the namespace. Defaults to `{database}-{role}`. The Secret holds `type`, `provider`, `host`, `port`, `database`, `username`, `password`, `sslmode`, `ca.crt` and `uri`; mount it at `/bindings/<secret_name>`, where `uri` expects `ca.crt`.
+- `secret_name` (String) Name of the credentials Secret in the namespace. When unset, a new binding uses `{database}-{role}` and an existing or imported binding keeps its current name, so removing the attribute from configuration does not change the name back: set it to `{database}-{role}` instead. A different name replaces the binding. The Secret holds `type`, `provider`, `host`, `port`, `database`, `username`, `password`, `sslmode`, `ca.crt` and `uri`; mount it at `/bindings/<secret_name>`, where `uri` expects `ca.crt`.
 - `timeouts` (Attributes) (see [below for nested schema](#nestedatt--timeouts))
 
 ### Read-Only

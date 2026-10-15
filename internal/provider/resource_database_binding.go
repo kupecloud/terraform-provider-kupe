@@ -187,8 +187,10 @@ func (r *DatabaseBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 				},
 			},
 			"secret_name": schema.StringAttribute{
-				Description: "Name of the credentials Secret in the namespace. Defaults to `{database}-{role}`. " +
-					"The Secret holds `type`, `provider`, `host`, `port`, `database`, `username`, `password`, `sslmode`, " +
+				Description: "Name of the credentials Secret in the namespace. When unset, a new binding uses " +
+					"`{database}-{role}` and an existing or imported binding keeps its current name, so removing the " +
+					"attribute from configuration does not change the name back: set it to `{database}-{role}` " +
+					"instead. A different name replaces the binding. The Secret holds `type`, `provider`, `host`, `port`, `database`, `username`, `password`, `sslmode`, " +
 					"`ca.crt` and `uri`; mount it at `/bindings/<secret_name>`, where `uri` expects `ca.crt`.",
 				Optional: true,
 				Computed: true,

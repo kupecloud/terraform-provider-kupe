@@ -87,6 +87,21 @@ func TestAccDatabaseBindingResource(t *testing.T) {
 				},
 				Check: resource.TestCheckResourceAttr(addr, "name", "orders-worker"),
 			},
+			{
+				// Removing secret_name keeps the current name too: it does
+				// not go back to the default.
+				Config: testAccDatabaseBindingConfig(mock.url(), "prod", "worker", "app", ""),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(addr, plancheck.ResourceActionNoop)},
+				},
+				Check: resource.TestCheckResourceAttr(addr, "secret_name", "orders-credentials"),
+			},
+			{
+				// Writing the default name out replaces the binding with it.
+				Config:           testAccDatabaseBindingConfig(mock.url(), "prod", "worker", "app", `  secret_name = "orders-db-app"`),
+				ConfigPlanChecks: replace,
+				Check:            resource.TestCheckResourceAttr(addr, "secret_name", "orders-db-app"),
+			},
 		},
 	})
 }
