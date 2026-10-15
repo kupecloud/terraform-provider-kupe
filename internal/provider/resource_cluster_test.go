@@ -3,6 +3,7 @@ package provider
 import (
 	"fmt"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -28,6 +29,36 @@ func TestAccClusterResource_TypeValidator(t *testing.T) {
 			},
 		},
 	})
+}
+
+// TestAccClusterResource_InvalidName: a name the platform would refuse
+// fails validation before anything is sent.
+func TestAccClusterResource_InvalidName(t *testing.T) {
+	const badName = "must be lowercase letters, digits and '-', start with a letter"
+	tests := []struct {
+		name, cluster, wantErr string
+	}{
+		{name: "uppercase", cluster: "Prod", wantErr: badName},
+		{name: "starting with a digit", cluster: "1app", wantErr: badName},
+		{name: "all digits", cluster: "00000", wantErr: badName},
+		{name: "double hyphen", cluster: "prod--eu", wantErr: badName},
+		{name: "ending with a hyphen", cluster: "prod-", wantErr: badName},
+		{name: "over 63 characters", cluster: "a" + strings.Repeat("b", 63), wantErr: "string length must be at most 63"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := newMockKupeAPI()
+			defer mock.close()
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+				CheckDestroy:             testAccCheckNoClusters(mock),
+				Steps: []resource.TestStep{{
+					Config:      testAccClusterConfigNoDisplayName(mock.url(), tt.cluster),
+					ExpectError: regexp.MustCompile(wrappedText(tt.wantErr)),
+				}},
+			})
+		})
+	}
 }
 
 // TestAccClusterResource_TypeDefaultsToShared verifies the StaticString

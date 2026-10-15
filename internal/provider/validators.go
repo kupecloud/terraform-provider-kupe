@@ -14,17 +14,31 @@ import (
 // names the platform derives from databases and clusters, so those names
 // may not contain it: each "-" must be followed by a letter or digit.
 var (
-	databaseNamePattern = regexp.MustCompile(`^[a-z](-?[a-z0-9])*$`)
-	clusterRefPattern   = regexp.MustCompile(`^[a-z0-9](-?[a-z0-9])*$`)
-	namespacePattern    = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+	serviceNamePattern = regexp.MustCompile(`^[a-z](-?[a-z0-9])*$`)
+	clusterRefPattern  = regexp.MustCompile(`^[a-z0-9](-?[a-z0-9])*$`)
+	namespacePattern   = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 )
 
 // databaseNameValidators check a database name: a DNS-1035 label (starts
 // with a letter) without "--".
 func databaseNameValidators() []validator.String {
+	return serviceNameValidators()
+}
+
+// clusterNameValidators check a new cluster's name the way the platform's
+// admission does: a DNS-1035 label (starts with a letter) without "--". The
+// platform also caps the tenant and cluster names together (the namespace it
+// derives from them must fit a DNS label); that needs the tenant's name, so
+// it is left to the platform.
+func clusterNameValidators() []validator.String {
+	return serviceNameValidators()
+}
+
+// serviceNameValidators check the name of a managed service resource.
+func serviceNameValidators() []validator.String {
 	return []validator.String{
 		stringvalidator.LengthAtMost(maxNameLength),
-		stringvalidator.RegexMatches(databaseNamePattern,
+		stringvalidator.RegexMatches(serviceNamePattern,
 			"must be lowercase letters, digits and '-', start with a letter, end with a letter or digit, and not contain '--'"),
 	}
 }

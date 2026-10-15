@@ -176,8 +176,11 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 			"Kupe Console.",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
-				Description: "Cluster name (immutable after creation).",
-				Required:    true,
+				Description: "Cluster name (immutable after creation). A lowercase DNS label starting with a letter, " +
+					"without `--`. The Kupe platform also limits the tenant and cluster names together to 52 " +
+					"characters and refuses a longer cluster name when it is created.",
+				Required:   true,
+				Validators: clusterNameValidators(),
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
