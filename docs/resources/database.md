@@ -73,7 +73,7 @@ Grant access with [`kupe_database_binding`](database_binding.md). Each binding p
 ### Required
 
 - `name` (String) Database name (immutable after creation). A lowercase DNS label starting with a letter, without `--`. It is also the Service name applications connect to.
-- `resources` (Attributes) Per-instance resources in Kubernetes quantity format. Billing uses these requested values. A high-availability database runs two instances of this size. (see [below for nested schema](#nestedatt--resources))
+- `resources` (Attributes) Per-instance resources in Kubernetes quantity format. Billing uses these requested values. A high-availability database runs two instances of this size. All three are required, unlike the optional limits of `kupe_cluster`. (see [below for nested schema](#nestedatt--resources))
 
 ### Optional
 
@@ -88,7 +88,7 @@ Grant access with [`kupe_database_binding`](database_binding.md). Each binding p
 - `created_at` (String) Timestamp when the database was created.
 - `current_version` (String) Full engine version running, e.g. `18.0`.
 - `etag` (String) Resource version used for optimistic locking during updates.
-- `phase` (String) Current phase: Pending, Provisioning, Running, Upgrading, Degraded or Terminating.
+- `phase` (String) Current phase: Pending, Provisioning, Running, Degraded or Terminating.
 
 <a id="nestedatt--resources"></a>
 ### Nested Schema for `resources`

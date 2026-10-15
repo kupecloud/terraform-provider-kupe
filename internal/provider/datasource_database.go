@@ -66,7 +66,7 @@ func (d *DatabaseDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 				Computed:    true,
 			},
 			"phase": schema.StringAttribute{
-				Description: "Current phase: Pending, Provisioning, Running, Upgrading, Degraded or Terminating.",
+				Description: "Current phase: Pending, Provisioning, Running, Degraded or Terminating.",
 				Computed:    true,
 			},
 			"current_version": schema.StringAttribute{

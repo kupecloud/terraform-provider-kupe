@@ -36,7 +36,7 @@ output "orders_db_running_version" {
 - `deletion_protection` (Boolean) Whether the Kupe platform refuses to delete the database.
 - `engine` (String) Database engine, e.g. `postgres`.
 - `high_availability` (Boolean) Whether the database runs two instances with a synchronous standby.
-- `phase` (String) Current phase: Pending, Provisioning, Running, Upgrading, Degraded or Terminating.
+- `phase` (String) Current phase: Pending, Provisioning, Running, Degraded or Terminating.
 - `resources` (Attributes) Per-instance resources. (see [below for nested schema](#nestedatt--resources))
 - `version` (String) Requested engine major version, e.g. `18`.
 

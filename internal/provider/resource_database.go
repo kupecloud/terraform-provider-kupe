@@ -198,7 +198,8 @@ func (r *DatabaseResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 				},
 			},
 			"resources": requiredResourcesAttribute("Per-instance resources in Kubernetes quantity format. Billing " +
-				"uses these requested values. A high-availability database runs two instances of this size."),
+				"uses these requested values. A high-availability database runs two instances of this size. All three " +
+				"are required, unlike the optional limits of `kupe_cluster`."),
 			"high_availability": schema.BoolAttribute{
 				Description: "Run two instances with a synchronous standby. Can be turned on or off in place. When " +
 					"unset, a new database is created without it and an existing or imported database keeps its " +
@@ -222,7 +223,7 @@ func (r *DatabaseResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 				Default:  booldefault.StaticBool(true),
 			},
 			"phase": schema.StringAttribute{
-				Description: "Current phase: Pending, Provisioning, Running, Upgrading, Degraded or Terminating.",
+				Description: "Current phase: Pending, Provisioning, Running, Degraded or Terminating.",
 				Computed:    true,
 			},
 			"current_version": schema.StringAttribute{
