@@ -21,14 +21,23 @@ import (
 
 // Cluster phases Create and Update act on. Running is the one they wait
 // for; Pending, Provisioning and Upgrading are in progress; Terminating ends
-// the wait at once, and so does Degraded once the platform has seen the
-// change (observedGeneration caught up with generation). The platform already
-// reports a running cluster's short blips as Running (a 2 minute grace), and
-// a new cluster turns Degraded only when its deployment has failed.
+// the wait at once and Degraded, once the platform has seen the change
+// (observedGeneration caught up with generation), after it has lasted
+// clusterDegradedGrace.
 const (
 	clusterPhaseRunning  = "Running"
 	clusterPhaseDegraded = "Degraded"
 )
+
+// clusterDegradedGrace is how long Create and Update ride out a Degraded
+// cluster that has seen the change before failing. The platform stamps
+// observedGeneration in the pass that hands the change to the cluster's
+// deployment, but judges the phase from the deployment's status read in that
+// same pass, from before it retried: a cluster Degraded by a failed
+// deployment sync reads Degraded at the new generation until the next pass,
+// even when the change heals it. 2 minutes is the platform's own grace for a
+// running cluster's blips. A var so tests can shorten it.
+var clusterDegradedGrace = 2 * time.Minute
 
 // Default timeouts for cluster operations. Users can override via the
 // resource's `timeouts` attribute in HCL; these are the framework defaults
@@ -112,10 +121,11 @@ var clusterKind = serviceKind[ClusterResourceModel, client.Cluster]{
 			case phaseTerminating:
 				return 0, true
 			case clusterPhaseDegraded:
-				// Only once the platform has seen the change: a cluster that
-				// was Degraded before it (a failed deployment sync, which a
-				// spec change retries) must get the chance to recover.
-				return 0, c.Status.ObservedGeneration >= c.Generation
+				// Only once the platform has seen the change, and then after
+				// the grace: a cluster that was Degraded before it (a failed
+				// deployment sync, which a spec change retries) must get the
+				// chance to recover.
+				return clusterDegradedGrace, c.Status.ObservedGeneration >= c.Generation
 			}
 			return 0, false
 		},

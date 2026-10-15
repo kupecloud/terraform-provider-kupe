@@ -5,6 +5,7 @@ import (
 	"math"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
@@ -49,57 +50,80 @@ func testAccCheckClusterStatusesPlayed(mock *mockKupeAPI) resource.TestCheckFunc
 	}
 }
 
+// setClusterDegradedGrace shortens or lengthens clusterDegradedGrace for one
+// test.
+func setClusterDegradedGrace(t *testing.T, grace time.Duration) {
+	t.Helper()
+	prev := clusterDegradedGrace
+	clusterDegradedGrace = grace
+	t.Cleanup(func() { clusterDegradedGrace = prev })
+}
+
 // TestAccClusterResource_UpdateWait: Update waits until the cluster is
-// Running at the post-PATCH generation and fails at once when it is
-// Degraded at that generation or starts being deleted.
+// Running at the post-PATCH generation, rides out Degraded at that
+// generation for clusterDegradedGrace, fails on Degraded beyond the grace
+// and at once on a cluster being deleted.
 func TestAccClusterResource_UpdateWait(t *testing.T) {
 	shrinkPollInterval(t)
 	const addr = "kupe_cluster.test"
 	// The PATCH made generation 2; observedGeneration 1 is the spec before.
 	stale := map[string]any{"phase": "Running", "observedGeneration": 1}
 	converged := map[string]any{}
+	syncFailed := []any{map[string]any{"type": "Ready", "status": "False", "message": "cluster deployment sync failed"}}
+	degradedBefore := map[string]any{"phase": "Degraded", "observedGeneration": 1, "conditions": syncFailed}
+	degradedSeen := map[string]any{"phase": "Degraded", "observedGeneration": 2, "conditions": syncFailed}
 	tests := []struct {
-		name     string
-		statuses []map[string]any
-		wantErr  string // empty: the update applies
+		name          string
+		grace         time.Duration
+		updateTimeout string
+		statuses      []map[string]any
+		wantErr       string // empty: the update applies
 	}{
 		{
-			name:     "waits for the post-PATCH generation and through Upgrading",
+			name: "waits for the post-PATCH generation and through Upgrading", grace: time.Hour,
 			statuses: []map[string]any{stale, {"phase": "Upgrading", "observedGeneration": 2}, converged},
 		},
 		{
-			// The first poll reads the status from before the PATCH: a
-			// cluster Degraded then gets the chance to recover with the
-			// change.
-			name: "Degraded from before the change is not a failure",
-			statuses: []map[string]any{
-				{"phase": "Degraded", "observedGeneration": 1}, {"phase": "Degraded", "observedGeneration": 1}, converged,
-			},
+			// The order the platform produces for a cluster Degraded by a
+			// failed deployment sync: the first poll reads the status from
+			// before the PATCH; the pass that takes the change stamps the new
+			// generation but judges the phase from the deployment's status
+			// from before its retry, so it still reads Degraded; the retry
+			// heals it.
+			name: "a Degraded cluster the change heals is not a failure", grace: clusterDegradedGrace,
+			statuses: []map[string]any{degradedBefore, degradedSeen, degradedSeen, converged},
 		},
 		{
-			name: "fails at once on Degraded once the change is seen",
-			statuses: []map[string]any{{
-				"phase": "Degraded", "observedGeneration": 2,
-				"conditions": []any{map[string]any{"type": "Ready", "status": "False", "message": "cluster deployment sync failed"}},
-			}},
+			name: "fails once Degraded at the new generation outlasts the grace", grace: 0,
+			statuses: []map[string]any{degradedBefore, degradedSeen},
 			wantErr: `(?s)cluster degraded.*` + wrappedText(`Cluster "wait" is Degraded, so the update did not complete.`) +
 				`.*` + wrappedText("Status message: cluster deployment sync failed"),
 		},
 		{
-			name:     "fails at once on a cluster being deleted",
+			name: "a timeout while still Degraded is an error", grace: time.Hour, updateTimeout: "1s",
+			statuses: []map[string]any{degradedSeen},
+			wantErr:  `(?s)cluster degraded.*` + wrappedText("The update timeout fired while it was Degraded."),
+		},
+		{
+			name: "fails at once on a cluster being deleted", grace: time.Hour,
 			statuses: []map[string]any{{"phase": "Terminating"}},
 			wantErr:  `(?s)cluster terminating.*` + wrappedText("It is being deleted, so it can no longer change."),
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			setClusterDegradedGrace(t, tt.grace)
 			mock := newMockKupeAPI()
 			defer mock.close()
+			updateTimeout := tt.updateTimeout
+			if updateTimeout == "" {
+				updateTimeout = "1m"
+			}
 			step := resource.TestStep{
 				PreConfig: func() {
 					mock.setState(func(m *mockKupeAPI) { m.clusterStatusesOnPatch = tt.statuses })
 				},
-				Config: testAccClusterWaitConfig(mock.url(), "4", `  timeouts = { update = "1m" }`),
+				Config: testAccClusterWaitConfig(mock.url(), "4", fmt.Sprintf("  timeouts = { update = %q }", updateTimeout)),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(addr, "resources.cpu", "4"),
 					resource.TestCheckResourceAttr(addr, "phase", "Running"),
@@ -123,6 +147,7 @@ func TestAccClusterResource_UpdateWait(t *testing.T) {
 // next apply replaces it.
 func TestAccClusterResource_DegradedCreate(t *testing.T) {
 	shrinkPollInterval(t)
+	setClusterDegradedGrace(t, 0)
 	mock := newMockKupeAPI()
 	defer mock.close()
 	mock.setState(func(m *mockKupeAPI) { m.clusterStatuses = []map[string]any{{"phase": "Degraded"}} })
