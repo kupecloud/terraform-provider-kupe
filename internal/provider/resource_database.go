@@ -124,6 +124,10 @@ var databaseKind = serviceKind[DatabaseResourceModel, client.Database]{
 			}
 			return client.ConditionMessage(db.Status.Conditions, client.ConditionReady)
 		},
+		notApplied: func(db *client.Database) bool {
+			return db != nil && db.Status != nil &&
+				reconcileFailing(db.Generation, db.Status.ObservedGeneration, db.Status.Conditions)
+		},
 	},
 	settingsChanged: func(prior *DatabaseResourceModel, current *client.Database) []string {
 		return settingsChanged(&prior.databaseModel, databaseModelFromAPI(current))

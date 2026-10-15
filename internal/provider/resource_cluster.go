@@ -135,6 +135,10 @@ var clusterKind = serviceKind[ClusterResourceModel, client.Cluster]{
 			}
 			return client.ConditionMessage(c.Status.Conditions, client.ConditionReady)
 		},
+		notApplied: func(c *client.Cluster) bool {
+			return c != nil && c.Status != nil &&
+				reconcileFailing(c.Generation, c.Status.ObservedGeneration, c.Status.Conditions)
+		},
 	},
 	settingsChanged: clusterSettingsChanged,
 	stillDeleting: func(m *ClusterResourceModel) string {

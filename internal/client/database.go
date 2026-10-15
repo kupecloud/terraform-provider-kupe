@@ -100,25 +100,37 @@ type Condition struct {
 // runs with its latest change in effect.
 const ConditionReady = "Ready"
 
+// ReasonReconcileFailed is the reason of a cluster's or database's Ready
+// condition while the platform fails to apply its spec and retries. The
+// platform does not mark a spec it failed to apply as observed.
+const ReasonReconcileFailed = "ReconcileFailed"
+
 // ConditionTrue reports whether the condition of type t is True.
 func ConditionTrue(conditions []Condition, t string) bool {
-	for _, c := range conditions {
-		if c.Type == t {
-			return c.Status == "True"
-		}
-	}
-	return false
+	return findCondition(conditions, t).Status == "True"
 }
 
 // ConditionMessage is the message of the condition of type t, "" when
 // there is none.
 func ConditionMessage(conditions []Condition, t string) string {
+	return findCondition(conditions, t).Message
+}
+
+// ConditionReason is the reason of the condition of type t, "" when there
+// is none.
+func ConditionReason(conditions []Condition, t string) string {
+	return findCondition(conditions, t).Reason
+}
+
+// findCondition is the condition of type t, the zero Condition when there
+// is none.
+func findCondition(conditions []Condition, t string) Condition {
 	for _, c := range conditions {
 		if c.Type == t {
-			return c.Message
+			return c
 		}
 	}
-	return ""
+	return Condition{}
 }
 
 // CreateDatabaseBindingRequest is the body for creating a binding. The

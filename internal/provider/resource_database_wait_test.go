@@ -92,6 +92,19 @@ func TestAccDatabaseResource_UpdateWait(t *testing.T) {
 			name: "a timeout while still rolling out only warns", updateTimeout: "1s",
 			statuses: []map[string]any{rolling}, wantPhase: "Running",
 		},
+		{
+			// The operator failed to apply generation 2 and retries: it
+			// leaves observedGeneration and the phase as they were.
+			name: "a timeout while the platform fails to apply the change is an error", grace: time.Hour,
+			updateTimeout: "1s",
+			statuses: []map[string]any{{"phase": "Running", "observedGeneration": 1, "conditions": []any{map[string]any{
+				"type": "Ready", "status": "False", "reason": "ReconcileFailed",
+				"message": "the database could not be reconciled; retrying",
+			}}}},
+			wantErr: `(?s)database update not applied.*` +
+				wrappedText(`The Kupe platform has not applied the change to database "orders-db"`) +
+				`.*` + wrappedText("Status message: the database could not be reconciled; retrying"),
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

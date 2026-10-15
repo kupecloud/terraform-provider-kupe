@@ -72,6 +72,12 @@ func TestAccClusterResource_UpdateWait(t *testing.T) {
 	syncFailed := []any{map[string]any{"type": "Ready", "status": "False", "message": "cluster deployment sync failed"}}
 	degradedBefore := map[string]any{"phase": "Degraded", "observedGeneration": 1, "conditions": syncFailed}
 	degradedSeen := map[string]any{"phase": "Degraded", "observedGeneration": 2, "conditions": syncFailed}
+	// The operator failed to apply generation 2 and retries: it leaves
+	// observedGeneration and the phase as they were.
+	notApplied := map[string]any{"phase": "Running", "observedGeneration": 1, "conditions": []any{map[string]any{
+		"type": "Ready", "status": "False", "reason": "ReconcileFailed",
+		"message": "the cluster could not be reconciled; retrying",
+	}}}
 	tests := []struct {
 		name          string
 		grace         time.Duration
@@ -103,6 +109,18 @@ func TestAccClusterResource_UpdateWait(t *testing.T) {
 			name: "a timeout while still Degraded is an error", grace: time.Hour, updateTimeout: "1s",
 			statuses: []map[string]any{degradedSeen},
 			wantErr:  `(?s)cluster degraded.*` + wrappedText("The update timeout fired while it was Degraded."),
+		},
+		{
+			name: "a timeout before the change is seen only warns", grace: time.Hour, updateTimeout: "1s",
+			statuses: []map[string]any{stale},
+		},
+		{
+			name: "a timeout while the platform fails to apply the change is an error", grace: time.Hour,
+			updateTimeout: "1s", statuses: []map[string]any{notApplied},
+			wantErr: `(?s)cluster update not applied.*` +
+				wrappedText(`The Kupe platform has not applied the change to cluster "wait"`) +
+				`.*` + wrappedText("Status message: the cluster could not be reconciled; retrying") +
+				`.*` + wrappedText("The change is recorded in Terraform state, so running `terraform apply` again plans no change"),
 		},
 		{
 			name: "fails at once on a cluster being deleted", grace: time.Hour,

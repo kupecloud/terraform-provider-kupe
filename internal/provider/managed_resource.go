@@ -92,6 +92,18 @@ type readiness[M, A any] struct {
 	// timedOutDetail, when set, is added to the warning given when the
 	// timeout fires first.
 	timedOutDetail func(m *M, obj *A) string
+	// notApplied, when set, reports that the platform has not applied obj's
+	// latest change and is failing to. An update timeout in that state is
+	// an error, not a warning: the change is in state but not in effect.
+	notApplied func(obj *A) bool
+}
+
+// reconcileFailing reports that the platform has not applied generation
+// (observedGeneration is behind it) and its Ready condition says it failed
+// to and is retrying.
+func reconcileFailing(generation, observedGeneration int64, conditions []client.Condition) bool {
+	return observedGeneration < generation &&
+		client.ConditionReason(conditions, client.ConditionReady) == client.ReasonReconcileFailed
 }
 
 func (r *managedResource[M, A]) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
@@ -239,7 +251,10 @@ var errReadyFailed = errors.New("failed while waiting")
 // to state so an interrupted apply keeps the latest values. op ("create" or
 // "update") names the operation in diagnostics; obj is the last observation
 // before the wait. A failed resource ends the wait with an error once its
-// grace has passed; a timeout is a warning, since the platform carries on.
+// grace has passed. A timeout is a warning while the resource is still
+// progressing, since the platform carries on; it is an error while the
+// resource is failing, or on update while the platform fails to apply the
+// change.
 func (r *managedResource[M, A]) waitForReady(
 	ctx context.Context, timeout time.Duration, op string, obj *A, m *M, state *tfsdk.State, diags *diag.Diagnostics,
 ) {
@@ -286,6 +301,10 @@ func (r *managedResource[M, A]) waitForReady(
 		// failed state, which is not progress.
 		diags.AddError(r.kind.noun+" "+strings.ToLower(phase), r.failedDetail(op, m, last)+
 			fmt.Sprintf("\n\nThe %s timeout fired while it was %s.", op, phase))
+	case op == "update" && ready.notApplied != nil && ready.notApplied(last):
+		// Not progress either: the platform keeps failing to apply the
+		// change, and the next plan would show nothing to do.
+		diags.AddError(r.kind.noun+" update not applied", r.notAppliedDetail(m, last))
 	default:
 		detail := fmt.Sprintf("%s %q was at phase=%q when the %s timeout fired. The Kupe platform continues in "+
 			"the background; re-run `terraform apply` later and it will be a no-op once the %s is %s. If it stays "+
@@ -329,6 +348,23 @@ func (r *managedResource[M, A]) failedDetail(op string, m *M, obj *A) string {
 			"plans to replace it. To keep it instead, run `terraform untaint` on it.", r.kind.noun)
 	}
 	return detail
+}
+
+// notAppliedDetail explains an update the platform was still failing to
+// apply when the timeout fired.
+func (r *managedResource[M, A]) notAppliedDetail(m *M, obj *A) string {
+	ready := r.kind.ready
+	detail := fmt.Sprintf("The Kupe platform has not applied the change to %s %q: it failed to and was still "+
+		"retrying when the update timeout fired.", r.kind.noun, r.kind.name(m))
+	if ready.message != nil {
+		if msg := ready.message(obj); msg != "" {
+			detail += "\n\nStatus message: " + msg
+		}
+	}
+	return detail + "\n\nThe change is recorded in Terraform state, so running `terraform apply` again plans " +
+		"no change and does not send it again; the platform keeps retrying it. If it is not applied, check the " +
+		r.kind.noun + " in the Kupe Console or contact Kupe Cloud support. To back the change out, set the " +
+		"previous value in the configuration and apply."
 }
 
 func (r *managedResource[M, A]) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {

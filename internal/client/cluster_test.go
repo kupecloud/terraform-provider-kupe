@@ -223,4 +223,10 @@ func TestGetCluster_GenerationAndConditions(t *testing.T) {
 	if got := ConditionMessage(cluster.Status.Conditions, ConditionReady); got != "the cluster could not be reconciled; retrying" {
 		t.Errorf("Ready message = %q", got)
 	}
+	if got := ConditionReason(cluster.Status.Conditions, ConditionReady); got != ReasonReconcileFailed {
+		t.Errorf("Ready reason = %q, want %q", got, ReasonReconcileFailed)
+	}
+	if got := ConditionReason(cluster.Status.Conditions, "Missing"); got != "" {
+		t.Errorf("reason of a missing condition = %q, want empty", got)
+	}
 }
