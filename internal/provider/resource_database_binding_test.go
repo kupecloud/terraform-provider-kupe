@@ -165,6 +165,30 @@ resource "kupe_database_binding" "test" {
 	})
 }
 
+// TestAccDatabaseBindingResource_DatabaseRefAllowsOlderLongNames: a binding
+// may name a database created before the platform's 44-character limit, so
+// the reference is held only to the Kubernetes name limit.
+func TestAccDatabaseBindingResource_DatabaseRefAllowsOlderLongNames(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		Steps: []resource.TestStep{{
+			Config: testAccProviderConfig(mock.url()) + fmt.Sprintf(`
+resource "kupe_database_binding" "test" {
+  name      = "legacy-db-prod-api-app"
+  database  = %q
+  cluster   = "prod"
+  namespace = "api"
+  role      = "app"
+}
+`, "d"+strings.Repeat("b", 51)),
+			PlanOnly:           true,
+			ExpectNonEmptyPlan: true,
+		}},
+	})
+}
+
 func TestParseDatabaseBindingImportID(t *testing.T) {
 	tests := []struct {
 		id                     string

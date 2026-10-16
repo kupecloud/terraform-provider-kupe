@@ -176,7 +176,10 @@ func (r *DatabaseResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
 				Description: "Database name (immutable after creation). A lowercase DNS label starting with a letter, " +
-					"without `--`. It is also the Service name applications connect to.",
+					"without `--`, at most 44 characters. It is also the Service name applications connect to. The Kupe " +
+					"platform also limits it to 56 characters minus the length of the tenant name, so tenant names over " +
+					"12 characters allow fewer than 44; the provider cannot check that at plan time, so the platform " +
+					"refuses a longer name when the database is created.",
 				Required:   true,
 				Validators: databaseNameValidators(),
 				PlanModifiers: []planmodifier.String{

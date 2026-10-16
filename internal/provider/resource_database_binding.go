@@ -162,7 +162,7 @@ func (r *DatabaseBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 			"database": schema.StringAttribute{
 				Description:   "Name of the database to bind.",
 				Required:      true,
-				Validators:    databaseNameValidators(),
+				Validators:    databaseRefValidators(),
 				PlanModifiers: replace,
 			},
 			"cluster": schema.StringAttribute{

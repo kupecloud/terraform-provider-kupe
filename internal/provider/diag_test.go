@@ -198,6 +198,17 @@ func TestAPIErrorDetail(t *testing.T) {
 			wantSubstr: []string{"Error code: plan_limit_reached", "Delete one you no longer need or upgrade your plan"},
 		},
 		{
+			name: "400 DATABASE_NAME_TOO_LONG says to choose a shorter name",
+			err: &client.APIError{
+				StatusCode: http.StatusBadRequest, Code: client.CodeDatabaseNameTooLong, Field: "metadata.name",
+				Message: `database name "` + strings.Repeat("d", 45) + `" too long: at most 44 characters for this tenant`,
+			},
+			wantSubstr: []string{
+				"Error code: DATABASE_NAME_TOO_LONG", "Field: metadata.name",
+				"too long for your tenant, so nothing was created", "Choose a shorter `name`",
+			},
+		},
+		{
 			name: "503 while the tenant's limit is being set up gets the retry hint",
 			err: &client.APIError{
 				StatusCode: http.StatusServiceUnavailable,

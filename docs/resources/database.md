@@ -72,7 +72,7 @@ Grant access with [`kupe_database_binding`](database_binding.md). Each binding p
 
 ### Required
 
-- `name` (String) Database name (immutable after creation). A lowercase DNS label starting with a letter, without `--`. It is also the Service name applications connect to.
+- `name` (String) Database name (immutable after creation). A lowercase DNS label starting with a letter, without `--`, at most 44 characters. It is also the Service name applications connect to. The Kupe platform also limits it to 56 characters minus the length of the tenant name, so tenant names over 12 characters allow fewer than 44; the provider cannot check that at plan time, so the platform refuses a longer name when the database is created.
 - `resources` (Attributes) Per-instance resources in Kubernetes quantity format. Billing uses these requested values. A high-availability database runs two instances of this size. All three are required, unlike the optional limits of `kupe_cluster`. (see [below for nested schema](#nestedatt--resources))
 
 ### Optional

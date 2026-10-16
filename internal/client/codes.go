@@ -40,6 +40,10 @@ const (
 	// CodePlanLimitReached comes with a 400 when the tenant's plan has no
 	// room for another cluster or database.
 	CodePlanLimitReached = "plan_limit_reached"
+	// CodeDatabaseNameTooLong comes with a 400 when a new database's name is
+	// longer than the tenant may use: 44 characters, or 56 minus the length
+	// of the tenant name when that is less. The platform's own code.
+	CodeDatabaseNameTooLong = "DATABASE_NAME_TOO_LONG"
 )
 
 // ErrorCode is the code of the API error err carries, "" when it carries

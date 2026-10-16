@@ -19,10 +19,26 @@ var (
 	namespacePattern   = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 )
 
-// databaseNameValidators check a database name: a DNS-1035 label (starts
-// with a letter) without "--".
+// maxDatabaseNameLength is the longest name the platform gives a new
+// database whatever the tenant: CloudNativePG derives object names from it,
+// the longest {name}-{serial}-major-upgrade, which must fit in 63 characters.
+const maxDatabaseNameLength = 44
+
+// databaseNameValidators check a new database's name the way the platform's
+// admission does: a DNS-1035 label (starts with a letter) without "--", at
+// most 44 characters. The platform lowers the limit to 56 minus the length
+// of the tenant name for tenant names over 12 characters; that needs the
+// tenant's name, which the provider does not know at plan time, so kupe-api
+// enforces it (DATABASE_NAME_TOO_LONG).
 func databaseNameValidators() []validator.String {
-	return serviceNameValidators()
+	return serviceNameValidators(maxDatabaseNameLength)
+}
+
+// databaseRefValidators check a reference to a database by name. A database
+// created before the platform's 44-character limit may be longer, so only
+// the Kubernetes name limit applies.
+func databaseRefValidators() []validator.String {
+	return serviceNameValidators(maxNameLength)
 }
 
 // clusterNameValidators check a new cluster's name the way the platform's
@@ -31,13 +47,14 @@ func databaseNameValidators() []validator.String {
 // derives from them must fit a DNS label); that needs the tenant's name, so
 // it is left to the platform.
 func clusterNameValidators() []validator.String {
-	return serviceNameValidators()
+	return serviceNameValidators(maxNameLength)
 }
 
-// serviceNameValidators check the name of a managed service resource.
-func serviceNameValidators() []validator.String {
+// serviceNameValidators check the name of a managed service resource, at
+// most maxLength characters.
+func serviceNameValidators(maxLength int) []validator.String {
 	return []validator.String{
-		stringvalidator.LengthAtMost(maxNameLength),
+		stringvalidator.LengthAtMost(maxLength),
 		stringvalidator.RegexMatches(serviceNamePattern,
 			"must be lowercase letters, digits and '-', start with a letter, end with a letter or digit, and not contain '--'"),
 	}

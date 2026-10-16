@@ -453,6 +453,7 @@ func TestAccDatabaseResource_InvalidConfig(t *testing.T) {
 		{name: "name starting with a digit", db: testDatabase{name: "1orders"}, wantErr: badName},
 		{name: "name with a double hyphen", db: testDatabase{name: "orders--db"}, wantErr: badName},
 		{name: "name ending with a hyphen", db: testDatabase{name: "orders-"}, wantErr: badName},
+		{name: "name over the platform's 44 characters", db: testDatabase{name: "d" + strings.Repeat("b", 44)}, wantErr: "string length must be at most 44"},
 		{name: "cpu with a unit", db: testDatabase{cpu: "1Gi"}, wantErr: badCPU},
 		{name: "memory with milli and a unit", db: testDatabase{memory: "1mGi"}, wantErr: badSize},
 		{name: "memory without a unit", db: testDatabase{memory: "1024"}, wantErr: badSize},
@@ -472,6 +473,22 @@ func TestAccDatabaseResource_InvalidConfig(t *testing.T) {
 			})
 		})
 	}
+}
+
+// TestAccDatabaseResource_NameAtThePlatformLimit: a 44-character name, the
+// most any tenant may use, passes validation and is created.
+func TestAccDatabaseResource_NameAtThePlatformLimit(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+	name := "d" + strings.Repeat("b", 43)
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		CheckDestroy:             testAccCheckNoDatabases(mock),
+		Steps: []resource.TestStep{{
+			Config: testAccDatabaseConfig(mock.url(), testDatabase{name: name, protection: boolPtr(false)}),
+			Check:  resource.TestCheckResourceAttr("kupe_database.test", "name", name),
+		}},
+	})
 }
 
 func TestAccDatabaseResource_DeleteRetriesConflict(t *testing.T) {

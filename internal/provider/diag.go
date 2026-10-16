@@ -231,6 +231,10 @@ func apiErrorDetail(err error) string {
 		case client.CodePlanLimitReached:
 			return base + "\n\nYour plan has no room for another one, so nothing was created. Delete one you no " +
 				"longer need or upgrade your plan, then run `terraform apply` again."
+		case client.CodeDatabaseNameTooLong:
+			return base + "\n\nThe database name is too long for your tenant, so nothing was created. Database " +
+				"names may be at most 44 characters, and fewer when the tenant name is over 12 characters. Choose a " +
+				"shorter `name`, then run `terraform apply` again."
 		}
 		// 400 covers two server-side outcomes that surface here:
 		// (a) the request body failed schema decoding (typo in
