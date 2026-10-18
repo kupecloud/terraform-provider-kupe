@@ -4,6 +4,7 @@
 #   - 201 from POST /databases; phase reaches Running
 #   - update path: changing resources or high_availability is a PATCH, not a replace
 #   - binding: phase Ready, Service and Secret appear in the bound namespace
+#   - readonly binding: a second Secret, smoke-db-readonly, in the same namespace
 #   - destroy: the binding and the database are removed
 #
 # deletion_protection is off so `tofu destroy` cleans up.
@@ -24,6 +25,13 @@ resource "kupe_database_binding" "smoke" {
   cluster   = kupe_cluster.smoke.name
   namespace = "default"
   role      = "readwrite"
+}
+
+resource "kupe_database_binding" "smoke_readonly" {
+  database  = kupe_database.smoke.name
+  cluster   = kupe_cluster.smoke.name
+  namespace = "default"
+  role      = "readonly"
 }
 
 data "kupe_database" "smoke_read" {
