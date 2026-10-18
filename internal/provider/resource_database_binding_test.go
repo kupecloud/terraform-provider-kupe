@@ -106,13 +106,64 @@ func TestAccDatabaseBindingResource(t *testing.T) {
 	})
 }
 
+// TestAccDatabaseBindingResource_ReadOnly: a readonly binding takes its
+// default name and Secret name from the role, and changing the role
+// replaces the binding: the platform cannot change a binding's role.
+func TestAccDatabaseBindingResource_ReadOnly(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+	const addr = "kupe_database_binding.test"
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		CheckDestroy:             testAccCheckNoDatabases(mock),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccDatabaseBindingConfig(mock.url(), "prod", "worker", "readonly", ""),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(addr, "name", "orders-db-prod-worker-readonly"),
+					resource.TestCheckResourceAttr(addr, "role", "readonly"),
+					resource.TestCheckResourceAttr(addr, "secret_name", "orders-db-readonly"),
+					resource.TestCheckResourceAttr(addr, "phase", "Ready"),
+				),
+			},
+			{
+				ResourceName:                         addr,
+				ImportState:                          true,
+				ImportStateVerify:                    true,
+				ImportStateId:                        "orders-db/orders-db-prod-worker-readonly",
+				ImportStateVerifyIdentifierAttribute: "name",
+			},
+			{
+				Config: testAccDatabaseBindingConfig(mock.url(), "prod", "worker", "readwrite", ""),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(addr, plancheck.ResourceActionDestroyBeforeCreate)},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(addr, "name", "orders-db-prod-worker-readwrite"),
+					resource.TestCheckResourceAttr(addr, "role", "readwrite"),
+					resource.TestCheckResourceAttr(addr, "secret_name", "orders-db-readwrite"),
+				),
+			},
+			{
+				Config: testAccDatabaseBindingConfig(mock.url(), "prod", "worker", "readonly", ""),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(addr, plancheck.ResourceActionDestroyBeforeCreate)},
+				},
+				Check: resource.TestCheckResourceAttr(addr, "role", "readonly"),
+			},
+		},
+	})
+}
+
 func TestAccDatabaseBindingResource_PlanTimeErrors(t *testing.T) {
 	tests := []struct {
 		name      string
 		cluster   string
 		namespace string
 		role      string
-		wantErr   string
+		// wantErr is "" for a row that plans without an error.
+		wantErr string
 	}{
 		// app gets the same standard diagnostic as any other value that is
 		// not a role.
@@ -121,6 +172,16 @@ func TestAccDatabaseBindingResource_PlanTimeErrors(t *testing.T) {
 		{
 			name: "default name longer than 63 characters", cluster: strings.Repeat("c", 30),
 			namespace: strings.Repeat("n", 30), role: "readwrite", wantErr: `Default binding name too long`,
+		},
+		// readwrite is four characters longer than owner: a default name of
+		// 61 characters with owner is 65 with readwrite.
+		{
+			name: "default name fits with owner", cluster: strings.Repeat("c", 30),
+			namespace: strings.Repeat("n", 14), role: "owner",
+		},
+		{
+			name: "the same default name too long with readwrite", cluster: strings.Repeat("c", 30),
+			namespace: strings.Repeat("n", 14), role: "readwrite", wantErr: `Default binding name too long`,
 		},
 		{name: "kube-* namespace", cluster: "prod", namespace: "kube-system", role: "readwrite", wantErr: `Reserved namespace`},
 		{name: "argocd namespace", cluster: "prod", namespace: "argocd", role: "readwrite", wantErr: `Reserved namespace`},
@@ -131,15 +192,17 @@ func TestAccDatabaseBindingResource_PlanTimeErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := newMockKupeAPI()
 			defer mock.close()
+			step := resource.TestStep{Config: testAccDatabaseBindingConfig(mock.url(), tt.cluster, tt.namespace, tt.role, "")}
+			if tt.wantErr == "" {
+				// The row plans: no error.
+				step.PlanOnly, step.ExpectNonEmptyPlan = true, true
+			} else {
+				step.ExpectError = regexp.MustCompile(tt.wantErr)
+			}
 			resource.UnitTest(t, resource.TestCase{
 				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
 				CheckDestroy:             testAccCheckNoDatabases(mock),
-				Steps: []resource.TestStep{
-					{
-						Config:      testAccDatabaseBindingConfig(mock.url(), tt.cluster, tt.namespace, tt.role, ""),
-						ExpectError: regexp.MustCompile(tt.wantErr),
-					},
-				},
+				Steps:                    []resource.TestStep{step},
 			})
 		})
 	}
