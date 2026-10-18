@@ -281,7 +281,7 @@ func (r *DatabaseBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 						},
 						"host": schema.StringAttribute{
 							Description: "In-cluster DNS name applications in this namespace connect to, e.g. " +
-								"`orders-db.api.svc.cluster.local`. Empty until the Service is delivered.",
+								"`orders-db.orders-api.svc.cluster.local`. Empty until the Service is delivered.",
 							Computed: true,
 						},
 						"phase": schema.StringAttribute{

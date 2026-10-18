@@ -1,5 +1,5 @@
-resource "kupe_cluster" "production" {
-  name    = "production"
+resource "kupe_cluster" "prod" {
+  name    = "prod"
   version = "1.32"
 
   resources = {

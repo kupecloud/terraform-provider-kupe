@@ -66,8 +66,8 @@ supported for local development endpoints such as
 ## Example resource
 
 ```hcl
-resource "kupe_cluster" "production" {
-  name         = "production"
+resource "kupe_cluster" "prod" {
+  name         = "prod"
   type         = "shared"
   version      = "1.31"
 

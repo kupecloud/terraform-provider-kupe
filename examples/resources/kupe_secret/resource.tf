@@ -4,7 +4,7 @@ resource "kupe_secret" "app_config" {
 
   sync = [
     {
-      cluster   = "production"
+      cluster   = "prod"
       namespace = "hello"
     },
     {

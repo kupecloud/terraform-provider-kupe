@@ -1,3 +1,3 @@
-data "kupe_cluster" "production" {
-  name = "production"
+data "kupe_cluster" "prod" {
+  name = "prod"
 }

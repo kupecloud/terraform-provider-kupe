@@ -9,7 +9,7 @@
 resource "kubernetes_deployment_v1" "api" {
   metadata {
     name      = "api"
-    namespace = "api"
+    namespace = "orders-api"
   }
 
   spec {
@@ -56,7 +56,7 @@ resource "kubernetes_deployment_v1" "api" {
 data "kubernetes_secret_v1" "orders_db" {
   metadata {
     name      = kupe_database_binding.api.secret_name
-    namespace = "api"
+    namespace = "orders-api"
   }
 }
 

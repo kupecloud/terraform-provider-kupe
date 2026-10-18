@@ -13,8 +13,8 @@ Reads an existing Kupe cluster by name.
 ## Example Usage
 
 ```terraform
-data "kupe_cluster" "production" {
-  name = "production"
+data "kupe_cluster" "prod" {
+  name = "prod"
 }
 ```
 

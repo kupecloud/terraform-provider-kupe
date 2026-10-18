@@ -1,1 +1,1 @@
-terraform import kupe_cluster.production production
+terraform import kupe_cluster.prod prod

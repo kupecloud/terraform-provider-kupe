@@ -21,8 +21,8 @@ data "kupe_plan" "pro" {
 }
 
 # Create a production cluster
-resource "kupe_cluster" "production" {
-  name    = "production"
+resource "kupe_cluster" "prod" {
+  name    = "prod"
   version = "1.31"
 
   resources = {
@@ -44,18 +44,18 @@ resource "kupe_cluster" "staging" {
   }
 }
 
-# Sync a database password to production
+# Sync a database password to the prod cluster
 resource "kupe_secret" "db_password" {
   name        = "db-password"
   secret_path = "production/db-password"
 
   sync = [
     {
-      cluster   = kupe_cluster.production.name
+      cluster   = kupe_cluster.prod.name
       namespace = "default"
     },
     {
-      cluster     = kupe_cluster.production.name
+      cluster     = kupe_cluster.prod.name
       namespace   = "backend"
       secret_name = "database-credentials"
     },
@@ -80,6 +80,6 @@ output "cicd_api_key" {
   sensitive = true
 }
 
-output "production_endpoint" {
-  value = kupe_cluster.production.endpoint
+output "prod_endpoint" {
+  value = kupe_cluster.prod.endpoint
 }

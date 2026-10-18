@@ -19,26 +19,25 @@ Binds a Kupe database into namespaces of one cluster for one role. The Kupe plat
 # role. One binding delivers the Service and the Secret into both namespaces.
 resource "kupe_database_binding" "api" {
   database   = kupe_database.orders.name
-  cluster    = kupe_cluster.production.name
-  namespaces = ["api", "jobs"]
+  cluster    = kupe_cluster.prod.name
+  namespaces = ["orders-api", "orders-worker"]
   role       = "readwrite"
 }
 
 # Schema migrations run with the owner role in a namespace of their own, so no
-# pod in api can mount the owner credentials.
+# pod in orders-api can mount the owner credentials.
 resource "kupe_database_binding" "migrations" {
-  database    = kupe_database.orders.name
-  cluster     = kupe_cluster.production.name
-  namespaces  = ["api-migrations"]
-  role        = "owner"
-  secret_name = "orders-db-migrations"
+  database   = kupe_database.orders.name
+  cluster    = kupe_cluster.prod.name
+  namespaces = ["orders-migrate"]
+  role       = "owner"
 }
 
 # A reporting job reads data and cannot change it.
 resource "kupe_database_binding" "reports" {
   database   = kupe_database.orders.name
-  cluster    = kupe_cluster.production.name
-  namespaces = ["reports"]
+  cluster    = kupe_cluster.prod.name
+  namespaces = ["orders-reports"]
   role       = "readonly"
 }
 
@@ -54,7 +53,7 @@ Inside the cluster, each bound namespace sees a Service named after the database
 
 Mount the Secret as a volume at `/bindings/<secret_name>` and set `SERVICE_BINDING_ROOT=/bindings`. `uri` is a `postgresql://` connection string with `sslmode=verify-full` and `sslrootcert=/bindings/<secret_name>/ca.crt`, so it only connects from that mount path. Mounted elsewhere, build the connection from `host`, `port`, `database`, `username`, `password`, `sslmode` and `ca.crt` instead.
 
-The example below is illustrative. It uses the [hashicorp/kubernetes](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs) provider, configured against the bound cluster, to mount the Secret into a Deployment in `api` and to read the Secret from that namespace.
+The example below is illustrative. It uses the [hashicorp/kubernetes](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs) provider, configured against the bound cluster, to mount the Secret into a Deployment in `orders-api` and to read the Secret from that namespace.
 
 ```terraform
 # Illustrative: consume the binding from inside the cluster with the
@@ -68,7 +67,7 @@ The example below is illustrative. It uses the [hashicorp/kubernetes](https://re
 resource "kubernetes_deployment_v1" "api" {
   metadata {
     name      = "api"
-    namespace = "api"
+    namespace = "orders-api"
   }
 
   spec {
@@ -115,7 +114,7 @@ resource "kubernetes_deployment_v1" "api" {
 data "kubernetes_secret_v1" "orders_db" {
   metadata {
     name      = kupe_database_binding.api.secret_name
-    namespace = "api"
+    namespace = "orders-api"
   }
 }
 
@@ -177,7 +176,7 @@ Optional:
 
 Read-Only:
 
-- `host` (String) In-cluster DNS name applications in this namespace connect to, e.g. `orders-db.api.svc.cluster.local`. Empty until the Service is delivered.
+- `host` (String) In-cluster DNS name applications in this namespace connect to, e.g. `orders-db.orders-api.svc.cluster.local`. Empty until the Service is delivered.
 - `message` (String) Why the namespace is not Ready; empty when it is.
 - `name` (String) Namespace inside the cluster.
 - `phase` (String) Pending, Ready, or Failed (the namespace already has a Service or Secret of the same name that the platform did not create).
@@ -188,5 +187,5 @@ Import is supported using the following syntax:
 
 ```shell
 # <database>/<binding>
-terraform import kupe_database_binding.api orders-db/orders-db-production-readwrite
+terraform import kupe_database_binding.api orders-db/orders-db-prod-readwrite
 ```

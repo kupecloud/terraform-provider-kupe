@@ -26,8 +26,8 @@ The same contract applies whether you delete via Terraform, the `kupe` CLI, or t
 ## Example Usage
 
 ```terraform
-resource "kupe_cluster" "production" {
-  name    = "production"
+resource "kupe_cluster" "prod" {
+  name    = "prod"
   version = "1.32"
 
   resources = {
@@ -128,5 +128,5 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-terraform import kupe_cluster.production production
+terraform import kupe_cluster.prod prod
 ```
