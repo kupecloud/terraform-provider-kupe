@@ -2,25 +2,26 @@
 page_title: "kupe_database_binding Resource - kupe"
 subcategory: ""
 description: |-
-  Binds a Kupe database into one namespace of one cluster for one role. The Kupe platform delivers a Service named after the database and a credentials Secret into that namespace and opens the network path; other namespaces see neither. Create waits for phase=Ready, and fails at once if the binding is Failed: the namespace already has a Service named after the database, or a Secret named secret_name, that the platform did not create. The failed binding stays in state, marked tainted. Delete waits until the binding is gone. Set timeouts with the timeouts attribute, for example timeouts = { create = "10m" } (defaults: create/delete 5m).
-  Bindings cannot be changed: changing any argument replaces the binding. Removing a binding removes the Service, the Secret and the network path, but not knowledge of the password; rotate the role's credentials if that matters.
+  Binds a Kupe database into namespaces of one cluster for one role. The Kupe platform delivers a Service named after the database and a credentials Secret into each listed namespace and opens the network path; other namespaces see neither. A binding lists 1 to 10 namespaces, and the bindings of one database list at most 20 between them. Create and Update wait until every listed namespace is Ready, and fail at once if one is Failed: it already has a Service named after the database, or a Secret named secret_name, that the platform did not create. A binding that fails on create stays in state, marked tainted. Delete waits until the binding is gone. Set timeouts with the timeouts attribute, for example timeouts = { create = "10m" } (defaults: create/update/delete 5m).
+  namespaces changes in place: a namespace added gets the Service and the Secret, and the namespaces kept work throughout. Changing any other argument replaces the binding. Removing a namespace, or the binding, removes the Secret there, and the Service and the network path too unless another binding of the same database still lists that namespace. The password does not change: rotate the role's credentials if the namespace should lose knowledge of it.
 ---
 
 # kupe_database_binding (Resource)
 
-Binds a Kupe database into one namespace of one cluster for one role. The Kupe platform delivers a Service named after the database and a credentials Secret into that namespace and opens the network path; other namespaces see neither. Create waits for phase=Ready, and fails at once if the binding is Failed: the namespace already has a Service named after the database, or a Secret named `secret_name`, that the platform did not create. The failed binding stays in state, marked tainted. Delete waits until the binding is gone. Set timeouts with the `timeouts` attribute, for example `timeouts = { create = "10m" }` (defaults: create/delete 5m).
+Binds a Kupe database into namespaces of one cluster for one role. The Kupe platform delivers a Service named after the database and a credentials Secret into each listed namespace and opens the network path; other namespaces see neither. A binding lists 1 to 10 namespaces, and the bindings of one database list at most 20 between them. Create and Update wait until every listed namespace is Ready, and fail at once if one is Failed: it already has a Service named after the database, or a Secret named `secret_name`, that the platform did not create. A binding that fails on create stays in state, marked tainted. Delete waits until the binding is gone. Set timeouts with the `timeouts` attribute, for example `timeouts = { create = "10m" }` (defaults: create/update/delete 5m).
 
-Bindings cannot be changed: changing any argument replaces the binding. Removing a binding removes the Service, the Secret and the network path, but not knowledge of the password; rotate the role's credentials if that matters.
+`namespaces` changes in place: a namespace added gets the Service and the Secret, and the namespaces kept work throughout. Changing any other argument replaces the binding. Removing a namespace, or the binding, removes the Secret there, and the Service and the network path too unless another binding of the same database still lists that namespace. The password does not change: rotate the role's credentials if the namespace should lose knowledge of it.
 
 ## Example Usage
 
 ```terraform
-# The API reads and writes data with the readwrite role.
+# The API and its background jobs read and write data with the readwrite
+# role. One binding delivers the Service and the Secret into both namespaces.
 resource "kupe_database_binding" "api" {
-  database  = kupe_database.orders.name
-  cluster   = kupe_cluster.production.name
-  namespace = "api"
-  role      = "readwrite"
+  database   = kupe_database.orders.name
+  cluster    = kupe_cluster.production.name
+  namespaces = ["api", "jobs"]
+  role       = "readwrite"
 }
 
 # Schema migrations run with the owner role in a namespace of their own, so no
@@ -28,32 +29,32 @@ resource "kupe_database_binding" "api" {
 resource "kupe_database_binding" "migrations" {
   database    = kupe_database.orders.name
   cluster     = kupe_cluster.production.name
-  namespace   = "api-migrations"
+  namespaces  = ["api-migrations"]
   role        = "owner"
   secret_name = "orders-db-migrations"
 }
 
 # A reporting job reads data and cannot change it.
 resource "kupe_database_binding" "reports" {
-  database  = kupe_database.orders.name
-  cluster   = kupe_cluster.production.name
-  namespace = "reports"
-  role      = "readonly"
+  database   = kupe_database.orders.name
+  cluster    = kupe_cluster.production.name
+  namespaces = ["reports"]
+  role       = "readonly"
 }
 
-output "orders_db_host" {
-  description = "In-cluster DNS name the api namespace connects to."
-  value       = kupe_database_binding.api.host
+output "orders_db_hosts" {
+  description = "In-cluster DNS name each namespace of the api binding connects to."
+  value       = { for ns in kupe_database_binding.api.namespace_status : ns.name => ns.host }
 }
 ```
 
 ### Using the credentials Secret
 
-Inside the cluster, the bound namespace sees a Service named after the database and the Secret named by `secret_name`, with the keys `type`, `provider`, `host`, `port`, `database`, `username`, `password`, `sslmode`, `ca.crt` and `uri`. `type` is `postgresql` and `provider` is `kupe`.
+Inside the cluster, each bound namespace sees a Service named after the database and the Secret named by `secret_name`, with the keys `type`, `provider`, `host`, `port`, `database`, `username`, `password`, `sslmode`, `ca.crt` and `uri`. `type` is `postgresql` and `provider` is `kupe`.
 
 Mount the Secret as a volume at `/bindings/<secret_name>` and set `SERVICE_BINDING_ROOT=/bindings`. `uri` is a `postgresql://` connection string with `sslmode=verify-full` and `sslrootcert=/bindings/<secret_name>/ca.crt`, so it only connects from that mount path. Mounted elsewhere, build the connection from `host`, `port`, `database`, `username`, `password`, `sslmode` and `ca.crt` instead.
 
-The example below is illustrative. It uses the [hashicorp/kubernetes](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs) provider, configured against the bound cluster, to mount the Secret into a Deployment and to read the Secret from the bound namespace.
+The example below is illustrative. It uses the [hashicorp/kubernetes](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs) provider, configured against the bound cluster, to mount the Secret into a Deployment in `api` and to read the Secret from that namespace.
 
 ```terraform
 # Illustrative: consume the binding from inside the cluster with the
@@ -67,7 +68,7 @@ The example below is illustrative. It uses the [hashicorp/kubernetes](https://re
 resource "kubernetes_deployment_v1" "api" {
   metadata {
     name      = "api"
-    namespace = kupe_database_binding.api.namespace
+    namespace = "api"
   }
 
   spec {
@@ -109,12 +110,12 @@ resource "kubernetes_deployment_v1" "api" {
   }
 }
 
-# When another Terraform resource needs a value, read the Secret in the bound
+# When another Terraform resource needs a value, read the Secret in a bound
 # namespace. Its values are then stored in Terraform state.
 data "kubernetes_secret_v1" "orders_db" {
   metadata {
     name      = kupe_database_binding.api.secret_name
-    namespace = kupe_database_binding.api.namespace
+    namespace = "api"
   }
 }
 
@@ -124,11 +125,20 @@ output "orders_db_port" {
 }
 ```
 
+### Changing the namespaces
+
+`namespaces` changes in place. Terraform sends the complete new list: a namespace added gets the Service and the Secret, a namespace taken out loses its Secret (and the Service and network path, unless another binding of the database lists it), and the namespaces in both lists keep working throughout. Update waits until the platform has delivered the new list, which includes withdrawing from the namespaces taken out.
+
+A binding lists at most 10 namespaces, which the plan checks. The bindings of one database list at most 20 namespaces between them, and a namespace can be in only one binding per cluster and role of a database. The Kupe API refuses a change that breaks either rule when it is applied; a change that only takes namespaces out never breaks them.
+
 ### When a binding waits or fails
 
-A binding is `Pending` while its database or cluster does not exist yet, is not running yet or is being deleted. Create keeps waiting until its timeout, then warns. The Kupe platform keeps trying, and the binding becomes `Ready` once both are running.
+A binding is `Pending` while its database or cluster does not exist yet, is not running yet or is being deleted, and while a namespace it lists is not delivered yet. Create and Update keep waiting until their timeout, then warn. The Kupe platform keeps trying, and the binding becomes `Ready` once every listed namespace is.
 
-A binding is `Failed` when the namespace already has a Service named after the database, or a Secret named `secret_name`, that the Kupe platform did not create. The binding does not replace that object. Create stops at once with an error that names both. Terraform keeps the failed binding in state, marked tainted: rename or remove the object, or set a different `secret_name`, then run `terraform apply` to replace the binding. `terraform destroy` removes it.
+A namespace is `Failed` when it already has a Service named after the database, or a Secret named `secret_name`, that the Kupe platform did not create. The binding does not replace that object, and the other namespaces keep working. Create and Update stop at once with an error that names the namespace and both objects, and `namespace_status` carries the platform's message for it.
+
+- After a failed Create, Terraform keeps the binding in state, marked tainted: rename or remove the object, or set a different `secret_name`, then run `terraform apply` to replace the binding. `terraform destroy` removes it.
+- After a failed Update, the new list is in state. Rename or remove the object and the platform delivers into the namespace on its next try, or take the namespace out of `namespaces` and apply.
 
 <!-- schema generated by tfplugindocs -->
 ## Schema
@@ -137,19 +147,20 @@ A binding is `Failed` when the namespace already has a Service named after the d
 
 - `cluster` (String) Cluster to bind into. It may not exist yet: the binding becomes Ready once it does, so Create waits up to its timeout and then warns.
 - `database` (String) Name of the database to bind.
-- `namespace` (String) Namespace inside the cluster that receives the Service and credentials Secret. Not `kube-*` or `argocd`.
+- `namespaces` (Set of String) Namespaces inside the cluster that receive the Service and credentials Secret: 1 to 10, none `kube-*` or `argocd`. Changes in place.
 - `role` (String) Role granted: `owner` (can change the schema), `readwrite` (reads and writes data) or `readonly` (reads data).
 
 ### Optional
 
-- `name` (String) Binding name. Defaults to `{database}-{cluster}-{namespace}-{role}`; set it explicitly if that is longer than 63 characters.
-- `secret_name` (String) Name of the credentials Secret in the namespace. When unset, a new binding uses `{database}-{role}` and an existing or imported binding keeps its current name, so removing the attribute from configuration does not change the name back: set it to `{database}-{role}` instead. A different name replaces the binding. The Secret holds `type`, `provider`, `host`, `port`, `database`, `username`, `password`, `sslmode`, `ca.crt` and `uri`; mount it at `/bindings/<secret_name>`, where `uri` expects `ca.crt`.
+- `name` (String) Binding name. Defaults to `{database}-{cluster}-{role}`. Set it explicitly if that is longer than 63 characters, or to bind the same role of a database into the same cluster with a second binding.
+- `secret_name` (String) Name of the credentials Secret in every listed namespace. When unset, a new binding uses `{database}-{role}` and an existing or imported binding keeps its current name, so removing the attribute from configuration does not change the name back: set it to `{database}-{role}` instead. A different name replaces the binding. The Secret holds `type`, `provider`, `host`, `port`, `database`, `username`, `password`, `sslmode`, `ca.crt` and `uri`; mount it at `/bindings/<secret_name>`, where `uri` expects `ca.crt`.
 - `timeouts` (Attributes) (see [below for nested schema](#nestedatt--timeouts))
 
 ### Read-Only
 
-- `host` (String) In-cluster DNS name applications connect to, e.g. `orders-db.api.svc.cluster.local`.
-- `phase` (String) Current phase: Pending (waiting for the database or the cluster), Ready, or Failed (the namespace already has a Service or Secret of the same name that the platform did not create).
+- `etag` (String) Resource version used for optimistic locking during updates.
+- `namespace_status` (Attributes List) What the binding delivered into each namespace, sorted by name. A namespace removed from `namespaces` stays listed until its Service and Secret are withdrawn. (see [below for nested schema](#nestedatt--namespace_status))
+- `phase` (String) Current phase: Pending (waiting for the database, the cluster or a namespace), Ready (every listed namespace is Ready), or Failed (a listed namespace already has a Service or Secret of the same name that the platform did not create).
 
 <a id="nestedatt--timeouts"></a>
 ### Nested Schema for `timeouts`
@@ -158,6 +169,18 @@ Optional:
 
 - `create` (String) A string that can be [parsed as a duration](https://pkg.go.dev/time#ParseDuration) consisting of numbers and unit suffixes, such as "30s" or "2h45m". Valid time units are "s" (seconds), "m" (minutes), "h" (hours).
 - `delete` (String) A string that can be [parsed as a duration](https://pkg.go.dev/time#ParseDuration) consisting of numbers and unit suffixes, such as "30s" or "2h45m". Valid time units are "s" (seconds), "m" (minutes), "h" (hours). Setting a timeout for a Delete operation is only applicable if changes are saved into state before the destroy operation occurs.
+- `update` (String) A string that can be [parsed as a duration](https://pkg.go.dev/time#ParseDuration) consisting of numbers and unit suffixes, such as "30s" or "2h45m". Valid time units are "s" (seconds), "m" (minutes), "h" (hours).
+
+
+<a id="nestedatt--namespace_status"></a>
+### Nested Schema for `namespace_status`
+
+Read-Only:
+
+- `host` (String) In-cluster DNS name applications in this namespace connect to, e.g. `orders-db.api.svc.cluster.local`. Empty until the Service is delivered.
+- `message` (String) Why the namespace is not Ready; empty when it is.
+- `name` (String) Namespace inside the cluster.
+- `phase` (String) Pending, Ready, or Failed (the namespace already has a Service or Secret of the same name that the platform did not create).
 
 ## Import
 
@@ -165,5 +188,5 @@ Import is supported using the following syntax:
 
 ```shell
 # <database>/<binding>
-terraform import kupe_database_binding.api orders-db/orders-db-production-api-readwrite
+terraform import kupe_database_binding.api orders-db/orders-db-production-readwrite
 ```

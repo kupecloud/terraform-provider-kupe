@@ -9,7 +9,7 @@
 resource "kubernetes_deployment_v1" "api" {
   metadata {
     name      = "api"
-    namespace = kupe_database_binding.api.namespace
+    namespace = "api"
   }
 
   spec {
@@ -51,12 +51,12 @@ resource "kubernetes_deployment_v1" "api" {
   }
 }
 
-# When another Terraform resource needs a value, read the Secret in the bound
+# When another Terraform resource needs a value, read the Secret in a bound
 # namespace. Its values are then stored in Terraform state.
 data "kubernetes_secret_v1" "orders_db" {
   metadata {
     name      = kupe_database_binding.api.secret_name
-    namespace = kupe_database_binding.api.namespace
+    namespace = "api"
   }
 }
 

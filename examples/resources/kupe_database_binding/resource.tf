@@ -1,9 +1,10 @@
-# The API reads and writes data with the readwrite role.
+# The API and its background jobs read and write data with the readwrite
+# role. One binding delivers the Service and the Secret into both namespaces.
 resource "kupe_database_binding" "api" {
-  database  = kupe_database.orders.name
-  cluster   = kupe_cluster.production.name
-  namespace = "api"
-  role      = "readwrite"
+  database   = kupe_database.orders.name
+  cluster    = kupe_cluster.production.name
+  namespaces = ["api", "jobs"]
+  role       = "readwrite"
 }
 
 # Schema migrations run with the owner role in a namespace of their own, so no
@@ -11,20 +12,20 @@ resource "kupe_database_binding" "api" {
 resource "kupe_database_binding" "migrations" {
   database    = kupe_database.orders.name
   cluster     = kupe_cluster.production.name
-  namespace   = "api-migrations"
+  namespaces  = ["api-migrations"]
   role        = "owner"
   secret_name = "orders-db-migrations"
 }
 
 # A reporting job reads data and cannot change it.
 resource "kupe_database_binding" "reports" {
-  database  = kupe_database.orders.name
-  cluster   = kupe_cluster.production.name
-  namespace = "reports"
-  role      = "readonly"
+  database   = kupe_database.orders.name
+  cluster    = kupe_cluster.production.name
+  namespaces = ["reports"]
+  role       = "readonly"
 }
 
-output "orders_db_host" {
-  description = "In-cluster DNS name the api namespace connects to."
-  value       = kupe_database_binding.api.host
+output "orders_db_hosts" {
+  description = "In-cluster DNS name each namespace of the api binding connects to."
+  value       = { for ns in kupe_database_binding.api.namespace_status : ns.name => ns.host }
 }

@@ -23,7 +23,7 @@ To delete a protected database, set `deletion_protection = false` (and remove `p
 
 ### Connecting applications
 
-Grant access with [`kupe_database_binding`](database_binding.md). Each binding places a Service named after the database and a credentials Secret into one namespace of one cluster.
+Grant access with [`kupe_database_binding`](database_binding.md). Each binding places a Service named after the database and a credentials Secret into each namespace it lists, in one cluster.
 
 {{ .SchemaMarkdown | trimspace }}
 

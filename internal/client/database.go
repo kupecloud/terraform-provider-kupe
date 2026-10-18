@@ -60,14 +60,15 @@ type PatchDatabaseRequest struct {
 	DeletionProtection *bool               `json:"deletionProtection,omitempty"`
 }
 
-// DatabaseBinding grants one role of a database to one namespace of one
+// DatabaseBinding grants one role of a database to namespaces of one
 // cluster.
 type DatabaseBinding struct {
-	Name      string `json:"name"`
-	Database  string `json:"database"`
-	Cluster   string `json:"cluster"`
-	Namespace string `json:"namespace"`
-	Role      string `json:"role"`
+	Name     string `json:"name"`
+	Database string `json:"database"`
+	Cluster  string `json:"cluster"`
+	// Namespaces are the namespaces the binding delivers into.
+	Namespaces []string `json:"namespaces"`
+	Role       string   `json:"role"`
 	// SecretName is the requested name; empty means the API default.
 	SecretName      string                 `json:"secretName"`
 	Status          *DatabaseBindingStatus `json:"status,omitempty"`
@@ -77,15 +78,29 @@ type DatabaseBinding struct {
 
 // DatabaseBindingStatus contains binding status fields.
 type DatabaseBindingStatus struct {
+	// Phase is Ready only when every listed namespace is Ready.
 	Phase string `json:"phase"`
-	// Host is the in-cluster DNS name applications connect to.
-	Host string `json:"host"`
-	// SecretName is the effective credentials Secret name in the namespace.
+	// SecretName is the effective credentials Secret name in every listed
+	// namespace.
 	SecretName string `json:"secretName"`
 	Message    string `json:"message"`
+	// Namespaces is what was delivered into each namespace. A namespace
+	// removed from the binding stays here until it is withdrawn.
+	Namespaces []DatabaseBindingNamespaceStatus `json:"namespaces"`
 	// Conditions carry the reason behind the phase, e.g. Conflict True
 	// (reason SyncConflict) on a Failed binding.
 	Conditions []Condition `json:"conditions"`
+}
+
+// DatabaseBindingNamespaceStatus is what a binding delivered into one
+// namespace.
+type DatabaseBindingNamespaceStatus struct {
+	Name string `json:"name"`
+	// Host is the in-cluster DNS name applications in the namespace connect
+	// to; empty while nothing is delivered.
+	Host    string `json:"host"`
+	Phase   string `json:"phase"`
+	Message string `json:"message"`
 }
 
 // Condition is one status condition of a resource.
@@ -136,11 +151,17 @@ func findCondition(conditions []Condition, t string) Condition {
 // CreateDatabaseBindingRequest is the body for creating a binding. The
 // database comes from the request path.
 type CreateDatabaseBindingRequest struct {
-	Name       string `json:"name"`
-	Cluster    string `json:"cluster"`
-	Namespace  string `json:"namespace"`
-	Role       string `json:"role"`
-	SecretName string `json:"secretName,omitempty"`
+	Name       string   `json:"name"`
+	Cluster    string   `json:"cluster"`
+	Namespaces []string `json:"namespaces"`
+	Role       string   `json:"role"`
+	SecretName string   `json:"secretName,omitempty"`
+}
+
+// PatchDatabaseBindingRequest changes a binding's namespaces, the only
+// field the API can change. Namespaces is the complete new list.
+type PatchDatabaseBindingRequest struct {
+	Namespaces []string `json:"namespaces"`
 }
 
 // IsDeletionProtected reports whether err is the API refusing a database
@@ -195,22 +216,35 @@ func (c *Client) DeleteDatabase(ctx context.Context, name string) error {
 	return err
 }
 
-// GetDatabaseBinding returns a single binding of a database.
-func (c *Client) GetDatabaseBinding(ctx context.Context, database, name string) (*DatabaseBinding, error) {
+// GetDatabaseBinding returns a single binding of a database and its ETag.
+func (c *Client) GetDatabaseBinding(ctx context.Context, database, name string) (*DatabaseBinding, string, error) {
 	var binding DatabaseBinding
-	if _, err := c.request(ctx, http.MethodGet, c.tenantPath("databases", database, "bindings", name), nil, &binding); err != nil {
-		return nil, err
+	etag, err := c.request(ctx, http.MethodGet, c.tenantPath("databases", database, "bindings", name), nil, &binding)
+	if err != nil {
+		return nil, "", err
 	}
-	return &binding, nil
+	return &binding, etag, nil
 }
 
-// CreateDatabaseBinding binds a database into a cluster namespace.
-func (c *Client) CreateDatabaseBinding(ctx context.Context, database string, req CreateDatabaseBindingRequest) (*DatabaseBinding, error) {
+// CreateDatabaseBinding binds a database into namespaces of a cluster.
+func (c *Client) CreateDatabaseBinding(ctx context.Context, database string, req CreateDatabaseBindingRequest) (*DatabaseBinding, string, error) {
 	var binding DatabaseBinding
-	if _, err := c.request(ctx, http.MethodPost, c.tenantPath("databases", database, "bindings"), req, &binding); err != nil {
-		return nil, err
+	etag, err := c.request(ctx, http.MethodPost, c.tenantPath("databases", database, "bindings"), req, &binding)
+	if err != nil {
+		return nil, "", err
 	}
-	return &binding, nil
+	return &binding, etag, nil
+}
+
+// UpdateDatabaseBinding replaces a binding's namespaces with optimistic
+// locking.
+func (c *Client) UpdateDatabaseBinding(ctx context.Context, database, name, etag string, req PatchDatabaseBindingRequest) (*DatabaseBinding, string, error) {
+	var binding DatabaseBinding
+	newETag, err := c.requestWithETag(ctx, http.MethodPatch, c.tenantPath("databases", database, "bindings", name), etag, req, &binding)
+	if err != nil {
+		return nil, "", err
+	}
+	return &binding, newETag, nil
 }
 
 // DeleteDatabaseBinding removes a binding.

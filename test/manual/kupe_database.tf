@@ -21,17 +21,17 @@ resource "kupe_database" "smoke" {
 }
 
 resource "kupe_database_binding" "smoke" {
-  database  = kupe_database.smoke.name
-  cluster   = kupe_cluster.smoke.name
-  namespace = "default"
-  role      = "readwrite"
+  database   = kupe_database.smoke.name
+  cluster    = kupe_cluster.smoke.name
+  namespaces = ["default"]
+  role       = "readwrite"
 }
 
 resource "kupe_database_binding" "smoke_readonly" {
-  database  = kupe_database.smoke.name
-  cluster   = kupe_cluster.smoke.name
-  namespace = "default"
-  role      = "readonly"
+  database   = kupe_database.smoke.name
+  cluster    = kupe_cluster.smoke.name
+  namespaces = ["default"]
+  role       = "readonly"
 }
 
 data "kupe_database" "smoke_read" {
@@ -45,5 +45,5 @@ output "smoke_database_phase" {
 
 output "smoke_database_binding_host" {
   description = "In-cluster host the bound namespace connects to."
-  value       = kupe_database_binding.smoke.host
+  value       = kupe_database_binding.smoke.namespace_status[0].host
 }

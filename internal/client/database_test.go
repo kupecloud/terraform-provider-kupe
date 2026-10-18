@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 )
@@ -174,13 +175,20 @@ func TestIsDatabasesUnavailable(t *testing.T) {
 func TestDatabaseBindingLifecycle(t *testing.T) {
 	mock := newMockAPI()
 	defer mock.close()
-	const itemPath = "/api/v1/tenants/acme/databases/orders-db/bindings/orders-db-prod-api-readwrite"
+	const itemPath = "/api/v1/tenants/acme/databases/orders-db/bindings/orders-db-prod-readwrite"
 	mock.onJSON("POST", "/api/v1/tenants/acme/databases/orders-db/bindings", http.StatusCreated, map[string]any{
-		"name": "orders-db-prod-api-readwrite", "database": "orders-db", "cluster": "prod", "namespace": "api", "role": "readwrite",
+		"name": "orders-db-prod-readwrite", "database": "orders-db", "cluster": "prod",
+		"namespaces": []string{"api", "jobs"}, "role": "readwrite",
 	})
 	mock.onJSON("GET", itemPath, http.StatusOK, map[string]any{
-		"name": "orders-db-prod-api-readwrite", "database": "orders-db",
-		"status": map[string]any{"phase": "Ready", "host": "orders-db.api.svc.cluster.local", "secretName": "orders-db-readwrite"},
+		"name": "orders-db-prod-readwrite", "database": "orders-db", "namespaces": []string{"api", "jobs"},
+		"status": map[string]any{
+			"phase": "Ready", "secretName": "orders-db-readwrite",
+			"namespaces": []map[string]any{
+				{"name": "api", "host": "orders-db.api.svc.cluster.local", "phase": "Ready", "message": ""},
+				{"name": "jobs", "host": "orders-db.jobs.svc.cluster.local", "phase": "Ready", "message": ""},
+			},
+		},
 	})
 	mock.on("DELETE", itemPath, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
@@ -188,14 +196,14 @@ func TestDatabaseBindingLifecycle(t *testing.T) {
 	c := mock.client("acme")
 	ctx := context.Background()
 
-	created, err := c.CreateDatabaseBinding(ctx, "orders-db", CreateDatabaseBindingRequest{
-		Name: "orders-db-prod-api-readwrite", Cluster: "prod", Namespace: "api", Role: "readwrite",
+	created, etag, err := c.CreateDatabaseBinding(ctx, "orders-db", CreateDatabaseBindingRequest{
+		Name: "orders-db-prod-readwrite", Cluster: "prod", Namespaces: []string{"api", "jobs"}, Role: "readwrite",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.Cluster != "prod" {
-		t.Errorf("created cluster = %q, want prod", created.Cluster)
+	if created.Cluster != "prod" || etag != `"12345"` {
+		t.Errorf("created cluster = %q, ETag %q; want prod and the response's ETag", created.Cluster, etag)
 	}
 	var body map[string]any
 	if err := json.Unmarshal([]byte(mock.lastRequest().Body), &body); err != nil {
@@ -204,19 +212,58 @@ func TestDatabaseBindingLifecycle(t *testing.T) {
 	if _, present := body["secretName"]; present {
 		t.Errorf("secretName must be omitted when unset so the API default applies, got body %v", body)
 	}
+	if _, present := body["namespace"]; present {
+		t.Errorf("the API refuses the old namespace field, got body %v", body)
+	}
+	if fmt.Sprint(body["namespaces"]) != "[api jobs]" {
+		t.Errorf("namespaces = %v, want [api jobs]", body["namespaces"])
+	}
 
-	got, err := c.GetDatabaseBinding(ctx, "orders-db", "orders-db-prod-api-readwrite")
+	got, etag, err := c.GetDatabaseBinding(ctx, "orders-db", "orders-db-prod-readwrite")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Status.Host != "orders-db.api.svc.cluster.local" || got.Status.SecretName != "orders-db-readwrite" {
+	if etag != `"12345"` {
+		t.Errorf("GET ETag = %q, want the response's ETag", etag)
+	}
+	if len(got.Status.Namespaces) != 2 || got.Status.Namespaces[1].Host != "orders-db.jobs.svc.cluster.local" ||
+		got.Status.SecretName != "orders-db-readwrite" {
 		t.Errorf("unexpected status: %+v", got.Status)
 	}
 
-	if err := c.DeleteDatabaseBinding(ctx, "orders-db", "orders-db-prod-api-readwrite"); err != nil {
+	if err := c.DeleteDatabaseBinding(ctx, "orders-db", "orders-db-prod-readwrite"); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.DeleteDatabaseBinding(ctx, "orders-db", "missing"); !IsNotFound(err) {
 		t.Errorf("delete of a missing binding: IsNotFound(%v) = false, want true", err)
+	}
+}
+
+// TestUpdateDatabaseBinding: the PATCH carries If-Match and only the
+// complete new namespace list.
+func TestUpdateDatabaseBinding(t *testing.T) {
+	mock := newMockAPI()
+	defer mock.close()
+	mock.onJSON("PATCH", "/api/v1/tenants/acme/databases/orders-db/bindings/orders-db-prod-readwrite", http.StatusOK,
+		map[string]any{"name": "orders-db-prod-readwrite", "namespaces": []string{"api", "reports"}})
+
+	got, etag, err := mock.client("acme").UpdateDatabaseBinding(context.Background(), "orders-db",
+		"orders-db-prod-readwrite", `"41"`, PatchDatabaseBindingRequest{Namespaces: []string{"api", "reports"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if etag != `"12345"` || fmt.Sprint(got.Namespaces) != "[api reports]" {
+		t.Errorf("got namespaces %v, ETag %q; want the response's", got.Namespaces, etag)
+	}
+	req := mock.lastRequest()
+	if got := req.Header.Get("If-Match"); got != `"41"` {
+		t.Errorf("If-Match = %q, want %q", got, `"41"`)
+	}
+	var body map[string]any
+	if err := json.Unmarshal([]byte(req.Body), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body) != 1 || fmt.Sprint(body["namespaces"]) != "[api reports]" {
+		t.Errorf("PATCH body = %v, want only namespaces=[api reports]", body)
 	}
 }

@@ -86,9 +86,9 @@ type readiness[M, A any] struct {
 	failed func(obj *A) (grace time.Duration, failed bool)
 	// message, when set, is what obj's status says about its phase.
 	message func(obj *A) string
-	// failedDetail, when set, explains a failure instead of
-	// managedResource.failedDetail.
-	failedDetail func(m *M, obj *A) string
+	// failedDetail, when set, explains a failure of op ("create" or
+	// "update") instead of managedResource.failedDetail.
+	failedDetail func(op string, m *M, obj *A) string
 	// timedOutDetail, when set, is added to the warning given when the
 	// timeout fires first.
 	timedOutDetail func(m *M, obj *A) string
@@ -328,7 +328,7 @@ const phaseTerminating = "Terminating"
 func (r *managedResource[M, A]) failedDetail(op string, m *M, obj *A) string {
 	ready := r.kind.ready
 	if ready.failedDetail != nil {
-		return ready.failedDetail(m, obj)
+		return ready.failedDetail(op, m, obj)
 	}
 	phase := ready.phase(obj)
 	detail := fmt.Sprintf("%s %q is %s, so the %s did not complete.", capitalise(r.kind.noun), r.kind.name(m), phase, op)

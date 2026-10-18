@@ -167,7 +167,7 @@ func (r *DatabaseResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 			"with the `timeouts` attribute, for example `timeouts = { create = \"45m\" }` (defaults: " +
 			"create/update 30m, delete 15m).\n\n" +
 			"Applications reach the database through `kupe_database_binding`, which places a Service and a " +
-			"credentials Secret in one namespace of one cluster. Credentials are never returned by the API or " +
+			"credentials Secret in each namespace it lists, in one cluster. Credentials are never returned by the API or " +
 			"stored in Terraform state.\n\n" +
 			"### Destroy semantics\n\n" +
 			databaseDeleteNotice + " `deletion_protection` (default `true`) makes the Kupe platform " +

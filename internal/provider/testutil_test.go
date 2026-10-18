@@ -74,10 +74,32 @@ type mockKupeAPI struct {
 	// provider's read and its update.
 	databaseBeforePatch []func(db map[string]any)
 	// databaseBindingStatus, when set, is the status every binding GET
-	// reports instead of Ready, like the platform does for a binding that
-	// waits or fails. databaseBindingGets counts those GETs.
+	// reports instead of the one built from its namespaces, like the
+	// platform does for a binding that waits. databaseBindingGets counts
+	// binding GETs.
 	databaseBindingStatus map[string]any
 	databaseBindingGets   int
+	// databaseBindingNamespaceStatus, keyed by namespace, is laid over that
+	// namespace's Ready status entry, e.g. a Failed phase with a conflict
+	// message; the binding's phase, message and Conflict condition follow
+	// from its entries the way the platform summarises them.
+	databaseBindingNamespaceStatus map[string]map[string]any
+	// databaseBindingLagOnPatch is how many binding GETs after a PATCH still
+	// report the status of the namespaces delivered before it, like the
+	// platform does until it reconciles the new list.
+	databaseBindingLagOnPatch int
+	// databaseBindingBeforePatch is applied, one per PATCH, to the binding
+	// just before the PATCH checks If-Match: a write landing between the
+	// provider's read and its update.
+	databaseBindingBeforePatch []func(b map[string]any)
+	// databaseBindingRequests records each binding POST and PATCH body.
+	databaseBindingRequests []mockRequest
+}
+
+// mockRequest is a request the mock received: its method, If-Match and body.
+type mockRequest struct {
+	method, ifMatch string
+	body            map[string]any
 }
 
 func newMockKupeAPI() *mockKupeAPI {
@@ -726,6 +748,8 @@ func (m *mockKupeAPI) serveDatabases(w http.ResponseWriter, r *http.Request) {
 		m.createDatabaseBinding(w, r, segs[0])
 	case len(segs) == 3 && segs[1] == "bindings" && r.Method == http.MethodGet:
 		m.getDatabaseBinding(w, segs[0], segs[2])
+	case len(segs) == 3 && segs[1] == "bindings" && r.Method == http.MethodPatch:
+		m.patchDatabaseBinding(w, r, segs[0], segs[2])
 	case len(segs) == 3 && segs[1] == "bindings" && r.Method == http.MethodDelete:
 		m.deleteDatabaseBinding(w, segs[0], segs[2])
 	default:
@@ -912,6 +936,10 @@ func (m *mockKupeAPI) deleteDatabase(w http.ResponseWriter, name string) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// mockBindingCreateFields are the fields kupe-api accepts when a binding is
+// created; it refuses any other field, the old `namespace` included.
+var mockBindingCreateFields = map[string]bool{"name": true, "cluster": true, "namespaces": true, "role": true, "secretName": true}
+
 func (m *mockKupeAPI) createDatabaseBinding(w http.ResponseWriter, r *http.Request, database string) {
 	if _, ok := m.databases[database]; !ok {
 		mockError(w, http.StatusNotFound, "", "database not found")
@@ -919,9 +947,21 @@ func (m *mockKupeAPI) createDatabaseBinding(w http.ResponseWriter, r *http.Reque
 	}
 	var body map[string]any
 	mustDecodeJSON(r, &body)
+	m.databaseBindingRequests = append(m.databaseBindingRequests, mockRequest{method: r.Method, body: body})
+	for key := range body {
+		if !mockBindingCreateFields[key] {
+			mockError(w, http.StatusBadRequest, "", fmt.Sprintf("invalid request body: json: unknown field %q", key))
+			return
+		}
+	}
 	name := strOrEmpty(body["name"])
 	if name == "" {
 		mockError(w, http.StatusBadRequest, "", `invalid name ""`)
+		return
+	}
+	namespaces, ok := mockNamespaces(body["namespaces"])
+	if !ok {
+		mockError(w, http.StatusBadRequest, "", "namespaces is required: list at least one namespace")
 		return
 	}
 	key := database + "/" + name
@@ -929,16 +969,49 @@ func (m *mockKupeAPI) createDatabaseBinding(w http.ResponseWriter, r *http.Reque
 		mockError(w, http.StatusConflict, "", "binding already exists")
 		return
 	}
+	rv := m.nextRV()
 	binding := map[string]any{
 		"name": name, "database": database,
-		"cluster": body["cluster"], "namespace": body["namespace"], "role": body["role"],
-		"secretName":      strOrEmpty(body["secretName"]),
-		"status":          map[string]any{"phase": "Pending", "host": "", "secretName": "", "message": ""},
-		"resourceVersion": m.nextRV(), "createdAt": "2026-10-09T10:05:00Z",
+		"cluster": body["cluster"], "namespaces": namespaces, "role": body["role"],
+		"secretName": strOrEmpty(body["secretName"]),
+		"status": map[string]any{
+			"phase": "Pending", "secretName": "", "message": "", "namespaces": []any{}, "conditions": []any{},
+		},
+		// delivered (and lag, set by a PATCH) are the mock's own record
+		// of the namespaces the platform has delivered into; the API
+		// returns neither.
+		"delivered":       namespaces,
+		"resourceVersion": rv, "createdAt": "2026-10-09T10:05:00Z",
 	}
 	m.databaseBindings[key] = binding
+	w.Header().Set("ETag", `"`+rv+`"`)
 	w.WriteHeader(http.StatusCreated)
-	mustEncodeJSON(w, binding)
+	mustEncodeJSON(w, mockBindingView(binding))
+}
+
+// mockNamespaces is a binding's namespace list from a request body, false
+// when it is missing or empty.
+func mockNamespaces(v any) ([]string, bool) {
+	list, ok := v.([]any)
+	if !ok || len(list) == 0 {
+		return nil, false
+	}
+	namespaces := make([]string, 0, len(list))
+	for _, ns := range list {
+		namespaces = append(namespaces, strOrEmpty(ns))
+	}
+	return namespaces, true
+}
+
+// mockBindingView is the binding as kupe-api returns it.
+func mockBindingView(binding map[string]any) map[string]any {
+	view := make(map[string]any, len(binding))
+	for k, v := range binding {
+		if k != "delivered" && k != "lag" {
+			view[k] = v
+		}
+	}
+	return view
 }
 
 func (m *mockKupeAPI) getDatabaseBinding(w http.ResponseWriter, database, name string) {
@@ -952,20 +1025,114 @@ func (m *mockKupeAPI) getDatabaseBinding(w http.ResponseWriter, database, name s
 	if secretName == "" {
 		secretName = database + "-" + binding["role"].(string)
 	}
-	status := map[string]any{
-		"phase":      "Ready",
-		"host":       fmt.Sprintf("%s.%s.svc.cluster.local", database, binding["namespace"]),
-		"secretName": secretName,
-		"message":    "",
+	reported := binding["namespaces"].([]string)
+	if lag, _ := binding["lag"].(int); lag > 0 {
+		binding["lag"] = lag - 1
+		reported = binding["delivered"].([]string)
+	} else {
+		binding["delivered"] = reported
 	}
+	status := m.mockBindingStatus(database, reported)
+	status["secretName"] = secretName
 	if m.databaseBindingStatus != nil {
-		status = map[string]any{"secretName": secretName}
+		status = map[string]any{"secretName": secretName, "namespaces": []any{}}
 		for k, v := range m.databaseBindingStatus {
 			status[k] = v
 		}
 	}
 	binding["status"] = status
-	mustEncodeJSON(w, binding)
+	w.Header().Set("ETag", `"`+binding["resourceVersion"].(string)+`"`)
+	mustEncodeJSON(w, mockBindingView(binding))
+}
+
+// mockBindingStatus is the status of a binding that delivered into
+// namespaces: an entry per namespace, Ready unless
+// databaseBindingNamespaceStatus says otherwise, and the binding Failed
+// while any is Failed, Ready when all are Ready, else Pending.
+func (m *mockKupeAPI) mockBindingStatus(database string, namespaces []string) map[string]any {
+	entries := make([]any, 0, len(namespaces))
+	phase := "Ready"
+	var conflicts []string
+	for _, ns := range namespaces {
+		entry := map[string]any{
+			"name": ns, "host": fmt.Sprintf("%s.%s.svc.cluster.local", database, ns),
+			"phase": "Ready", "deliveredRotation": "", "message": "",
+		}
+		for k, v := range m.databaseBindingNamespaceStatus[ns] {
+			entry[k] = v
+		}
+		switch entry["phase"] {
+		case "Failed":
+			phase = "Failed"
+			conflicts = append(conflicts, strOrEmpty(entry["message"]))
+		case "Ready":
+		default:
+			if phase != "Failed" {
+				phase = "Pending"
+			}
+		}
+		entries = append(entries, entry)
+	}
+	conflict := map[string]any{"type": "Conflict", "status": "False", "reason": "NoConflict"}
+	message := ""
+	if len(conflicts) > 0 {
+		message = strings.Join(conflicts, "; ")
+		conflict = map[string]any{"type": "Conflict", "status": "True", "reason": "SyncConflict", "message": message}
+	}
+	return map[string]any{"phase": phase, "message": message, "namespaces": entries, "conditions": []any{conflict}}
+}
+
+// patchDatabaseBinding answers like kupe-api: the body is only the new
+// namespace list, checked against If-Match. The status keeps describing the
+// namespaces delivered before for databaseBindingLagOnPatch GETs.
+func (m *mockKupeAPI) patchDatabaseBinding(w http.ResponseWriter, r *http.Request, database, name string) {
+	binding, ok := m.databaseBindings[database+"/"+name]
+	if !ok {
+		mockError(w, http.StatusNotFound, "", "binding not found for this database")
+		return
+	}
+	var body map[string]any
+	mustDecodeJSON(r, &body)
+	m.databaseBindingRequests = append(m.databaseBindingRequests,
+		mockRequest{method: r.Method, ifMatch: r.Header.Get("If-Match"), body: body})
+	if len(m.databaseBindingBeforePatch) > 0 {
+		m.databaseBindingBeforePatch[0](binding)
+		m.databaseBindingBeforePatch = m.databaseBindingBeforePatch[1:]
+		binding["resourceVersion"] = m.nextRV()
+	}
+	if ifMatch := r.Header.Get("If-Match"); ifMatch != "" && strings.Trim(ifMatch, `"`) != binding["resourceVersion"] {
+		mockError(w, http.StatusPreconditionFailed, "", "resource has been modified (ETag mismatch)")
+		return
+	}
+	for key := range body {
+		if key != "namespaces" {
+			mockError(w, http.StatusBadRequest, "", fmt.Sprintf("invalid request body: json: unknown field %q", key))
+			return
+		}
+	}
+	namespaces, ok := mockNamespaces(body["namespaces"])
+	if !ok {
+		mockError(w, http.StatusBadRequest, "", "namespaces is required: list at least one namespace")
+		return
+	}
+	binding["namespaces"] = namespaces
+	binding["lag"] = m.databaseBindingLagOnPatch
+	rv := m.nextRV()
+	binding["resourceVersion"] = rv
+	w.Header().Set("ETag", `"`+rv+`"`)
+	mustEncodeJSON(w, mockBindingView(binding))
+}
+
+// mockBindingPatches are the bodies of the binding PATCHes the mock
+// received, in order.
+func (m *mockKupeAPI) mockBindingPatches() []mockRequest {
+	var patches []mockRequest
+	for _, req := range m.databaseBindingRequests {
+		if req.method == http.MethodPatch {
+			patches = append(patches, req)
+		}
+	}
+	return patches
 }
 
 func (m *mockKupeAPI) deleteDatabaseBinding(w http.ResponseWriter, database, name string) {
