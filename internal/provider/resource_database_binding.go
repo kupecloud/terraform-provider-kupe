@@ -33,8 +33,8 @@ const (
 )
 
 // databaseBindingConditionConflict is the condition that is True while an
-// object the platform did not create holds the binding's Service or Secret
-// name in a cluster namespace.
+// object the platform did not create holds the binding's Service, Endpoints
+// or Secret name in a cluster namespace.
 const databaseBindingConditionConflict = "Conflict"
 
 // Default timeouts for binding operations, overridable in the `timeouts`
@@ -197,16 +197,16 @@ func (r *DatabaseBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 			"delivers a Service named after the database and a credentials Secret into each listed namespace and " +
 			"opens the network path; other namespaces see neither. A binding lists 1 to 10 namespaces, and the " +
 			"bindings of one database list at most 20 between them. Create and Update wait until every listed " +
-			"namespace is Ready, and fail at once if one is Failed: it already has a Service named after the " +
-			"database, or a Secret named `secret_name`, that the platform did not create. A binding that fails on " +
-			"create stays in state, marked tainted. Delete waits until the binding is gone. Set timeouts with the " +
-			"`timeouts` attribute, for example `timeouts = { create = \"10m\" }` (defaults: create/update/delete " +
-			"5m).\n\n" +
+			"namespace is Ready, and fail at once if one is Failed: it already has a Service or Endpoints object " +
+			"named after the database, or a Secret named `secret_name`, that the platform did not create. A " +
+			"binding that fails on create stays in state, marked tainted. Delete waits until the binding is gone. " +
+			"Set timeouts with the `timeouts` attribute, for example `timeouts = { create = \"10m\" }` (defaults: " +
+			"create/update/delete 5m).\n\n" +
 			"`namespaces` changes in place: a namespace added gets the Service and the Secret, and the namespaces " +
-			"kept work throughout. Changing any other argument replaces the binding. Removing a namespace, or the " +
-			"binding, removes the Secret there, and the Service and the network path too unless another binding of " +
-			"the same database still lists that namespace. The password does not change: rotate the role's " +
-			"credentials if the namespace should lose knowledge of it.",
+			"kept work throughout. Changing any other argument except `timeouts` replaces the binding. Removing a " +
+			"namespace, or the binding, removes the Secret there, and the Service and the network path too unless " +
+			"another binding of the same database still lists that namespace. The password does not change: " +
+			"rotate the role's credentials if the namespace should lose knowledge of it.",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
 				Description: "Binding name. Defaults to `{database}-{cluster}-{role}`. Set it explicitly if that is " +
@@ -265,8 +265,8 @@ func (r *DatabaseBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 			},
 			"phase": schema.StringAttribute{
 				Description: "Current phase: Pending (waiting for the database, the cluster or a namespace), Ready " +
-					"(every listed namespace is Ready), or Failed (a listed namespace already has a Service or Secret " +
-					"of the same name that the platform did not create).",
+					"(every listed namespace is Ready), or Failed (a listed namespace already has a Service, Endpoints " +
+					"object or Secret of the same name that the platform did not create).",
 				Computed: true,
 			},
 			"namespace_status": schema.ListNestedAttribute{
@@ -285,8 +285,8 @@ func (r *DatabaseBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 							Computed: true,
 						},
 						"phase": schema.StringAttribute{
-							Description: "Pending, Ready, or Failed (the namespace already has a Service or Secret of " +
-								"the same name that the platform did not create).",
+							Description: "Pending, Ready, or Failed (the namespace already has a Service, Endpoints " +
+								"object or Secret of the same name that the platform did not create).",
 							Computed: true,
 						},
 						"message": schema.StringAttribute{
@@ -382,14 +382,15 @@ func databaseBindingFailedDetail(op string, m *DatabaseBindingResourceModel, b *
 	}
 	if failed := databaseBindingFailedNamespaces(b); len(failed) > 0 && databaseBindingConflicted(status) {
 		if len(failed) == 1 {
-			detail += fmt.Sprintf("\n\nNamespace %s of cluster %q already has a Service named %q or a Secret named %q "+
-				"that the Kupe platform did not create, and the binding does not replace it. Rename or remove that "+
-				"object, or, if the Secret is the clash, set a different `secret_name`.",
+			detail += fmt.Sprintf("\n\nNamespace %s of cluster %q already has a Service or Endpoints object named "+
+				"%q, or a Secret named %q, that the Kupe platform did not create, and the binding does not replace "+
+				"it. Rename or remove that object, or, if the Secret is the clash, set a different `secret_name`.",
 				quotedList(failed), m.Cluster.ValueString(), m.Database.ValueString(), m.SecretName.ValueString())
 		} else {
-			detail += fmt.Sprintf("\n\nNamespaces %s of cluster %q each already have a Service named %q or a Secret "+
-				"named %q that the Kupe platform did not create, and the binding does not replace them. Rename or "+
-				"remove those objects, or, if a Secret is the clash, set a different `secret_name`.",
+			detail += fmt.Sprintf("\n\nNamespaces %s of cluster %q each already have a Service or Endpoints object "+
+				"named %q, or a Secret named %q, that the Kupe platform did not create, and the binding does not "+
+				"replace them. Rename or remove those objects, or, if a Secret is the clash, set a different "+
+				"`secret_name`.",
 				quotedList(failed), m.Cluster.ValueString(), m.Database.ValueString(), m.SecretName.ValueString())
 		}
 	}

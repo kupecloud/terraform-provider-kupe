@@ -480,7 +480,7 @@ func TestAccDatabaseBindingResource_FailedCreate(t *testing.T) {
 		return testAccDatabaseBindingConfig(host, "prod", ns("api", "jobs"), "readwrite", `  timeouts = { create = "1m" }`)
 	}
 	wantErr := regexp.MustCompile(`(?s)database binding failed.*` + wrappedText(testAccBindingConflictMessage("jobs")) +
-		`.*` + wrappedText(`Namespace "jobs" of cluster "prod" already has a Service named "orders-db" or a Secret named "orders-db-readwrite"`) +
+		`.*` + wrappedText(`Namespace "jobs" of cluster "prod" already has a Service or Endpoints object named "orders-db", or a Secret named "orders-db-readwrite", that`) +
 		`.*` + wrappedText("Rename or remove that object, or, if the Secret is the clash, set a different `secret_name`.") +
 		`.*` + wrappedText("marked tainted"))
 
@@ -610,7 +610,7 @@ func TestAccDatabaseBindingResource_UpdateFailedNamespace(t *testing.T) {
 	const addr = "kupe_database_binding.test"
 	withJobs := testAccDatabaseBindingConfig(mock.url(), "prod", ns("api", "jobs"), "readwrite", `  timeouts = { update = "1m" }`)
 	wantErr := regexp.MustCompile(`(?s)database binding failed.*` + wrappedText(testAccBindingConflictMessage("jobs")) +
-		`.*` + wrappedText(`Namespace "jobs" of cluster "prod" already has a Service named "orders-db"`) +
+		`.*` + wrappedText(`Namespace "jobs" of cluster "prod" already has a Service or Endpoints object named "orders-db"`) +
 		`.*` + wrappedText("The other namespaces keep working. "+changeRecordedNotice))
 
 	resource.UnitTest(t, resource.TestCase{
@@ -877,7 +877,7 @@ func TestDatabaseBindingFailedDetail(t *testing.T) {
 	for _, want := range []string{
 		`Binding "orders-db-prod-readwrite" of database "orders-db" failed.`,
 		"Status message: conflicts",
-		`Namespaces "jobs" and "reports" of cluster "prod" each already have a Service named "orders-db" or a Secret named "orders-db-readwrite"`,
+		`Namespaces "jobs" and "reports" of cluster "prod" each already have a Service or Endpoints object named "orders-db", or a Secret named "orders-db-readwrite", that`,
 		"Rename or remove those objects, or, if a Secret is the clash, set a different `secret_name`.",
 		"marked tainted",
 	} {
