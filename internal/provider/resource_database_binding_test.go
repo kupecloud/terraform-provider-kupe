@@ -40,11 +40,11 @@ func TestAccDatabaseBindingResource(t *testing.T) {
 		CheckDestroy:             testAccCheckNoDatabases(mock),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccDatabaseBindingConfig(mock.url(), "prod", "api", "app", ""),
+				Config: testAccDatabaseBindingConfig(mock.url(), "prod", "api", "readwrite", ""),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr(addr, "name", "orders-db-prod-api-app"),
+					resource.TestCheckResourceAttr(addr, "name", "orders-db-prod-api-readwrite"),
 					resource.TestCheckResourceAttr(addr, "database", "orders-db"),
-					resource.TestCheckResourceAttr(addr, "secret_name", "orders-db-app"),
+					resource.TestCheckResourceAttr(addr, "secret_name", "orders-db-readwrite"),
 					resource.TestCheckResourceAttr(addr, "host", "orders-db.api.svc.cluster.local"),
 					resource.TestCheckResourceAttr(addr, "phase", "Ready"),
 				),
@@ -53,35 +53,35 @@ func TestAccDatabaseBindingResource(t *testing.T) {
 				ResourceName:                         addr,
 				ImportState:                          true,
 				ImportStateVerify:                    true,
-				ImportStateId:                        "orders-db/orders-db-prod-api-app",
+				ImportStateId:                        "orders-db/orders-db-prod-api-readwrite",
 				ImportStateVerifyIdentifierAttribute: "name",
 			},
 			{
 				// Bindings are immutable: a new namespace replaces the
 				// binding, and the default name follows the new namespace.
-				Config:           testAccDatabaseBindingConfig(mock.url(), "prod", "worker", "app", ""),
+				Config:           testAccDatabaseBindingConfig(mock.url(), "prod", "worker", "readwrite", ""),
 				ConfigPlanChecks: replace,
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr(addr, "name", "orders-db-prod-worker-app"),
+					resource.TestCheckResourceAttr(addr, "name", "orders-db-prod-worker-readwrite"),
 					resource.TestCheckResourceAttr(addr, "host", "orders-db.worker.svc.cluster.local"),
 				),
 			},
 			{
-				Config:           testAccDatabaseBindingConfig(mock.url(), "prod", "worker", "app", `  secret_name = "orders-credentials"`),
+				Config:           testAccDatabaseBindingConfig(mock.url(), "prod", "worker", "readwrite", `  secret_name = "orders-credentials"`),
 				ConfigPlanChecks: replace,
 				Check:            resource.TestCheckResourceAttr(addr, "secret_name", "orders-credentials"),
 			},
 			{
 				// An explicit name that differs from the current one
 				// replaces the binding too.
-				Config: testAccDatabaseBindingConfig(mock.url(), "prod", "worker", "app",
+				Config: testAccDatabaseBindingConfig(mock.url(), "prod", "worker", "readwrite",
 					"  secret_name = \"orders-credentials\"\n  name = \"orders-worker\""),
 				ConfigPlanChecks: replace,
 				Check:            resource.TestCheckResourceAttr(addr, "name", "orders-worker"),
 			},
 			{
 				// Removing name from config keeps the existing binding.
-				Config: testAccDatabaseBindingConfig(mock.url(), "prod", "worker", "app", `  secret_name = "orders-credentials"`),
+				Config: testAccDatabaseBindingConfig(mock.url(), "prod", "worker", "readwrite", `  secret_name = "orders-credentials"`),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(addr, plancheck.ResourceActionNoop)},
 				},
@@ -90,7 +90,7 @@ func TestAccDatabaseBindingResource(t *testing.T) {
 			{
 				// Removing secret_name keeps the current name too: it does
 				// not go back to the default.
-				Config: testAccDatabaseBindingConfig(mock.url(), "prod", "worker", "app", ""),
+				Config: testAccDatabaseBindingConfig(mock.url(), "prod", "worker", "readwrite", ""),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(addr, plancheck.ResourceActionNoop)},
 				},
@@ -98,9 +98,9 @@ func TestAccDatabaseBindingResource(t *testing.T) {
 			},
 			{
 				// Writing the default name out replaces the binding with it.
-				Config:           testAccDatabaseBindingConfig(mock.url(), "prod", "worker", "app", `  secret_name = "orders-db-app"`),
+				Config:           testAccDatabaseBindingConfig(mock.url(), "prod", "worker", "readwrite", `  secret_name = "orders-db-readwrite"`),
 				ConfigPlanChecks: replace,
-				Check:            resource.TestCheckResourceAttr(addr, "secret_name", "orders-db-app"),
+				Check:            resource.TestCheckResourceAttr(addr, "secret_name", "orders-db-readwrite"),
 			},
 		},
 	})
@@ -114,15 +114,18 @@ func TestAccDatabaseBindingResource_PlanTimeErrors(t *testing.T) {
 		role      string
 		wantErr   string
 	}{
-		{name: "unknown role", cluster: "prod", namespace: "api", role: "admin", wantErr: `value must be one of`},
+		// app gets the same standard diagnostic as any other value that is
+		// not a role.
+		{name: "role app", cluster: "prod", namespace: "api", role: "app", wantErr: testAccRoleNotOneOf("app")},
+		{name: "unknown role", cluster: "prod", namespace: "api", role: "admin", wantErr: testAccRoleNotOneOf("admin")},
 		{
 			name: "default name longer than 63 characters", cluster: strings.Repeat("c", 30),
-			namespace: strings.Repeat("n", 30), role: "app", wantErr: `Default binding name too long`,
+			namespace: strings.Repeat("n", 30), role: "readwrite", wantErr: `Default binding name too long`,
 		},
-		{name: "kube-* namespace", cluster: "prod", namespace: "kube-system", role: "app", wantErr: `Reserved namespace`},
-		{name: "argocd namespace", cluster: "prod", namespace: "argocd", role: "app", wantErr: `Reserved namespace`},
-		{name: "namespace with uppercase", cluster: "prod", namespace: "API", role: "app", wantErr: `must be lowercase letters`},
-		{name: "cluster with a double hyphen", cluster: "prod--eu", namespace: "api", role: "app", wantErr: `not contain '--'`},
+		{name: "kube-* namespace", cluster: "prod", namespace: "kube-system", role: "readwrite", wantErr: `Reserved namespace`},
+		{name: "argocd namespace", cluster: "prod", namespace: "argocd", role: "readwrite", wantErr: `Reserved namespace`},
+		{name: "namespace with uppercase", cluster: "prod", namespace: "API", role: "readwrite", wantErr: `must be lowercase letters`},
+		{name: "cluster with a double hyphen", cluster: "prod--eu", namespace: "api", role: "readwrite", wantErr: `not contain '--'`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -142,6 +145,12 @@ func TestAccDatabaseBindingResource_PlanTimeErrors(t *testing.T) {
 	}
 }
 
+// testAccRoleNotOneOf matches the framework's standard OneOf diagnostic for
+// a role that is not one of the three.
+func testAccRoleNotOneOf(role string) string {
+	return wrappedText(fmt.Sprintf(`Attribute role value must be one of: ["owner" "readwrite" "readonly"], got: %q`, role))
+}
+
 // TestAccDatabaseBindingResource_DatabaseNameValidated: a literal database
 // name the platform would refuse fails validation.
 func TestAccDatabaseBindingResource_DatabaseNameValidated(t *testing.T) {
@@ -156,7 +165,7 @@ resource "kupe_database_binding" "test" {
   database  = "orders--db"
   cluster   = "prod"
   namespace = "api"
-  role      = "app"
+  role      = "readwrite"
 }
 `,
 				ExpectError: regexp.MustCompile(`not contain '--'`),
@@ -176,11 +185,11 @@ func TestAccDatabaseBindingResource_DatabaseRefAllowsOlderLongNames(t *testing.T
 		Steps: []resource.TestStep{{
 			Config: testAccProviderConfig(mock.url()) + fmt.Sprintf(`
 resource "kupe_database_binding" "test" {
-  name      = "legacy-db-prod-api-app"
+  name      = "legacy-db-prod-api-readwrite"
   database  = %q
   cluster   = "prod"
   namespace = "api"
-  role      = "app"
+  role      = "readwrite"
 }
 `, "d"+strings.Repeat("b", 51)),
 			PlanOnly:           true,
@@ -195,7 +204,7 @@ func TestParseDatabaseBindingImportID(t *testing.T) {
 		wantDatabase, wantName string
 		wantOK                 bool
 	}{
-		{id: "orders-db/orders-db-prod-api-app", wantDatabase: "orders-db", wantName: "orders-db-prod-api-app", wantOK: true},
+		{id: "orders-db/orders-db-prod-api-readwrite", wantDatabase: "orders-db", wantName: "orders-db-prod-api-readwrite", wantOK: true},
 		{id: "orders-db", wantOK: false},
 		{id: "/binding", wantOK: false},
 		{id: "orders-db/", wantOK: false},
@@ -282,7 +291,7 @@ func TestAccDatabaseBindingResource_CreateWait(t *testing.T) {
 				CheckDestroy:             testAccCheckNoDatabases(mock),
 				Steps: []resource.TestStep{
 					{
-						Config: testAccDatabaseBindingConfig(mock.url(), "prod", "api", "app", `  timeouts = { create = "1s" }`),
+						Config: testAccDatabaseBindingConfig(mock.url(), "prod", "api", "readwrite", `  timeouts = { create = "1s" }`),
 						Check: resource.ComposeAggregateTestCheckFunc(
 							resource.TestCheckResourceAttr(addr, "phase", tt.wantPhase),
 							testAccCheckBindingGets(mock, tt.wantGets),
@@ -303,10 +312,10 @@ func TestAccDatabaseBindingResource_FailedCreate(t *testing.T) {
 	// A 1m timeout the fix never waits for: a Failed binding taken for in
 	// progress would poll for a minute and then only warn.
 	config := func(host string) string {
-		return testAccDatabaseBindingConfig(host, "prod", "api", "app", `  timeouts = { create = "1m" }`)
+		return testAccDatabaseBindingConfig(host, "prod", "api", "readwrite", `  timeouts = { create = "1m" }`)
 	}
 	wantErr := regexp.MustCompile(`(?s)database binding failed.*` + wrappedText(testAccBindingConflictMessage) +
-		`.*` + wrappedText(`Namespace "api" of cluster "prod" already has a Service named "orders-db" or a Secret named "orders-db-app"`) +
+		`.*` + wrappedText(`Namespace "api" of cluster "prod" already has a Service named "orders-db" or a Secret named "orders-db-readwrite"`) +
 		`.*` + wrappedText("Rename or remove that object, or, if the Secret is the clash, set a different `secret_name`.") +
 		`.*` + wrappedText("marked tainted"))
 
@@ -358,7 +367,7 @@ resource "kupe_database_binding" "test" {
   database  = "orders-db"
   cluster   = "prod"
   namespace = "api"
-  role      = "app"
+  role      = "readwrite"
   timeouts  = { create = "1m" }
 }
 `,
@@ -419,14 +428,14 @@ func TestMapDatabaseBindingSecretName(t *testing.T) {
 	}{
 		{
 			name:    "requested",
-			binding: client.DatabaseBinding{Database: "orders-db", Role: "app", SecretName: "orders-creds"},
+			binding: client.DatabaseBinding{Database: "orders-db", Role: "readwrite", SecretName: "orders-creds"},
 			want:    "orders-creds",
 		},
 		{
 			name: "effective, from status",
-			binding: client.DatabaseBinding{Database: "orders-db", Role: "app",
-				Status: &client.DatabaseBindingStatus{SecretName: "orders-db-app"}},
-			want: "orders-db-app",
+			binding: client.DatabaseBinding{Database: "orders-db", Role: "readwrite",
+				Status: &client.DatabaseBindingStatus{SecretName: "orders-db-readwrite"}},
+			want: "orders-db-readwrite",
 		},
 		{
 			name:    "not reconciled yet",
@@ -435,9 +444,9 @@ func TestMapDatabaseBindingSecretName(t *testing.T) {
 		},
 		{
 			name: "status without a name yet",
-			binding: client.DatabaseBinding{Database: "orders-db", Role: "app",
+			binding: client.DatabaseBinding{Database: "orders-db", Role: "readwrite",
 				Status: &client.DatabaseBindingStatus{Phase: "Pending"}},
-			want: "orders-db-app",
+			want: "orders-db-readwrite",
 		},
 	}
 	for _, tt := range tests {

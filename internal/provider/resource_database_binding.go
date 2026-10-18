@@ -179,11 +179,11 @@ func (r *DatabaseBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 				PlanModifiers: replace,
 			},
 			"role": schema.StringAttribute{
-				Description:   "Role granted: `owner` (can change the schema) or `app` (reads and writes data).",
+				Description:   "Role granted: `owner` (can change the schema), `readwrite` (reads and writes data) or `readonly` (reads data).",
 				Required:      true,
 				PlanModifiers: replace,
 				Validators: []validator.String{
-					stringvalidator.OneOf("owner", "app"),
+					stringvalidator.OneOf("owner", "readwrite", "readonly"),
 				},
 			},
 			"secret_name": schema.StringAttribute{

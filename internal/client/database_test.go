@@ -174,13 +174,13 @@ func TestIsDatabasesUnavailable(t *testing.T) {
 func TestDatabaseBindingLifecycle(t *testing.T) {
 	mock := newMockAPI()
 	defer mock.close()
-	const itemPath = "/api/v1/tenants/acme/databases/orders-db/bindings/orders-db-prod-api-app"
+	const itemPath = "/api/v1/tenants/acme/databases/orders-db/bindings/orders-db-prod-api-readwrite"
 	mock.onJSON("POST", "/api/v1/tenants/acme/databases/orders-db/bindings", http.StatusCreated, map[string]any{
-		"name": "orders-db-prod-api-app", "database": "orders-db", "cluster": "prod", "namespace": "api", "role": "app",
+		"name": "orders-db-prod-api-readwrite", "database": "orders-db", "cluster": "prod", "namespace": "api", "role": "readwrite",
 	})
 	mock.onJSON("GET", itemPath, http.StatusOK, map[string]any{
-		"name": "orders-db-prod-api-app", "database": "orders-db",
-		"status": map[string]any{"phase": "Ready", "host": "orders-db.api.svc.cluster.local", "secretName": "orders-db-app"},
+		"name": "orders-db-prod-api-readwrite", "database": "orders-db",
+		"status": map[string]any{"phase": "Ready", "host": "orders-db.api.svc.cluster.local", "secretName": "orders-db-readwrite"},
 	})
 	mock.on("DELETE", itemPath, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
@@ -189,7 +189,7 @@ func TestDatabaseBindingLifecycle(t *testing.T) {
 	ctx := context.Background()
 
 	created, err := c.CreateDatabaseBinding(ctx, "orders-db", CreateDatabaseBindingRequest{
-		Name: "orders-db-prod-api-app", Cluster: "prod", Namespace: "api", Role: "app",
+		Name: "orders-db-prod-api-readwrite", Cluster: "prod", Namespace: "api", Role: "readwrite",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -205,15 +205,15 @@ func TestDatabaseBindingLifecycle(t *testing.T) {
 		t.Errorf("secretName must be omitted when unset so the API default applies, got body %v", body)
 	}
 
-	got, err := c.GetDatabaseBinding(ctx, "orders-db", "orders-db-prod-api-app")
+	got, err := c.GetDatabaseBinding(ctx, "orders-db", "orders-db-prod-api-readwrite")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Status.Host != "orders-db.api.svc.cluster.local" || got.Status.SecretName != "orders-db-app" {
+	if got.Status.Host != "orders-db.api.svc.cluster.local" || got.Status.SecretName != "orders-db-readwrite" {
 		t.Errorf("unexpected status: %+v", got.Status)
 	}
 
-	if err := c.DeleteDatabaseBinding(ctx, "orders-db", "orders-db-prod-api-app"); err != nil {
+	if err := c.DeleteDatabaseBinding(ctx, "orders-db", "orders-db-prod-api-readwrite"); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.DeleteDatabaseBinding(ctx, "orders-db", "missing"); !IsNotFound(err) {

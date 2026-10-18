@@ -15,12 +15,12 @@ Bindings cannot be changed: changing any argument replaces the binding. Removing
 ## Example Usage
 
 ```terraform
-# The API reads and writes data with the app role.
+# The API reads and writes data with the readwrite role.
 resource "kupe_database_binding" "api" {
   database  = kupe_database.orders.name
   cluster   = kupe_cluster.production.name
   namespace = "api"
-  role      = "app"
+  role      = "readwrite"
 }
 
 # Schema migrations run with the owner role in a namespace of their own, so no
@@ -130,7 +130,7 @@ A binding is `Failed` when the namespace already has a Service named after the d
 - `cluster` (String) Cluster to bind into. It may not exist yet: the binding becomes Ready once it does, so Create waits up to its timeout and then warns.
 - `database` (String) Name of the database to bind.
 - `namespace` (String) Namespace inside the cluster that receives the Service and credentials Secret. Not `kube-*` or `argocd`.
-- `role` (String) Role granted: `owner` (can change the schema) or `app` (reads and writes data).
+- `role` (String) Role granted: `owner` (can change the schema), `readwrite` (reads and writes data) or `readonly` (reads data).
 
 ### Optional
 
@@ -157,5 +157,5 @@ Import is supported using the following syntax:
 
 ```shell
 # <database>/<binding>
-terraform import kupe_database_binding.api orders-db/orders-db-production-api-app
+terraform import kupe_database_binding.api orders-db/orders-db-production-api-readwrite
 ```

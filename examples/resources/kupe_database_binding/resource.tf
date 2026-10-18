@@ -1,9 +1,9 @@
-# The API reads and writes data with the app role.
+# The API reads and writes data with the readwrite role.
 resource "kupe_database_binding" "api" {
   database  = kupe_database.orders.name
   cluster   = kupe_cluster.production.name
   namespace = "api"
-  role      = "app"
+  role      = "readwrite"
 }
 
 # Schema migrations run with the owner role in a namespace of their own, so no

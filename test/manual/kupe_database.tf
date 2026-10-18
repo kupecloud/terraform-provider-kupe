@@ -23,7 +23,7 @@ resource "kupe_database_binding" "smoke" {
   database  = kupe_database.smoke.name
   cluster   = kupe_cluster.smoke.name
   namespace = "default"
-  role      = "app"
+  role      = "readwrite"
 }
 
 data "kupe_database" "smoke_read" {
