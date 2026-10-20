@@ -413,8 +413,8 @@ func testAccCheckBindingGets(mock *mockKupeAPI, check func(gets int) error) reso
 }
 
 // TestAccDatabaseBindingResource_CreateWait: Create returns once the binding
-// is Ready, and keeps waiting while it is Pending, ending the apply without
-// an error when the timeout fires.
+// is Ready, and keeps waiting while it is Pending, failing the apply when the
+// timeout fires.
 func TestAccDatabaseBindingResource_CreateWait(t *testing.T) {
 	shrinkPollInterval(t)
 	const addr = "kupe_database_binding.test"
@@ -422,6 +422,7 @@ func TestAccDatabaseBindingResource_CreateWait(t *testing.T) {
 		name      string
 		status    map[string]any
 		wantPhase string
+		wantErr   string // empty: the create applies
 		wantGets  func(gets int) error
 	}{
 		{
@@ -434,9 +435,12 @@ func TestAccDatabaseBindingResource_CreateWait(t *testing.T) {
 			},
 		},
 		{
-			name:      "pending keeps waiting until the timeout",
-			status:    map[string]any{"phase": "Pending", "message": "cluster prod does not exist"},
-			wantPhase: "Pending",
+			name:   "pending keeps waiting until the timeout, then fails",
+			status: map[string]any{"phase": "Pending", "message": "cluster prod does not exist"},
+			wantErr: `(?s)database binding create timed out while Pending.*` +
+				wrappedText(`If the cluster "prod" does not exist yet, the binding becomes Ready once it does.`) +
+				`.*` + wrappedText("Status message: cluster prod does not exist") +
+				`.*` + wrappedText("marked tainted"),
 			wantGets: func(gets int) error {
 				if gets < 2 {
 					return fmt.Errorf("binding GETs = %d, want the wait to keep polling", gets)
@@ -450,19 +454,26 @@ func TestAccDatabaseBindingResource_CreateWait(t *testing.T) {
 			mock := newMockKupeAPI()
 			defer mock.close()
 			mock.setState(func(m *mockKupeAPI) { m.databaseBindingStatus = tt.status })
+			step := resource.TestStep{
+				Config: testAccDatabaseBindingConfig(mock.url(), "prod", ns("api"), "readwrite", `  timeouts = { create = "1s" }`),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(addr, "phase", tt.wantPhase),
+					testAccCheckBindingGets(mock, tt.wantGets),
+				),
+			}
+			if tt.wantErr != "" {
+				step.Check, step.ExpectError = nil, regexp.MustCompile(tt.wantErr)
+			}
 			resource.UnitTest(t, resource.TestCase{
 				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
 				CheckDestroy:             testAccCheckNoDatabases(mock),
-				Steps: []resource.TestStep{
-					{
-						Config: testAccDatabaseBindingConfig(mock.url(), "prod", ns("api"), "readwrite", `  timeouts = { create = "1s" }`),
-						Check: resource.ComposeAggregateTestCheckFunc(
-							resource.TestCheckResourceAttr(addr, "phase", tt.wantPhase),
-							testAccCheckBindingGets(mock, tt.wantGets),
-						),
-					},
-				},
+				Steps:                    []resource.TestStep{step},
 			})
+			if tt.wantErr != "" {
+				if err := testAccCheckBindingGets(mock, tt.wantGets)(nil); err != nil {
+					t.Error(err)
+				}
+			}
 		})
 	}
 }

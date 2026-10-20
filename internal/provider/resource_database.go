@@ -159,9 +159,8 @@ func (r *DatabaseResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 		Description: "Manages a Kupe PostgreSQL database. Create and Update wait for the database to " +
 			"reach phase=Running with the change in effect on every instance. They fail at once if the database " +
 			"is being deleted (Terminating), and after 5 minutes if it stays Degraded once the platform has " +
-			"picked up the change. If the timeout fires first, the apply fails while the database is Degraded " +
-			"with the change picked up, or on Update while the platform is failing to apply the change; otherwise " +
-			"it ends with a warning and the platform carries on in the background. A change to " +
+			"picked up the change. If the timeout fires first, the apply fails; the platform carries on in the " +
+			"background, and a database that timed out on Create stays in state, marked tainted. A change to " +
 			"`deletion_protection` alone takes effect at once and is not waited for. Delete waits until the " +
 			"database is gone. Set timeouts " +
 			"with the `timeouts` attribute, for example `timeouts = { create = \"45m\" }` (defaults: " +

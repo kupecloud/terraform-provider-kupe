@@ -89,12 +89,13 @@ type readiness[M, A any] struct {
 	// failedDetail, when set, explains a failure of op ("create" or
 	// "update") instead of managedResource.failedDetail.
 	failedDetail func(op string, m *M, obj *A) string
-	// timedOutDetail, when set, is added to the warning given when the
-	// timeout fires first.
+	// timedOutDetail, when set, is added to the error given when the
+	// timeout fires first while the resource is still progressing.
 	timedOutDetail func(m *M, obj *A) string
 	// notApplied, when set, reports that the platform has not applied obj's
-	// latest change and is failing to. An update timeout in that state is
-	// an error, not a warning: the change is in state but not in effect.
+	// latest change and is failing to. An update timeout in that state gets
+	// its own error: the change is in state but the platform is not
+	// progressing it.
 	notApplied func(obj *A) bool
 }
 
@@ -251,10 +252,8 @@ var errReadyFailed = errors.New("failed while waiting")
 // to state so an interrupted apply keeps the latest values. op ("create" or
 // "update") names the operation in diagnostics; obj is the last observation
 // before the wait. A failed resource ends the wait with an error once its
-// grace has passed. A timeout is a warning while the resource is still
-// progressing, since the platform carries on; it is an error while the
-// resource is failing, or on update while the platform fails to apply the
-// change.
+// grace has passed. A timeout is an error too: the apply did not get the
+// resource to its target, even when the platform carries on.
 func (r *managedResource[M, A]) waitForReady(
 	ctx context.Context, timeout time.Duration, op string, obj *A, m *M, state *tfsdk.State, diags *diag.Diagnostics,
 ) {
@@ -306,17 +305,34 @@ func (r *managedResource[M, A]) waitForReady(
 		// change, and the next plan would show nothing to do.
 		diags.AddError(r.kind.noun+" update not applied", r.notAppliedDetail(m, last))
 	default:
-		detail := fmt.Sprintf("%s %q was at phase=%q when the %s timeout fired. The Kupe platform continues in "+
-			"the background; re-run `terraform apply` later and it will be a no-op once the %s is %s. If it stays "+
-			"in this phase, check it in the Kupe Console or contact Kupe Cloud support. Override with "+
-			"`timeouts.%s = %q`.",
-			capitalise(r.kind.noun), r.kind.name(m), phase, op, r.kind.noun, ready.target, op,
-			longerTimeout(timeout, r.kind.defaults.of(op)))
-		if ready.timedOutDetail != nil {
-			detail += ready.timedOutDetail(m, last)
-		}
-		diags.AddWarning(fmt.Sprintf("%s %s timed out before reaching %s", r.kind.noun, op, ready.target), detail)
+		diags.AddError(fmt.Sprintf("%s %s timed out while %s", r.kind.noun, op, phase),
+			r.timedOutDetail(op, timeout, m, last))
 	}
+}
+
+// timedOutDetail explains a timeout that fired while the resource was still
+// progressing: the platform carries on, but the apply did not get the
+// resource to its target. On create Terraform keeps the resource in state,
+// marked tainted, so the detail says how to keep it rather than replace it.
+func (r *managedResource[M, A]) timedOutDetail(op string, timeout time.Duration, m *M, obj *A) string {
+	ready := r.kind.ready
+	detail := fmt.Sprintf("%s %q was still at phase=%q, not %s, when the %s timeout fired, so the %s did not "+
+		"complete. The Kupe platform carries on in the background.",
+		capitalise(r.kind.noun), r.kind.name(m), ready.phase(obj), ready.target, op, op)
+	if ready.timedOutDetail != nil {
+		detail += ready.timedOutDetail(m, obj)
+	}
+	detail += fmt.Sprintf("\n\nIf it stays in this phase, check it in the Kupe Console or contact Kupe Cloud "+
+		"support. To wait longer, set `timeouts.%s = %q`.", op, longerTimeout(timeout, r.kind.defaults.of(op)))
+	switch op {
+	case "create":
+		detail += fmt.Sprintf("\n\nTerraform keeps the %s in state, marked tainted, so the next `terraform apply` "+
+			"plans to replace it. To keep it and wait for it instead, run `terraform untaint` on it before "+
+			"applying again.", r.kind.noun)
+	case "update":
+		detail += "\n\n" + changeRecordedNotice
+	}
+	return detail
 }
 
 // phaseTerminating is the phase of a resource being deleted.

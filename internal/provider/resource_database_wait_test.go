@@ -38,8 +38,8 @@ func testAccCheckDatabaseStatusesPlayed(mock *mockKupeAPI) resource.TestCheckFun
 // TestAccDatabaseResource_UpdateWait: Update waits until the change is in
 // effect on every instance (Running, observedGeneration caught up and Ready
 // True), rides out Degraded for databaseDegradedGrace, fails on Terminating
-// and on Degraded beyond the grace, and only warns when the timeout fires on
-// a change still rolling out.
+// and on Degraded beyond the grace, and fails when the timeout fires on a
+// change still rolling out.
 func TestAccDatabaseResource_UpdateWait(t *testing.T) {
 	shrinkPollInterval(t)
 	const addr = "kupe_database.test"
@@ -90,8 +90,9 @@ func TestAccDatabaseResource_UpdateWait(t *testing.T) {
 			wantErr:  `(?s)database degraded.*` + wrappedText("The update timeout fired while it was Degraded."),
 		},
 		{
-			name: "a timeout while still rolling out only warns", updateTimeout: "1s",
-			statuses: []map[string]any{rolling}, wantPhase: "Running",
+			name: "a timeout while still rolling out is an error", updateTimeout: "1s",
+			statuses: []map[string]any{rolling},
+			wantErr:  `(?s)database update timed out while.*` + wrappedText(changeRecordedNotice),
 		},
 		{
 			// The operator failed to apply generation 2 and retries: it
@@ -173,8 +174,8 @@ func TestAccDatabaseResource_ProtectionChangeNotWaited(t *testing.T) {
 }
 
 // TestAccDatabaseResource_CreateWait: Create fails on a database that ends
-// Degraded, keeping it in state marked tainted, and only warns when the
-// timeout fires while it is still provisioning.
+// Degraded, or that is still provisioning when the timeout fires, keeping it
+// in state marked tainted.
 func TestAccDatabaseResource_CreateWait(t *testing.T) {
 	shrinkPollInterval(t)
 	const addr = "kupe_database.test"
@@ -208,19 +209,31 @@ func TestAccDatabaseResource_CreateWait(t *testing.T) {
 		})
 	})
 
-	t.Run("a timeout while provisioning only warns", func(t *testing.T) {
+	t.Run("a timeout while provisioning fails the create and taints the database", func(t *testing.T) {
 		mock := newMockKupeAPI()
 		defer mock.close()
 		mock.setState(func(m *mockKupeAPI) {
 			m.databaseStatuses = []map[string]any{mockDatabaseStatus("Provisioning", false, "creating the database")}
 		})
+		config := testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false), createTimeout: "1s"})
 		resource.UnitTest(t, resource.TestCase{
 			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
 			CheckDestroy:             testAccCheckNoDatabases(mock),
-			Steps: []resource.TestStep{{
-				Config: testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false), createTimeout: "1s"}),
-				Check:  resource.TestCheckResourceAttr(addr, "phase", "Provisioning"),
-			}},
+			Steps: []resource.TestStep{
+				{
+					Config: config,
+					ExpectError: regexp.MustCompile(`(?s)database create timed out while Provisioning.*` +
+						wrappedText(`Database "orders-db" was still at phase="Provisioning", not Running, when the create timeout fired`) +
+						`.*` + wrappedText("marked tainted, so the next `terraform apply` plans to replace it.") +
+						`.*` + wrappedText("run `terraform untaint` on it")),
+				},
+				{
+					PreConfig:        func() { mock.setState(func(m *mockKupeAPI) { m.databaseStatuses = nil }) },
+					Config:           config,
+					ConfigPlanChecks: expectAction(plancheck.ResourceActionDestroyBeforeCreate),
+					Check:            resource.TestCheckResourceAttr(addr, "phase", "Running"),
+				},
+			},
 		})
 	})
 }

@@ -199,7 +199,8 @@ func (r *DatabaseBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 			"bindings of one database list at most 20 between them. Create and Update wait until every listed " +
 			"namespace is Ready, and fail at once if one is Failed: it already has a Service or Endpoints object " +
 			"named after the database, or a Secret named `secret_name`, that the platform did not create. A " +
-			"binding that fails on create stays in state, marked tainted. Delete waits until the binding is gone. " +
+			"binding that fails or times out on create stays in state, marked tainted. Delete waits until the " +
+			"binding is gone. " +
 			"Set timeouts with the `timeouts` attribute, for example `timeouts = { create = \"10m\" }` (defaults: " +
 			"create/update/delete 5m).\n\n" +
 			"`namespaces` changes in place: a namespace added gets the Service and the Secret, and the namespaces " +
@@ -227,7 +228,7 @@ func (r *DatabaseBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 			},
 			"cluster": schema.StringAttribute{
 				Description: "Cluster to bind into. It may not exist yet: the binding becomes Ready once it does, " +
-					"so Create waits up to its timeout and then warns.",
+					"so Create waits up to its timeout and then fails.",
 				Required:      true,
 				Validators:    clusterRefValidators(),
 				PlanModifiers: replace,
