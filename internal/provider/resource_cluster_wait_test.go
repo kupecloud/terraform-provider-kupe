@@ -111,8 +111,10 @@ func TestAccClusterResource_UpdateWait(t *testing.T) {
 			wantErr:  `(?s)cluster degraded.*` + wrappedText("The update timeout fired while it was Degraded."),
 		},
 		{
-			name: "a timeout before the change is seen only warns", grace: time.Hour, updateTimeout: "1s",
+			name: "a timeout before the change is seen is an error", grace: time.Hour, updateTimeout: "1s",
 			statuses: []map[string]any{stale},
+			wantErr: `(?s)cluster update timed out while Running.*` +
+				wrappedText(`Cluster "wait" was still at phase="Running", not Running`) + `.*` + wrappedText(changeRecordedNotice),
 		},
 		{
 			name: "a timeout while the platform fails to apply the change is an error", grace: time.Hour,

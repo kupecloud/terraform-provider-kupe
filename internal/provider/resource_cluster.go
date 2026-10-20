@@ -162,9 +162,9 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 			"cluster to reach phase=Running with the change applied. They fail at once if the cluster is being " +
 			"deleted (Terminating), and after 2 minutes if it stays Degraded once the platform has picked up the " +
 			"change; a cluster that was Degraded before the change gets the chance to recover with it. If " +
-			"the timeout fires first, the apply fails while the cluster is Degraded with the change picked up, or " +
-			"on Update while the platform is failing to apply the change; otherwise it ends with a warning and the " +
-			"platform carries on in the background. Delete waits for the cluster to finish terminating. Set " +
+			"the timeout fires first, the apply fails; the platform carries on in the background, and a cluster " +
+			"that timed out on Create stays in state, marked tainted. Delete waits for the cluster to finish " +
+			"terminating. Set " +
 			"timeouts with the `timeouts` attribute, for example " +
 			"`timeouts = { create = \"30m\" }` (defaults: create/update 15m, delete 10m).\n\n" +
 			"### Destroy semantics\n\n" +

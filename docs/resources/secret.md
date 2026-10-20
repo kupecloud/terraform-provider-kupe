@@ -3,12 +3,12 @@
 page_title: "kupe_secret Resource - kupe"
 subcategory: ""
 description: |-
-  Manages a Kupe Cloud secret definition and its sync targets. Create and Update wait for the secret to reach phase=Active before returning; Delete waits for the underlying ManagedSecret CR to finish terminating. Set timeouts with the timeouts attribute, for example timeouts = { create = "5m" } (defaults: create/update/delete 2m).
+  Manages a Kupe Cloud secret definition and its sync targets. Create and Update wait for the secret to reach phase=Active before returning, and fail if the timeout fires first; Delete waits for the underlying ManagedSecret CR to finish terminating. Set timeouts with the timeouts attribute, for example timeouts = { create = "5m" } (defaults: create/update/delete 2m).
 ---
 
 # kupe_secret (Resource)
 
-Manages a Kupe Cloud secret definition and its sync targets. Create and Update wait for the secret to reach phase=Active before returning; Delete waits for the underlying ManagedSecret CR to finish terminating. Set timeouts with the `timeouts` attribute, for example `timeouts = { create = "5m" }` (defaults: create/update/delete 2m).
+Manages a Kupe Cloud secret definition and its sync targets. Create and Update wait for the secret to reach phase=Active before returning, and fail if the timeout fires first; Delete waits for the underlying ManagedSecret CR to finish terminating. Set timeouts with the `timeouts` attribute, for example `timeouts = { create = "5m" }` (defaults: create/update/delete 2m).
 
 ## Example Usage
 

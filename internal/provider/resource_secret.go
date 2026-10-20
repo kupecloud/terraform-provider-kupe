@@ -70,7 +70,8 @@ func (r *SecretResource) Metadata(_ context.Context, req resource.MetadataReques
 func (r *SecretResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Manages a Kupe Cloud secret definition and its sync targets. Create and " +
-			"Update wait for the secret to reach phase=Active before returning; Delete waits for " +
+			"Update wait for the secret to reach phase=Active before returning, and fail if the timeout " +
+			"fires first; Delete waits for " +
 			"the underlying ManagedSecret CR to finish terminating. Set timeouts with the `timeouts` " +
 			"attribute, for example `timeouts = { create = \"5m\" }` (defaults: create/update/delete 2m).",
 		Attributes: map[string]schema.Attribute{
@@ -287,7 +288,7 @@ func (r *SecretResource) ImportState(ctx context.Context, req resource.ImportSta
 // "Active" or the context expires. Refreshes resource state on every
 // poll so an interrupted apply leaves Terraform with the latest
 // observed values. kind is "create" or "update", surfaced in the
-// warning so users can distinguish the two paths. See the
+// timeout error so users can distinguish the two paths. See the
 // corresponding cluster helper for the design rationale.
 func (r *SecretResource) waitForSecretReady(
 	ctx context.Context,
@@ -320,16 +321,24 @@ func (r *SecretResource) waitForSecretReady(
 			apiErrorDetail(err),
 		)
 	default:
-		diags.AddWarning(
-			fmt.Sprintf("secret %s timed out before reaching Active", kind),
-			fmt.Sprintf("secret %q only reached phase=%q when the %s timeout fired. Wait a few moments "+
-				"and re-run `terraform apply` to pick up the Active state — Kupe Cloud is still "+
-				"syncing the value to your target clusters and a subsequent apply will be a no-op "+
-				"once the sync completes. If the secret stays in this phase for longer than expected, "+
-				"check it in the Kupe Console or contact Kupe Cloud support. Override "+
-				"with `timeouts.%s = \"5m\"` for secrets with many sync targets.",
-				name, plan.Phase.ValueString(), kind, kind),
-		)
+		detail := fmt.Sprintf("Secret %q was still at phase=%q, not Active, when the %s timeout fired, so the %s "+
+			"did not complete. Kupe Cloud carries on syncing the value to your target clusters in the "+
+			"background.\n\nIf the secret stays in this phase, check it in the Kupe Console or contact Kupe "+
+			"Cloud support. To wait longer, set `timeouts.%s = \"5m\"` for secrets with many sync targets.",
+			name, plan.Phase.ValueString(), kind, kind, kind)
+		switch kind {
+		case "create":
+			detail += "\n\nTerraform keeps the secret in state, marked tainted, so the next `terraform apply` " +
+				"plans to replace it. To keep it and wait for it instead, run `terraform untaint` on it before " +
+				"applying again."
+		case "update":
+			detail += "\n\n" + changeRecordedNotice
+		}
+		summary := fmt.Sprintf("secret %s timed out while %s", kind, plan.Phase.ValueString())
+		if plan.Phase.ValueString() == "" {
+			summary = fmt.Sprintf("secret %s timed out before reaching Active", kind)
+		}
+		diags.AddError(summary, detail)
 	}
 }
 
