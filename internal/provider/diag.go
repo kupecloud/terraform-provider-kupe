@@ -260,7 +260,7 @@ func apiErrorDetail(err error) string {
 		return base
 	case http.StatusNotFound:
 		if apiErr.Code == client.CodeDatabasesUnavailable {
-			return base + "\n\nDatabases are not enabled for this Kupe Cloud environment. Existing databases can still be read, have deletion protection turned off, and be deleted; other changes are refused. Terraform state is kept unchanged. Contact Kupe Cloud support if you expected databases to be available."
+			return base + "\n\nDatabases are not enabled for this Kupe Cloud environment. Existing databases can still be read, have deletion protection turned off, and be deleted, and their bindings deleted or have namespaces removed; other changes are refused. Terraform state is kept unchanged. Contact Kupe Cloud support if you expected databases to be available."
 		}
 		return base + "\n\nThe resource does not exist on the server. If you expected it to exist it may have been deleted out-of-band; run `terraform refresh` to reconcile or `terraform import` to re-attach."
 	case http.StatusConflict:
