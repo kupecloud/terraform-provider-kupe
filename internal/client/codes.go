@@ -11,9 +11,10 @@ const (
 	// refused because deletion protection is enabled.
 	CodeDeletionProtected = "deletion_protected"
 	// CodeDatabasesUnavailable comes with a 404 when managed databases are
-	// not enabled on the platform. Reads, deletes and a PATCH that only
-	// changes deletionProtection still work then, so existing databases
-	// can be removed.
+	// not enabled on the platform. Reads, deletes, a database PATCH that
+	// only changes deletionProtection and a binding PATCH that only removes
+	// namespaces still work then, so existing databases and bindings can be
+	// removed.
 	CodeDatabasesUnavailable = "databases_unavailable"
 	// CodeCreationPaused comes with a 400 when the platform has temporarily
 	// paused creating clusters or databases. Existing resources are

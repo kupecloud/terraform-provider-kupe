@@ -755,7 +755,8 @@ func TestAccDatabaseBindingResource_UpdateStaleETag(t *testing.T) {
 
 // TestAccDatabaseBindingResource_UpdateWhileDatabasesDisabled: while the
 // platform has managed databases switched off, kupe-api refuses a binding
-// PATCH; the update fails with the explanation and state keeps the old list.
+// PATCH that adds a namespace (the update fails with the explanation and
+// state keeps the old list) and accepts one that only removes namespaces.
 func TestAccDatabaseBindingResource_UpdateWhileDatabasesDisabled(t *testing.T) {
 	mock := newMockKupeAPI()
 	defer mock.close()
@@ -764,18 +765,23 @@ func TestAccDatabaseBindingResource_UpdateWhileDatabasesDisabled(t *testing.T) {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
 		CheckDestroy:             testAccCheckNoDatabases(mock),
 		Steps: []resource.TestStep{
-			{Config: testAccDatabaseBindingConfig(mock.url(), "prod", ns("api"), "readwrite", "")},
+			{Config: testAccDatabaseBindingConfig(mock.url(), "prod", ns("api", "web"), "readwrite", "")},
 			{
 				PreConfig:   func() { mock.setState(func(m *mockKupeAPI) { m.databasesDisabled = true }) },
-				Config:      testAccDatabaseBindingConfig(mock.url(), "prod", ns("api", "jobs"), "readwrite", ""),
+				Config:      testAccDatabaseBindingConfig(mock.url(), "prod", ns("api", "web", "jobs"), "readwrite", ""),
 				ExpectError: regexp.MustCompile(`(?s)failed to update database binding.*` + wrappedText("Databases are not enabled")),
 			},
 			{
 				// Still off: refresh and plan work, and the plan still has
 				// the change to make.
-				Config:             testAccDatabaseBindingConfig(mock.url(), "prod", ns("api", "jobs"), "readwrite", ""),
+				Config:             testAccDatabaseBindingConfig(mock.url(), "prod", ns("api", "web", "jobs"), "readwrite", ""),
 				PlanOnly:           true,
 				ExpectNonEmptyPlan: true,
+			},
+			{
+				// Still off: removing a namespace is clean-up, and applies.
+				Config: testAccDatabaseBindingConfig(mock.url(), "prod", ns("api"), "readwrite", ""),
+				Check:  testAccCheckBindingNamespaceStatus(addr, "api"),
 			},
 			{
 				PreConfig: func() { mock.setState(func(m *mockKupeAPI) { m.databasesDisabled = false }) },

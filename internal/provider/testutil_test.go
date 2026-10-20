@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 
@@ -48,8 +49,9 @@ type mockKupeAPI struct {
 	databases        map[string]map[string]any
 	databaseBindings map[string]map[string]any
 	// databasesDisabled makes the database routes answer like a platform
-	// with managed databases turned off: reads, deletes and a PATCH that
-	// only changes deletionProtection work, everything else is refused.
+	// with managed databases turned off: reads, deletes, a database PATCH
+	// that only changes deletionProtection and a binding PATCH that only
+	// removes namespaces work, everything else is refused.
 	databasesDisabled bool
 	// creationPaused refuses cluster and database creation like kupe-api
 	// does while creation is paused.
@@ -726,7 +728,7 @@ func (m *mockKupeAPI) serveDatabases(w http.ResponseWriter, r *http.Request) {
 	if rest != "" {
 		segs = strings.Split(rest, "/")
 	}
-	if m.databasesDisabled && !mockAllowedWhileDisabled(r) {
+	if m.databasesDisabled && !m.allowedWhileDisabled(r, segs) {
 		mockError(w, http.StatusNotFound, client.CodeDatabasesUnavailable, "managed databases are not enabled")
 		return
 	}
@@ -757,11 +759,12 @@ func (m *mockKupeAPI) serveDatabases(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// mockAllowedWhileDisabled reports whether kupe-api still serves r with
-// databases disabled: reads, deletes, and a PATCH of deletionProtection
-// alone, so existing databases can be removed. It restores the body it
-// reads.
-func mockAllowedWhileDisabled(r *http.Request) bool {
+// allowedWhileDisabled reports whether kupe-api still serves r with
+// databases disabled: reads, deletes, a database PATCH of
+// deletionProtection alone, and a binding PATCH that lists no namespace the
+// stored binding does not, so existing databases and bindings can be
+// removed. It restores the body it reads. Called with m.mu held.
+func (m *mockKupeAPI) allowedWhileDisabled(r *http.Request, segs []string) bool {
 	switch r.Method {
 	case http.MethodGet, http.MethodDelete:
 		return true
@@ -775,11 +778,34 @@ func mockAllowedWhileDisabled(r *http.Request) bool {
 		if json.Unmarshal(raw, &body) != nil {
 			return false
 		}
+		if len(segs) == 3 && segs[1] == "bindings" {
+			return m.onlyRemovesNamespaces(segs[0]+"/"+segs[2], body)
+		}
 		_, ok := body["deletionProtection"]
 		return ok && len(body) == 1
 	default:
 		return false
 	}
+}
+
+// onlyRemovesNamespaces reports whether a binding PATCH body lists only
+// namespaces the stored binding key already lists.
+func (m *mockKupeAPI) onlyRemovesNamespaces(key string, body map[string]any) bool {
+	binding, ok := m.databaseBindings[key]
+	if !ok {
+		return true // answered 404 not found by the route
+	}
+	requested, ok := mockNamespaces(body["namespaces"])
+	if !ok {
+		return true // answered 400 by the route
+	}
+	stored, _ := binding["namespaces"].([]string)
+	for _, namespace := range requested {
+		if !slices.Contains(stored, namespace) {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *mockKupeAPI) createDatabase(w http.ResponseWriter, r *http.Request) {
