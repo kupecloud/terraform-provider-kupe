@@ -69,7 +69,7 @@ func TestAPIErrorDetail(t *testing.T) {
 				Message:    "managed databases are not available on this platform",
 				Code:       client.CodeDatabasesUnavailable,
 			},
-			wantSubstr:   []string{"Databases are not enabled for this Kupe Cloud environment", "Error code: databases_unavailable"},
+			wantSubstr:   []string{"Databases are not enabled for this Kupe Cloud environment", "their bindings deleted or have namespaces removed", "Error code: databases_unavailable"},
 			wantNoSubstr: []string{"does not exist on the server"},
 		},
 		{
