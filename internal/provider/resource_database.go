@@ -300,10 +300,11 @@ func (r *DatabaseResource) Update(ctx context.Context, req resource.UpdateReques
 // protectionOnly reports whether patch changes deletion protection and
 // nothing else. kupe-api and the platform read deletion protection from the
 // spec when a delete arrives, so it is in effect as soon as the PATCH is
-// accepted: Update does not wait for it.
+// accepted: Update does not wait for it. Every other PatchDatabaseRequest
+// field must be checked here (TestProtectionOnlyCoversEveryPatchField).
 func protectionOnly(patch client.PatchDatabaseRequest) bool {
 	return patch.DeletionProtection != nil &&
-		patch.Version == nil && patch.Resources == nil && patch.HighAvailability == nil
+		patch.Version == nil && patch.Resources == nil && patch.HighAvailability == nil && patch.Backup == nil
 }
 
 // databasePatch builds the merge patch for the fields that differ between
