@@ -65,12 +65,52 @@ func (d *DatabaseDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 				Description: "Whether the Kupe platform refuses to delete the database.",
 				Computed:    true,
 			},
+			"backup": schema.SingleNestedAttribute{
+				Description: "Backup settings. Null when the database has never set them: it keeps the defaults, " +
+					"7 days and `Daily`.",
+				Computed: true,
+				Attributes: map[string]schema.Attribute{
+					"retention": schema.Int64Attribute{
+						Description: "How far back the backups reach, in days. Null when never set: the default, 7, " +
+							"applies.",
+						Computed: true,
+					},
+					"schedule": schema.StringAttribute{
+						Description: "How many full backups are kept within the retention period: `Daily` keeps " +
+							"one for every day, `DailyThenWeekly` one for each of the last 7 days and one a week " +
+							"before that.",
+						Computed: true,
+					},
+				},
+			},
 			"phase": schema.StringAttribute{
 				Description: "Current phase: Pending, Provisioning, Running, Degraded or Terminating.",
 				Computed:    true,
 			},
 			"current_version": schema.StringAttribute{
 				Description: "Full engine version running, e.g. `18.0`.",
+				Computed:    true,
+			},
+			"last_backup_at": schema.StringAttribute{
+				Description: lastBackupAtDescription,
+				Computed:    true,
+			},
+			"recovery_window": schema.SingleNestedAttribute{
+				Description: recoveryWindowDescription,
+				Computed:    true,
+				Attributes: map[string]schema.Attribute{
+					"earliest": schema.StringAttribute{
+						Description: recoveryWindowEarliestDescription,
+						Computed:    true,
+					},
+					"latest": schema.StringAttribute{
+						Description: recoveryWindowLatestDescription,
+						Computed:    true,
+					},
+				},
+			},
+			"backup_size_bytes": schema.Int64Attribute{
+				Description: backupSizeBytesDescription,
 				Computed:    true,
 			},
 			"created_at": schema.StringAttribute{

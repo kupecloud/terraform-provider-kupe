@@ -56,6 +56,13 @@ type mockKupeAPI struct {
 	// creationPaused refuses cluster and database creation like kupe-api
 	// does while creation is paused.
 	creationPaused bool
+	// backupsUnavailable answers like a platform that does not offer
+	// backups: a database create or PATCH that sets backup is refused, and a
+	// database created meanwhile has no backup settings.
+	backupsUnavailable bool
+	// databaseRequests records each database POST and PATCH body the routes
+	// decoded.
+	databaseRequests []mockRequest
 	// databaseDeleteConflicts is how many upcoming database DELETEs are
 	// refused with a plain 409, like a concurrent change does.
 	databaseDeleteConflicts int
@@ -713,16 +720,82 @@ const mockDatabasesPath = "/api/v1/tenants/acme/databases"
 
 // mockDatabasePatchFields are the only fields kupe-api's PATCH accepts.
 var mockDatabasePatchFields = map[string]bool{
-	"version": true, "resources": true, "highAvailability": true, "deletionProtection": true,
+	"version": true, "resources": true, "highAvailability": true, "deletionProtection": true, "backup": true,
 }
 
 func mockError(w http.ResponseWriter, status int, code, msg string) {
+	mockFieldError(w, status, code, "", msg)
+}
+
+// mockFieldError is mockError naming the spec field the error applies to;
+// kupe-api sends a field only with a code.
+func mockFieldError(w http.ResponseWriter, status int, code, field, msg string) {
 	w.WriteHeader(status)
 	body := map[string]string{"error": msg}
 	if code != "" {
 		body["code"], body["severity"], body["message"] = code, "error", msg
+		if field != "" {
+			body["field"] = field
+		}
 	}
 	mustEncodeJSON(w, body)
+}
+
+// Backup settings the mock platform offers, as the operator chart publishes
+// them.
+const (
+	mockBackupRetentionMin     = 7
+	mockBackupRetentionMax     = 35
+	mockBackupRetentionDefault = 7
+)
+
+// mockBackup checks a backup object a database create or PATCH sent the way
+// kupe-api does, and returns stored with the sent keys laid over it and the
+// CRD's schedule default filled in. It answers a refusal itself and returns
+// false. A retention is checked only when it changes, like kupe-api.
+func (m *mockKupeAPI) mockBackup(w http.ResponseWriter, sent any, stored map[string]any, create bool) (map[string]any, bool) {
+	if m.backupsUnavailable {
+		mockFieldError(w, http.StatusBadRequest, client.CodeBackupsUnavailable, "spec.backup",
+			"backups are not available on this platform")
+		return nil, false
+	}
+	backup, ok := sent.(map[string]any)
+	if !ok {
+		mockError(w, http.StatusBadRequest, "", "invalid request body: backup must be an object")
+		return nil, false
+	}
+	for key := range backup {
+		if key != "retention" && key != "schedule" {
+			mockError(w, http.StatusBadRequest, "", fmt.Sprintf("invalid request body: json: unknown field %q", key))
+			return nil, false
+		}
+	}
+	if !create && len(backup) == 0 {
+		mockError(w, http.StatusBadRequest, "", "backup must set at least one of retention, schedule")
+		return nil, false
+	}
+	if schedule, set := backup["schedule"]; set && schedule != "Daily" && schedule != "DailyThenWeekly" {
+		mockError(w, http.StatusBadRequest, "", "backup.schedule must be one of Daily, DailyThenWeekly")
+		return nil, false
+	}
+	if retention, set := backup["retention"]; set && retention != stored["retention"] {
+		if days, _ := retention.(float64); days < mockBackupRetentionMin || days > mockBackupRetentionMax {
+			mockFieldError(w, http.StatusBadRequest, "DATABASE_BACKUP_RETENTION_OUT_OF_RANGE", "spec.backup.retention",
+				fmt.Sprintf("backup.retention must be between %d and %d days", mockBackupRetentionMin, mockBackupRetentionMax))
+			return nil, false
+		}
+	}
+	merged := map[string]any{}
+	for k, v := range stored {
+		merged[k] = v
+	}
+	for k, v := range backup {
+		merged[k] = v
+	}
+	if _, set := merged["schedule"]; !set {
+		merged["schedule"] = "Daily"
+	}
+	return merged, true
 }
 
 // serveDatabases routes /databases[/{name}[/bindings[/{binding}]]]. Like the
@@ -823,6 +896,7 @@ func (m *mockKupeAPI) createDatabase(w http.ResponseWriter, r *http.Request) {
 	}
 	var body map[string]any
 	mustDecodeJSON(r, &body)
+	m.databaseRequests = append(m.databaseRequests, mockRequest{method: r.Method, body: body})
 	name := strOrEmpty(body["name"])
 	if _, exists := m.databases[name]; exists {
 		mockError(w, http.StatusConflict, "", "database already exists")
@@ -841,12 +915,26 @@ func (m *mockKupeAPI) createDatabase(w http.ResponseWriter, r *http.Request) {
 		version = "18"
 	}
 	protected, set := body["deletionProtection"].(bool)
+	// The operator's defaulter gives a new database the default retention
+	// while backups are offered (CREATE only); the CRD defaults the schedule.
+	var backup map[string]any
+	if sent, ok := body["backup"]; ok {
+		if backup, ok = m.mockBackup(w, sent, nil, true); !ok {
+			return
+		}
+	} else if !m.backupsUnavailable {
+		backup = map[string]any{"schedule": "Daily"}
+	}
+	if _, ok := backup["retention"]; backup != nil && !ok {
+		backup["retention"] = float64(mockBackupRetentionDefault)
+	}
 	rv := m.nextRV()
 	db := map[string]any{
 		"name": name, "engine": engine, "version": version,
 		"resources":          body["resources"],
 		"highAvailability":   body["highAvailability"] == true,
 		"deletionProtection": protected || !set,
+		"backup":             backup,
 		"generation":         1,
 		"status":             map[string]any{"phase": "Pending", "observedGeneration": 0, "currentVersion": ""},
 		"resourceVersion":    rv, "createdAt": "2026-10-09T10:00:00Z",
@@ -869,6 +957,15 @@ func (m *mockKupeAPI) getDatabase(w http.ResponseWriter, name string) {
 		"observedGeneration": db["generation"],
 		"currentVersion":     db["version"].(string) + ".0",
 		"conditions":         []any{map[string]any{"type": "Ready", "status": "True", "reason": "Healthy"}},
+		"lastBackupAt":       "",
+		"recoveryWindow":     nil,
+		"backupSizeBytes":    0,
+	}
+	// A database with backup settings reports the backups taken.
+	if backup, _ := db["backup"].(map[string]any); backup != nil {
+		status["lastBackupAt"] = "2026-10-21T03:17:00Z"
+		status["recoveryWindow"] = map[string]any{"earliest": "2026-10-14T03:17:00Z", "latest": "2026-10-21T09:00:00Z"}
+		status["backupSizeBytes"] = int64(5368709120)
 	}
 	if len(m.databaseStatuses) > 0 {
 		for k, v := range m.databaseStatuses[0] {
@@ -900,6 +997,7 @@ func (m *mockKupeAPI) patchDatabase(w http.ResponseWriter, r *http.Request, name
 	}
 	var body map[string]any
 	mustDecodeJSON(r, &body)
+	m.databaseRequests = append(m.databaseRequests, mockRequest{method: r.Method, ifMatch: r.Header.Get("If-Match"), body: body})
 	if len(body) == 0 {
 		mockError(w, http.StatusBadRequest, "", "at least one field required")
 		return
@@ -913,6 +1011,13 @@ func (m *mockKupeAPI) patchDatabase(w http.ResponseWriter, r *http.Request, name
 	if v, ok := body["version"]; ok && v != db["version"] {
 		mockError(w, http.StatusBadRequest, client.CodeMajorUpgradeUnavailable, "major version upgrades are not available yet")
 		return
+	}
+	var backup map[string]any
+	if sent, ok := body["backup"]; ok {
+		stored, _ := db["backup"].(map[string]any)
+		if backup, ok = m.mockBackup(w, sent, stored, false); !ok {
+			return
+		}
 	}
 	if res, ok := body["resources"].(map[string]any); ok {
 		current, _ := db["resources"].(map[string]any)
@@ -933,6 +1038,9 @@ func (m *mockKupeAPI) patchDatabase(w http.ResponseWriter, r *http.Request, name
 		if v, ok := body[key]; ok {
 			db[key] = v
 		}
+	}
+	if backup != nil {
+		db["backup"] = backup
 	}
 	db["generation"] = db["generation"].(int) + 1
 	rv := m.nextRV()

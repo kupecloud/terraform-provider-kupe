@@ -173,6 +173,58 @@ func TestAccDatabaseResource_ProtectionChangeNotWaited(t *testing.T) {
 	})
 }
 
+// TestAccDatabaseResource_BackupChangeWaits: the platform applies a backup
+// change like a resize, so Update waits for it, alone or sent beside a
+// deletion protection change.
+func TestAccDatabaseResource_BackupChangeWaits(t *testing.T) {
+	shrinkPollInterval(t)
+	const addr = "kupe_database.test"
+	rolling := mockDatabaseStatus("Running", false, "applying changes: Cluster in healthy state (1 instances ready)")
+	ready := mockDatabaseStatus("Running", true, "1 of 1 instances ready")
+	tests := []struct {
+		name    string
+		changed testDatabase
+	}{
+		{name: "a backup change alone", changed: testDatabase{protection: boolPtr(false), backup: strPtr("retention = 21")}},
+		{
+			name:    "a backup change beside a deletion protection change",
+			changed: testDatabase{protection: boolPtr(true), backup: strPtr("retention = 21")},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := newMockKupeAPI()
+			defer mock.close()
+			unprotected := testDatabase{protection: boolPtr(false), backup: strPtr("retention = 21")}
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+				CheckDestroy:             testAccCheckNoDatabases(mock),
+				Steps: []resource.TestStep{
+					{Config: testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false), backup: strPtr("retention = 14")})},
+					{
+						PreConfig: func() {
+							mock.setState(func(m *mockKupeAPI) {
+								m.databaseStatusesOnPatch = []map[string]any{rolling, rolling, ready}
+							})
+						},
+						Config: testAccDatabaseConfig(mock.url(), tt.changed),
+						Check: resource.ComposeAggregateTestCheckFunc(
+							resource.TestCheckResourceAttr(addr, "backup.retention", "21"),
+							resource.TestCheckResourceAttr(addr, "phase", "Running"),
+							testAccCheckDatabaseStatusesPlayed(mock),
+						),
+					},
+					{
+						// Lift protection so the final destroy succeeds.
+						PreConfig: func() { mock.setState(func(m *mockKupeAPI) { m.databaseStatusesOnPatch = nil }) },
+						Config:    testAccDatabaseConfig(mock.url(), unprotected),
+					},
+				},
+			})
+		})
+	}
+}
+
 // TestAccDatabaseResource_CreateWait: Create fails on a database that ends
 // Degraded, or that is still provisioning when the timeout fires, keeping it
 // in state marked tainted.
