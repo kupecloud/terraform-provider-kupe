@@ -15,7 +15,10 @@ type Database struct {
 	Resources          *ResourceQuantities `json:"resources,omitempty"`
 	HighAvailability   bool                `json:"highAvailability"`
 	DeletionProtection bool                `json:"deletionProtection"`
-	Status             *DatabaseStatus     `json:"status,omitempty"`
+	// Backup is nil while the database has never set its backup settings:
+	// the platform defaults apply.
+	Backup *DatabaseBackup `json:"backup,omitempty"`
+	Status *DatabaseStatus `json:"status,omitempty"`
 	// Generation increments on every spec change; the operator has applied
 	// a change once Status.ObservedGeneration catches up with it.
 	Generation      int64  `json:"generation"`
@@ -32,6 +35,32 @@ type DatabaseStatus struct {
 	// Conditions carry the reason behind the phase. Ready is False while
 	// a change rolls through the instances, though the phase stays Running.
 	Conditions []Condition `json:"conditions"`
+	// LastBackupAt is when the newest full backup finished (RFC 3339), ""
+	// until the first one completes.
+	LastBackupAt string `json:"lastBackupAt"`
+	// RecoveryWindow is nil until the backups report one.
+	RecoveryWindow *RecoveryWindow `json:"recoveryWindow,omitempty"`
+	// BackupSizeBytes is the storage every full backup and all WAL kept for
+	// the database take up, 0 until measured.
+	BackupSizeBytes int64 `json:"backupSizeBytes"`
+}
+
+// DatabaseBackup is a database's backup settings. A nil field is unset: a
+// request leaves it out, so the platform keeps its value (or, on create,
+// applies its default); a response leaves it out when it was never set.
+type DatabaseBackup struct {
+	// Retention is how far back the backups reach, in days. The platform
+	// publishes the range it accepts and refuses a value outside it.
+	Retention *int32 `json:"retention,omitempty"`
+	// Schedule is Daily or DailyThenWeekly.
+	Schedule *string `json:"schedule,omitempty"`
+}
+
+// RecoveryWindow is the oldest and newest points a database can be
+// recovered to, in RFC 3339.
+type RecoveryWindow struct {
+	Earliest string `json:"earliest"`
+	Latest   string `json:"latest"`
 }
 
 // Ready reports whether the database's Ready condition is True.
@@ -49,15 +78,21 @@ type CreateDatabaseRequest struct {
 	// DeletionProtection is a pointer because the API defaults an omitted
 	// value to true; an explicit false must reach the wire.
 	DeletionProtection *bool `json:"deletionProtection,omitempty"`
+	// Backup is sent only when set; the platform defaults what it leaves
+	// out.
+	Backup *DatabaseBackup `json:"backup,omitempty"`
 }
 
 // PatchDatabaseRequest is the JSON merge patch for a database. Nil fields
-// are left unchanged; these four are the only fields the API can change.
+// are left unchanged; these five are the only fields the API can change.
 type PatchDatabaseRequest struct {
 	Version            *string             `json:"version,omitempty"`
 	Resources          *ResourceQuantities `json:"resources,omitempty"`
 	HighAvailability   *bool               `json:"highAvailability,omitempty"`
 	DeletionProtection *bool               `json:"deletionProtection,omitempty"`
+	// Backup changes only the keys it sets. The API refuses an empty one,
+	// and any while the platform does not offer backups.
+	Backup *DatabaseBackup `json:"backup,omitempty"`
 }
 
 // DatabaseBinding grants one role of a database to namespaces of one
