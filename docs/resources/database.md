@@ -34,6 +34,11 @@ resource "kupe_database" "orders" {
   # Two instances with a synchronous standby. Can be turned on or off later.
   high_availability = true
 
+  # Keep 14 days of backups instead of the default 7.
+  backup = {
+    retention = 14
+  }
+
   # deletion_protection defaults to true: the platform refuses to delete the
   # database until it is set to false and applied.
 }
@@ -62,6 +67,14 @@ resource "kupe_database" "billing" {
 ```
 
 To delete a protected database, set `deletion_protection = false` (and remove `prevent_destroy`), run `terraform apply`, then destroy it.
+
+### Backups
+
+Kupe takes a full backup of every database each day and saves the write-ahead log (WAL) continuously in between, so the backups cover every point inside the retention period. `backup.retention` sets how far back they reach (7 to 35 days, default 7) and `backup.schedule` how many full backups are kept within that time (`Daily` or `DailyThenWeekly`). Shortening retention deletes the backups that fall outside the new window.
+
+A change applies in place, and `terraform apply` waits for the database to take it, as it does for a resize. Fields you leave out keep their current value, and removing `backup` keeps the current settings: to go back to the defaults, set them.
+
+`last_backup_at`, `recovery_window` and `backup_size_bytes` report the newest full backup, the oldest and newest points you can recover to, and the storage the backups take up. The `kupe_database` data source returns the same values.
 
 ### Connecting applications
 
