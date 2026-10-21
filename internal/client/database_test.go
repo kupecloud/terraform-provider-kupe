@@ -267,3 +267,151 @@ func TestUpdateDatabaseBinding(t *testing.T) {
 		t.Errorf("PATCH body = %v, want only namespaces=[api reports]", body)
 	}
 }
+
+// TestGetDatabase_Backup decodes the backup settings and status: set, a
+// retention never set, and a database that never set them.
+func TestGetDatabase_Backup(t *testing.T) {
+	tests := []struct {
+		name          string
+		backup        any
+		status        map[string]any
+		wantRetention *int32
+		wantSchedule  *string
+		wantWindow    *RecoveryWindow
+		wantLast      string
+		wantSize      int64
+	}{
+		{
+			name:   "settings and status reported",
+			backup: map[string]any{"retention": 14, "schedule": "DailyThenWeekly"},
+			status: map[string]any{
+				"lastBackupAt":    "2026-10-21T03:17:00Z",
+				"recoveryWindow":  map[string]any{"earliest": "2026-10-07T03:17:00Z", "latest": "2026-10-21T09:00:00Z"},
+				"backupSizeBytes": 5368709120,
+			},
+			wantRetention: int32Ptr(14), wantSchedule: stringPtr("DailyThenWeekly"),
+			wantWindow: &RecoveryWindow{Earliest: "2026-10-07T03:17:00Z", Latest: "2026-10-21T09:00:00Z"},
+			wantLast:   "2026-10-21T03:17:00Z", wantSize: 5368709120,
+		},
+		{
+			name:         "a retention never set is absent",
+			backup:       map[string]any{"schedule": "Daily"},
+			status:       map[string]any{"lastBackupAt": "", "recoveryWindow": nil, "backupSizeBytes": 0},
+			wantSchedule: stringPtr("Daily"),
+		},
+		{
+			name:   "settings never set are null",
+			backup: nil,
+			status: map[string]any{"lastBackupAt": "", "recoveryWindow": nil, "backupSizeBytes": 0},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := newMockAPI()
+			defer mock.close()
+			mock.onJSON("GET", "/api/v1/tenants/acme/databases/orders-db", http.StatusOK, map[string]any{
+				"name": "orders-db", "backup": tt.backup, "status": tt.status,
+			})
+			db, _, err := mock.client("acme").GetDatabase(context.Background(), "orders-db")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.backup == nil {
+				if db.Backup != nil {
+					t.Fatalf("Backup = %+v, want nil", db.Backup)
+				}
+			} else {
+				if db.Backup == nil {
+					t.Fatal("Backup = nil, want the settings")
+				}
+				if !equalPtr(db.Backup.Retention, tt.wantRetention) || !equalPtr(db.Backup.Schedule, tt.wantSchedule) {
+					t.Errorf("Backup = %s, want retention %s schedule %s",
+						describeBackup(db.Backup), describePtr(tt.wantRetention), describePtr(tt.wantSchedule))
+				}
+			}
+			if db.Status.LastBackupAt != tt.wantLast || db.Status.BackupSizeBytes != tt.wantSize {
+				t.Errorf("lastBackupAt %q, backupSizeBytes %d; want %q, %d",
+					db.Status.LastBackupAt, db.Status.BackupSizeBytes, tt.wantLast, tt.wantSize)
+			}
+			if !equalPtr(db.Status.RecoveryWindow, tt.wantWindow) {
+				t.Errorf("RecoveryWindow = %+v, want %+v", db.Status.RecoveryWindow, tt.wantWindow)
+			}
+		})
+	}
+}
+
+// TestDatabaseRequests_BackupOnTheWire: backup is sent only when set, and
+// then with only the keys set.
+func TestDatabaseRequests_BackupOnTheWire(t *testing.T) {
+	tests := []struct {
+		name   string
+		backup *DatabaseBackup
+		want   string // the body's backup, "" when absent
+	}{
+		{name: "omitted when unset", backup: nil, want: ""},
+		{name: "retention only", backup: &DatabaseBackup{Retention: int32Ptr(14)}, want: `{"retention":14}`},
+		{name: "schedule only", backup: &DatabaseBackup{Schedule: stringPtr("DailyThenWeekly")}, want: `{"schedule":"DailyThenWeekly"}`},
+		{
+			name:   "both",
+			backup: &DatabaseBackup{Retention: int32Ptr(21), Schedule: stringPtr("Daily")},
+			want:   `{"retention":21,"schedule":"Daily"}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := newMockAPI()
+			defer mock.close()
+			mock.onJSON("POST", "/api/v1/tenants/acme/databases", http.StatusCreated, map[string]any{"name": "orders-db"})
+			mock.onJSON("PATCH", "/api/v1/tenants/acme/databases/orders-db", http.StatusOK, map[string]any{"name": "orders-db"})
+			c := mock.client("acme")
+			ctx := context.Background()
+
+			if _, _, err := c.CreateDatabase(ctx, CreateDatabaseRequest{Name: "orders-db", Backup: tt.backup}); err != nil {
+				t.Fatal(err)
+			}
+			if got := backupInBody(t, mock.lastRequest().Body); got != tt.want {
+				t.Errorf("POST backup = %q, want %q", got, tt.want)
+			}
+			ha := true
+			if _, _, err := c.UpdateDatabase(ctx, "orders-db", `"1"`, PatchDatabaseRequest{HighAvailability: &ha, Backup: tt.backup}); err != nil {
+				t.Fatal(err)
+			}
+			if got := backupInBody(t, mock.lastRequest().Body); got != tt.want {
+				t.Errorf("PATCH backup = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// backupInBody is the raw backup object in a request body, "" when absent.
+func backupInBody(t *testing.T, body string) string {
+	t.Helper()
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(body), &fields); err != nil {
+		t.Fatal(err)
+	}
+	return string(fields["backup"])
+}
+
+func int32Ptr(v int32) *int32    { return &v }
+func stringPtr(v string) *string { return &v }
+
+// equalPtr reports whether two pointers are both nil or point at equal
+// values.
+func equalPtr[T comparable](a, b *T) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+func describePtr[T any](p *T) string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprint(*p)
+}
+
+func describeBackup(b *DatabaseBackup) string {
+	return fmt.Sprintf("{retention %s schedule %s}", describePtr(b.Retention), describePtr(b.Schedule))
+}
