@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -228,6 +229,38 @@ func TestDatabaseDeleteNotice(t *testing.T) {
 	}
 	if !strings.Contains(string(doc), sharedDeleteNotice) {
 		t.Errorf("docs/resources/database.md does not state %q; run make docs", sharedDeleteNotice)
+	}
+}
+
+// TestProtectionOnlyCoversEveryPatchField guards protectionOnly against the
+// next PATCH field. A patch that sets deletion protection and anything else
+// changes more than protection, so Update must wait for it. A field added to
+// PatchDatabaseRequest that protectionOnly does not check fails here.
+func TestProtectionOnlyCoversEveryPatchField(t *testing.T) {
+	// exempt are the fields a patch that Update does not wait for may set.
+	exempt := map[string]bool{"DeletionProtection": true}
+	protected := true
+	if !protectionOnly(client.PatchDatabaseRequest{DeletionProtection: &protected}) {
+		t.Fatal("a patch of deletion protection alone is not protection only")
+	}
+	typ := reflect.TypeFor[client.PatchDatabaseRequest]()
+	for i := range typ.NumField() {
+		field := typ.Field(i)
+		if exempt[field.Name] {
+			continue
+		}
+		t.Run(field.Name, func(t *testing.T) {
+			if field.Type.Kind() != reflect.Pointer {
+				t.Fatalf("PatchDatabaseRequest.%s is a %s, not a pointer: protectionOnly cannot tell whether it is set",
+					field.Name, field.Type)
+			}
+			patch := client.PatchDatabaseRequest{DeletionProtection: &protected}
+			reflect.ValueOf(&patch).Elem().Field(i).Set(reflect.New(field.Type.Elem()))
+			if protectionOnly(patch) {
+				t.Errorf("protectionOnly ignores PatchDatabaseRequest.%s, so a patch that also sets it is not waited "+
+					"for: check it in protectionOnly", field.Name)
+			}
+		})
 	}
 }
 
