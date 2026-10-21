@@ -10,6 +10,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
@@ -320,6 +321,8 @@ func (r *DatabaseResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 						Validators: []validator.Int64{
 							int64validator.AtLeast(1),            // codespell:ignore
 							int64validator.AtMost(math.MaxInt32), // codespell:ignore
+							// `backup = {}` has nothing to send on PATCH, so a never-set database's unknown children never resolve.
+							int64validator.AtLeastOneOf(path.MatchRoot("backup").AtName("schedule")),
 						},
 					},
 					"schedule": schema.StringAttribute{
@@ -466,16 +469,13 @@ func databasePatch(plan, state *DatabaseResourceModel) (client.PatchDatabaseRequ
 }
 
 // backupOnCreate is the backup settings a new database is created with: the
-// planned keys with a known value, an empty object for `backup = {}`, nil
-// when `backup` is unset so the platform's defaults apply.
+// planned keys with a known value, nil when `backup` is unset so the
+// platform's defaults apply. `backup = {}` is refused at plan time.
 func backupOnCreate(plan types.Object) *client.DatabaseBackup {
 	if !isSet(plan) {
 		return nil
 	}
-	if backup := backupChanges(plan, types.ObjectNull(databaseBackupAttrTypes)); backup != nil {
-		return backup
-	}
-	return &client.DatabaseBackup{}
+	return backupChanges(plan, types.ObjectNull(databaseBackupAttrTypes))
 }
 
 // backupChanges is the backup settings to send: the planned keys with a

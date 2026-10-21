@@ -565,6 +565,10 @@ func TestAccDatabaseResource_InvalidConfig(t *testing.T) {
 			name: "a backup retention beyond the API's int32", db: testDatabase{backup: strPtr("retention = 2147483648")},
 			wantErr: `backup.retention value must be at most 2147483647, got: 2147483648`,
 		},
+		{
+			name: "an empty backup", db: testDatabase{backup: strPtr("")},
+			wantErr: wrappedText("At least one attribute out of [backup.schedule,backup.retention] must be specified"),
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -915,23 +919,6 @@ data "kupe_database" "test" {
 					),
 				},
 			},
-		})
-	})
-
-	t.Run("an empty backup takes the platform's defaults", func(t *testing.T) {
-		mock := newMockKupeAPI()
-		defer mock.close()
-		resource.UnitTest(t, resource.TestCase{
-			ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
-			CheckDestroy:             testAccCheckNoDatabases(mock),
-			Steps: []resource.TestStep{{
-				Config: testAccDatabaseConfig(mock.url(), testDatabase{protection: off, backup: strPtr("")}),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					testAccCheckDatabaseRequestBackup(mock, http.MethodPost, `{}`),
-					resource.TestCheckResourceAttr(addr, "backup.retention", "7"),
-					resource.TestCheckResourceAttr(addr, "backup.schedule", "Daily"),
-				),
-			}},
 		})
 	})
 
