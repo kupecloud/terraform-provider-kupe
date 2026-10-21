@@ -3,16 +3,23 @@ package provider
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/kupecloud/terraform-provider-kupe/internal/client"
@@ -40,6 +47,39 @@ const databaseEngine = "postgres"
 // and diagnostics use the same words so the promise is stated once.
 const databaseDeleteNotice = "Deleting a database removes it and its automatic backups immediately, and they cannot be restored. " +
 	"Manual backups stay until you delete them."
+
+// Backup schedules the platform offers. The platform also publishes the
+// retention range it accepts and refuses a value outside it, so the schema
+// checks only that a retention is a positive number of days.
+const (
+	backupScheduleDaily           = "Daily"
+	backupScheduleDailyThenWeekly = "DailyThenWeekly"
+)
+
+// Descriptions of the backup attributes. The resource and the data source
+// share the status ones.
+const (
+	backupDescription = "Backup settings: how far back the backups reach and how many full backups are kept. " +
+		"Fields left out keep their current value, and removing `backup` from the configuration keeps the " +
+		"current settings. Null on a database that has never set them: the defaults apply, 7 days and `Daily`. " +
+		"While the Kupe platform does not offer backups, setting `backup` fails with error code " +
+		"`backups_unavailable`."
+	backupRetentionDescription = "How far back the backups reach, in days: 7 to 35, default 7. The Kupe platform " +
+		"sets the range and refuses a value outside it (error code `DATABASE_BACKUP_RETENTION_OUT_OF_RANGE`). " +
+		"Shortening retention deletes the backups that fall outside the new window."
+	backupScheduleDescription = "How many full backups are kept within the retention period: `Daily` keeps one " +
+		"for every day; `DailyThenWeekly` keeps one for each of the last 7 days and one a week before that. The " +
+		"points you can recover to are the same either way; recovering to an older point takes longer. Default " +
+		"`Daily`."
+	lastBackupAtDescription = "When the newest full backup finished (RFC 3339). Empty until the first backup " +
+		"completes."
+	recoveryWindowDescription = "The oldest and newest points you can recover the database to. Null until the " +
+		"backups report them."
+	recoveryWindowEarliestDescription = "The oldest point you can recover to (RFC 3339)."
+	recoveryWindowLatestDescription   = "The newest point you can recover to: the newest WAL saved (RFC 3339)."
+	backupSizeBytesDescription        = "Bytes every full backup and all WAL kept for the database take up in " +
+		"storage, manual backups included. 0 until measured."
+)
 
 // Default timeouts for database operations, overridable in the `timeouts`
 // block. Provisioning starts instances and storage; an upgrade or resize
@@ -71,9 +111,29 @@ type databaseModel struct {
 	Resources          *ResourcesModel `tfsdk:"resources"`
 	HighAvailability   types.Bool      `tfsdk:"high_availability"`
 	DeletionProtection types.Bool      `tfsdk:"deletion_protection"`
-	Phase              types.String    `tfsdk:"phase"`
-	CurrentVersion     types.String    `tfsdk:"current_version"`
-	CreatedAt          types.String    `tfsdk:"created_at"`
+	// Backup and RecoveryWindow are objects, not struct pointers like
+	// Resources: a plan can hold them unknown (Backup on create without a
+	// `backup` attribute, RecoveryWindow on every change), which a struct
+	// pointer cannot represent.
+	Backup          types.Object `tfsdk:"backup"`
+	Phase           types.String `tfsdk:"phase"`
+	CurrentVersion  types.String `tfsdk:"current_version"`
+	LastBackupAt    types.String `tfsdk:"last_backup_at"`
+	RecoveryWindow  types.Object `tfsdk:"recovery_window"`
+	BackupSizeBytes types.Int64  `tfsdk:"backup_size_bytes"`
+	CreatedAt       types.String `tfsdk:"created_at"`
+}
+
+// databaseBackupAttrTypes are the attributes of `backup`.
+var databaseBackupAttrTypes = map[string]attr.Type{
+	"retention": types.Int64Type,
+	"schedule":  types.StringType,
+}
+
+// recoveryWindowAttrTypes are the attributes of `recovery_window`.
+var recoveryWindowAttrTypes = map[string]attr.Type{
+	"earliest": types.StringType,
+	"latest":   types.StringType,
 }
 
 type DatabaseResourceModel struct {
@@ -236,12 +296,73 @@ func (r *DatabaseResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 				Computed: true,
 				Default:  booldefault.StaticBool(true),
 			},
+			"backup": schema.SingleNestedAttribute{
+				Description: backupDescription,
+				Optional:    true,
+				Computed:    true,
+				// Unset in configuration, the recorded settings stay: the
+				// platform never changes them on its own, and a database
+				// that never set them stays null.
+				PlanModifiers: []planmodifier.Object{
+					objectplanmodifier.UseStateForUnknown(),
+				},
+				Attributes: map[string]schema.Attribute{
+					"retention": schema.Int64Attribute{
+						Description: backupRetentionDescription,
+						Optional:    true,
+						Computed:    true,
+						// Non-null only: a database without backup settings
+						// that gains a `backup` attribute gets the platform's
+						// values for the fields it leaves out.
+						PlanModifiers: []planmodifier.Int64{
+							int64planmodifier.UseNonNullStateForUnknown(),
+						},
+						Validators: []validator.Int64{
+							int64validator.AtLeast(1),            // codespell:ignore
+							int64validator.AtMost(math.MaxInt32), // codespell:ignore
+						},
+					},
+					"schedule": schema.StringAttribute{
+						Description: backupScheduleDescription,
+						Optional:    true,
+						Computed:    true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.UseNonNullStateForUnknown(),
+						},
+						Validators: []validator.String{
+							stringvalidator.OneOf(backupScheduleDaily, backupScheduleDailyThenWeekly),
+						},
+					},
+				},
+			},
 			"phase": schema.StringAttribute{
 				Description: "Current phase: Pending, Provisioning, Running, Degraded or Terminating.",
 				Computed:    true,
 			},
 			"current_version": schema.StringAttribute{
 				Description: "Full engine version running, e.g. `18.0`.",
+				Computed:    true,
+			},
+			"last_backup_at": schema.StringAttribute{
+				Description: lastBackupAtDescription,
+				Computed:    true,
+			},
+			"recovery_window": schema.SingleNestedAttribute{
+				Description: recoveryWindowDescription,
+				Computed:    true,
+				Attributes: map[string]schema.Attribute{
+					"earliest": schema.StringAttribute{
+						Description: recoveryWindowEarliestDescription,
+						Computed:    true,
+					},
+					"latest": schema.StringAttribute{
+						Description: recoveryWindowLatestDescription,
+						Computed:    true,
+					},
+				},
+			},
+			"backup_size_bytes": schema.Int64Attribute{
+				Description: backupSizeBytesDescription,
 				Computed:    true,
 			},
 			"etag":       etagAttribute(),
@@ -270,6 +391,7 @@ func (r *DatabaseResource) Create(ctx context.Context, req resource.CreateReques
 		Resources:          resourcesFromPlan(plan.Resources),
 		HighAvailability:   plan.HighAvailability.ValueBool(),
 		DeletionProtection: &deletionProtection,
+		Backup:             backupOnCreate(plan.Backup),
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("failed to create database", apiErrorDetail(err))
@@ -336,7 +458,75 @@ func databasePatch(plan, state *DatabaseResourceModel) (client.PatchDatabaseRequ
 		patch.DeletionProtection = &protected
 		hasChanges = true
 	}
+	if backup := backupChanges(plan.Backup, state.Backup); backup != nil {
+		patch.Backup = backup
+		hasChanges = true
+	}
 	return patch, hasChanges
+}
+
+// backupOnCreate is the backup settings a new database is created with: the
+// planned keys with a known value, an empty object for `backup = {}`, nil
+// when `backup` is unset so the platform's defaults apply.
+func backupOnCreate(plan types.Object) *client.DatabaseBackup {
+	if !isSet(plan) {
+		return nil
+	}
+	if backup := backupChanges(plan, types.ObjectNull(databaseBackupAttrTypes)); backup != nil {
+		return backup
+	}
+	return &client.DatabaseBackup{}
+}
+
+// backupChanges is the backup settings to send: the planned keys with a
+// known value that differs from prior's. nil when none does, so an unchanged
+// `backup` never reaches the wire: kupe-api refuses any `backup` while the
+// platform does not offer backups, and an empty one on PATCH.
+func backupChanges(plan, prior types.Object) *client.DatabaseBackup {
+	retention, schedule := backupAttributes(plan)
+	priorRetention, priorSchedule := backupAttributes(prior)
+	var backup client.DatabaseBackup
+	if isSet(retention) && !retention.Equal(priorRetention) {
+		backup.Retention = retentionDays(retention.ValueInt64())
+	}
+	if isSet(schedule) && !schedule.Equal(priorSchedule) {
+		value := schedule.ValueString()
+		backup.Schedule = &value
+	}
+	if backup.Retention == nil && backup.Schedule == nil {
+		return nil
+	}
+	return &backup
+}
+
+// backupAttributes is the retention and schedule of a `backup` object:
+// unknown when it is unknown, null when it is null.
+func backupAttributes(backup types.Object) (types.Int64, types.String) {
+	if backup.IsUnknown() {
+		return types.Int64Unknown(), types.StringUnknown()
+	}
+	if backup.IsNull() {
+		return types.Int64Null(), types.StringNull()
+	}
+	attrs := backup.Attributes()
+	retention, _ := attrs["retention"].(types.Int64)
+	schedule, _ := attrs["schedule"].(types.String)
+	return retention, schedule
+}
+
+// retentionDays is a retention the schema validated (1 to math.MaxInt32
+// days) as the API's int32.
+func retentionDays(days int64) *int32 {
+	if days < 1 || days > math.MaxInt32 {
+		return nil
+	}
+	d := int32(days)
+	return &d
+}
+
+// isSet reports whether v is known and not null.
+func isSet(v attr.Value) bool {
+	return !v.IsNull() && !v.IsUnknown()
 }
 
 // settingsChanged lists, by attribute name, the settings an update can
@@ -354,6 +544,9 @@ func settingsChanged(prior *databaseModel, current databaseModel) []string {
 	}
 	if !current.DeletionProtection.Equal(prior.DeletionProtection) {
 		changed = append(changed, "deletion_protection")
+	}
+	if !current.Backup.Equal(prior.Backup) {
+		changed = append(changed, "backup")
 	}
 	return changed
 }
@@ -392,9 +585,9 @@ func databaseModelFromAPI(db *client.Database) databaseModel {
 			Storage: stringOrNull(db.Resources.Storage),
 		}
 	}
-	phase, currentVersion := "", ""
-	if db.Status != nil {
-		phase, currentVersion = db.Status.Phase, db.Status.CurrentVersion
+	status := db.Status
+	if status == nil {
+		status = &client.DatabaseStatus{}
 	}
 	return databaseModel{
 		Name:               types.StringValue(db.Name),
@@ -403,8 +596,43 @@ func databaseModelFromAPI(db *client.Database) databaseModel {
 		Resources:          resources,
 		HighAvailability:   types.BoolValue(db.HighAvailability),
 		DeletionProtection: types.BoolValue(db.DeletionProtection),
-		Phase:              types.StringValue(phase),
-		CurrentVersion:     types.StringValue(currentVersion),
+		Backup:             backupFromAPI(db.Backup),
+		Phase:              types.StringValue(status.Phase),
+		CurrentVersion:     types.StringValue(status.CurrentVersion),
+		LastBackupAt:       types.StringValue(status.LastBackupAt),
+		RecoveryWindow:     recoveryWindowFromAPI(status.RecoveryWindow),
+		BackupSizeBytes:    types.Int64Value(status.BackupSizeBytes),
 		CreatedAt:          types.StringValue(db.CreatedAt),
 	}
+}
+
+// backupFromAPI is the `backup` object for the API's settings: null when the
+// database never set them, and a null field for a key never set.
+func backupFromAPI(backup *client.DatabaseBackup) types.Object {
+	if backup == nil {
+		return types.ObjectNull(databaseBackupAttrTypes)
+	}
+	retention, schedule := types.Int64Null(), types.StringNull()
+	if backup.Retention != nil {
+		retention = types.Int64Value(int64(*backup.Retention))
+	}
+	if backup.Schedule != nil {
+		schedule = types.StringValue(*backup.Schedule)
+	}
+	return types.ObjectValueMust(databaseBackupAttrTypes, map[string]attr.Value{
+		"retention": retention,
+		"schedule":  schedule,
+	})
+}
+
+// recoveryWindowFromAPI is the `recovery_window` object, null until the
+// backups report one.
+func recoveryWindowFromAPI(window *client.RecoveryWindow) types.Object {
+	if window == nil {
+		return types.ObjectNull(recoveryWindowAttrTypes)
+	}
+	return types.ObjectValueMust(recoveryWindowAttrTypes, map[string]attr.Value{
+		"earliest": types.StringValue(window.Earliest),
+		"latest":   types.StringValue(window.Latest),
+	})
 }

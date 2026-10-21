@@ -31,14 +31,36 @@ output "orders_db_running_version" {
 
 ### Read-Only
 
+- `backup` (Attributes) Backup settings. Null when the database has never set them: it keeps the defaults, 7 days and `Daily`. (see [below for nested schema](#nestedatt--backup))
+- `backup_size_bytes` (Number) Bytes every full backup and all WAL kept for the database take up in storage, manual backups included. 0 until measured.
 - `created_at` (String) Timestamp when the database was created.
 - `current_version` (String) Full engine version running, e.g. `18.0`.
 - `deletion_protection` (Boolean) Whether the Kupe platform refuses to delete the database.
 - `engine` (String) Database engine, e.g. `postgres`.
 - `high_availability` (Boolean) Whether the database runs two instances with a synchronous standby.
+- `last_backup_at` (String) When the newest full backup finished (RFC 3339). Empty until the first backup completes.
 - `phase` (String) Current phase: Pending, Provisioning, Running, Degraded or Terminating.
+- `recovery_window` (Attributes) The oldest and newest points you can recover the database to. Null until the backups report them. (see [below for nested schema](#nestedatt--recovery_window))
 - `resources` (Attributes) Per-instance resources. (see [below for nested schema](#nestedatt--resources))
 - `version` (String) Requested engine major version, e.g. `18`.
+
+<a id="nestedatt--backup"></a>
+### Nested Schema for `backup`
+
+Read-Only:
+
+- `retention` (Number) How far back the backups reach, in days. Null when never set: the default, 7, applies.
+- `schedule` (String) How many full backups are kept within the retention period: `Daily` keeps one for every day, `DailyThenWeekly` one for each of the last 7 days and one a week before that.
+
+
+<a id="nestedatt--recovery_window"></a>
+### Nested Schema for `recovery_window`
+
+Read-Only:
+
+- `earliest` (String) The oldest point you can recover to (RFC 3339).
+- `latest` (String) The newest point you can recover to: the newest WAL saved (RFC 3339).
+
 
 <a id="nestedatt--resources"></a>
 ### Nested Schema for `resources`

@@ -77,6 +77,7 @@ Grant access with [`kupe_database_binding`](database_binding.md). Each binding p
 
 ### Optional
 
+- `backup` (Attributes) Backup settings: how far back the backups reach and how many full backups are kept. Fields left out keep their current value, and removing `backup` from the configuration keeps the current settings. Null on a database that has never set them: the defaults apply, 7 days and `Daily`. While the Kupe platform does not offer backups, setting `backup` fails with error code `backups_unavailable`. (see [below for nested schema](#nestedatt--backup))
 - `deletion_protection` (Boolean) While `true`, the Kupe platform refuses to delete the database. Set it to `false` and apply before destroying. Default `true`, also for an existing database: importing an unprotected database without this attribute in configuration plans turning protection on.
 - `engine` (String) Database engine. Only `postgres` is supported, and it is the default. The engine of an existing database cannot change: a different value fails the plan instead of replacing the database.
 - `high_availability` (Boolean) Run two instances with a synchronous standby. Can be turned on or off in place. When unset, a new database is created without it and an existing or imported database keeps its current setting, so removing the attribute from configuration does not turn HA off: set it to `false` to do that.
@@ -85,10 +86,13 @@ Grant access with [`kupe_database_binding`](database_binding.md). Each binding p
 
 ### Read-Only
 
+- `backup_size_bytes` (Number) Bytes every full backup and all WAL kept for the database take up in storage, manual backups included. 0 until measured.
 - `created_at` (String) Timestamp when the database was created.
 - `current_version` (String) Full engine version running, e.g. `18.0`.
 - `etag` (String) Resource version used for optimistic locking during updates.
+- `last_backup_at` (String) When the newest full backup finished (RFC 3339). Empty until the first backup completes.
 - `phase` (String) Current phase: Pending, Provisioning, Running, Degraded or Terminating.
+- `recovery_window` (Attributes) The oldest and newest points you can recover the database to. Null until the backups report them. (see [below for nested schema](#nestedatt--recovery_window))
 
 <a id="nestedatt--resources"></a>
 ### Nested Schema for `resources`
@@ -100,6 +104,15 @@ Required:
 - `storage` (String) Storage with a unit, e.g. `10Gi`. Storage can only grow: a smaller value fails the plan.
 
 
+<a id="nestedatt--backup"></a>
+### Nested Schema for `backup`
+
+Optional:
+
+- `retention` (Number) How far back the backups reach, in days: 7 to 35, default 7. The Kupe platform sets the range and refuses a value outside it (error code `DATABASE_BACKUP_RETENTION_OUT_OF_RANGE`). Shortening retention deletes the backups that fall outside the new window.
+- `schedule` (String) How many full backups are kept within the retention period: `Daily` keeps one for every day; `DailyThenWeekly` keeps one for each of the last 7 days and one a week before that. The points you can recover to are the same either way; recovering to an older point takes longer. Default `Daily`.
+
+
 <a id="nestedatt--timeouts"></a>
 ### Nested Schema for `timeouts`
 
@@ -108,6 +121,15 @@ Optional:
 - `create` (String) A string that can be [parsed as a duration](https://pkg.go.dev/time#ParseDuration) consisting of numbers and unit suffixes, such as "30s" or "2h45m". Valid time units are "s" (seconds), "m" (minutes), "h" (hours).
 - `delete` (String) A string that can be [parsed as a duration](https://pkg.go.dev/time#ParseDuration) consisting of numbers and unit suffixes, such as "30s" or "2h45m". Valid time units are "s" (seconds), "m" (minutes), "h" (hours). Setting a timeout for a Delete operation is only applicable if changes are saved into state before the destroy operation occurs.
 - `update` (String) A string that can be [parsed as a duration](https://pkg.go.dev/time#ParseDuration) consisting of numbers and unit suffixes, such as "30s" or "2h45m". Valid time units are "s" (seconds), "m" (minutes), "h" (hours).
+
+
+<a id="nestedatt--recovery_window"></a>
+### Nested Schema for `recovery_window`
+
+Read-Only:
+
+- `earliest` (String) The oldest point you can recover to (RFC 3339).
+- `latest` (String) The newest point you can recover to: the newest WAL saved (RFC 3339).
 
 ## Import
 
