@@ -324,6 +324,39 @@ func TestAccDatabaseResource_CodedRefusals(t *testing.T) {
 				ExpectError: regexp.MustCompile(`(?s)failed to update database.*Error code: terminating.*` +
 					wrappedText("It is being deleted, so it can no longer be changed or bound.")),
 			},
+			{
+				// The platform stops offering backups: a backup change is
+				// refused, and removing `backup` leaves nothing to send.
+				PreConfig: func() { mock.setState(func(m *mockKupeAPI) { m.backupsUnavailable = true }) },
+				Config:    testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false), backup: strPtr("retention = 14")}),
+				ExpectError: regexp.MustCompile(`(?s)failed to update database.*Error code: backups_unavailable\s+Field: spec.backup.*` +
+					wrappedText("Backups are not available on this Kupe platform. Remove `backup` from the configuration, then run `terraform apply` again.")),
+			},
+			{Config: config},
+		},
+	})
+}
+
+// TestAccDatabaseResource_CreateWithBackupsUnavailable: a database created
+// with `backup` on a platform that does not offer backups is refused with the
+// remedy, and created once `backup` is removed.
+func TestAccDatabaseResource_CreateWithBackupsUnavailable(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+	mock.setState(func(m *mockKupeAPI) { m.backupsUnavailable = true })
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		CheckDestroy:             testAccCheckNoDatabases(mock),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false), backup: strPtr("retention = 14")}),
+				ExpectError: regexp.MustCompile(`(?s)failed to create database.*Error code: backups_unavailable.*` +
+					wrappedText("Backups are not available on this Kupe platform. Remove `backup` from the configuration, then run `terraform apply` again.")),
+			},
+			{
+				Config: testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false)}),
+				Check:  resource.TestCheckNoResourceAttr("kupe_database.test", "backup.%"),
+			},
 		},
 	})
 }
