@@ -38,8 +38,8 @@ const databaseEngine = "postgres"
 
 // databaseDeleteNotice is what deleting a database means for its data. Docs
 // and diagnostics use the same words so the promise is stated once.
-const databaseDeleteNotice = "Deleting a database removes it immediately. Its storage is kept for 7 days for " +
-	"support-assisted recovery, then permanently deleted. There is no self-service restore in v1."
+const databaseDeleteNotice = "Deleting a database removes it and its automatic backups immediately, and they cannot be restored. " +
+	"Manual backups stay until you delete them."
 
 // Default timeouts for database operations, overridable in the `timeouts`
 // block. Provisioning starts instances and storage; an upgrade or resize

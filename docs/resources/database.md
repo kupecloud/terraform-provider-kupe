@@ -5,7 +5,7 @@ description: |-
   Manages a Kupe PostgreSQL database. Create and Update wait for the database to reach phase=Running with the change in effect on every instance. They fail at once if the database is being deleted (Terminating), and after 5 minutes if it stays Degraded once the platform has picked up the change. If the timeout fires first, the apply fails; the platform carries on in the background, and a database that timed out on Create stays in state, marked tainted. A change to deletion_protection alone takes effect at once and is not waited for. Delete waits until the database is gone. Set timeouts with the timeouts attribute, for example timeouts = { create = "45m" } (defaults: create/update 30m, delete 15m).
   Applications reach the database through kupe_database_binding, which places a Service and a credentials Secret in each namespace it lists, in one cluster. Credentials are never returned by the API or stored in Terraform state.
   Destroy semantics
-  Deleting a database removes it immediately. Its storage is kept for 7 days for support-assisted recovery, then permanently deleted. There is no self-service restore in v1. deletion_protection (default true) makes the Kupe platform refuse the delete: set it to false and apply before destroying. Add lifecycle { prevent_destroy = true } to stop Terraform from planning the destroy at all.
+  Deleting a database removes it and its automatic backups immediately, and they cannot be restored. Manual backups stay until you delete them. deletion_protection (default true) makes the Kupe platform refuse the delete: set it to false and apply before destroying. Add lifecycle { prevent_destroy = true } to stop Terraform from planning the destroy at all.
 ---
 
 # kupe_database (Resource)
@@ -16,7 +16,7 @@ Applications reach the database through `kupe_database_binding`, which places a 
 
 ### Destroy semantics
 
-Deleting a database removes it immediately. Its storage is kept for 7 days for support-assisted recovery, then permanently deleted. There is no self-service restore in v1. `deletion_protection` (default `true`) makes the Kupe platform refuse the delete: set it to `false` and apply before destroying. Add `lifecycle { prevent_destroy = true }` to stop Terraform from planning the destroy at all.
+Deleting a database removes it and its automatic backups immediately, and they cannot be restored. Manual backups stay until you delete them. `deletion_protection` (default `true`) makes the Kupe platform refuse the delete: set it to `false` and apply before destroying. Add `lifecycle { prevent_destroy = true }` to stop Terraform from planning the destroy at all.
 
 ## Example Usage
 
