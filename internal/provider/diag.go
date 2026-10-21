@@ -287,6 +287,9 @@ func apiErrorDetail(err error) string {
 		case client.CodeRegistryTokenExpiryInvalid:
 			return base + "\n\nSet `expires_in_days` to a number of days the platform accepts, then run " +
 				"`terraform apply` again."
+		case client.CodeBackupsUnavailable:
+			return base + "\n\nBackups are not available on this Kupe platform. Remove `backup` from the " +
+				"configuration, then run `terraform apply` again."
 		}
 		// 400 covers two server-side outcomes that surface here:
 		// (a) the request body failed schema decoding (typo in

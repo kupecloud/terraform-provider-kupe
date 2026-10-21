@@ -288,6 +288,17 @@ func TestAPIErrorDetail(t *testing.T) {
 			wantNoSubstr: []string{roleHint, "access = \"pull\""},
 		},
 		{
+			name: "400 backups_unavailable says to remove backup",
+			err: &client.APIError{
+				StatusCode: http.StatusBadRequest, Code: client.CodeBackupsUnavailable, Field: "spec.backup",
+				Message: "backups are not available on this platform; remove spec.backup",
+			},
+			wantSubstr: []string{
+				"Error code: backups_unavailable", "Field: spec.backup",
+				"Remove `backup` from the configuration, then run `terraform apply` again.",
+			},
+		},
+		{
 			name: "503 while the tenant's limit is being set up gets the retry hint",
 			err: &client.APIError{
 				StatusCode: http.StatusServiceUnavailable,
