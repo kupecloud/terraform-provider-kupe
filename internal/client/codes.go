@@ -46,6 +46,9 @@ const (
 	// longer than the tenant may use: 44 characters, or 56 minus the length
 	// of the tenant name when that is less. The platform's own code.
 	CodeDatabaseNameTooLong = "DATABASE_NAME_TOO_LONG"
+	// CodeBackupsUnavailable comes with a 400 when a create or PATCH sets
+	// backup settings while the platform does not offer backups.
+	CodeBackupsUnavailable = "backups_unavailable"
 )
 
 // Registry codes. kupe-api's own are lower case; the platform's (the
