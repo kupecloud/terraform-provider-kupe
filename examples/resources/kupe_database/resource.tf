@@ -11,6 +11,11 @@ resource "kupe_database" "orders" {
   # Two instances with a synchronous standby. Can be turned on or off later.
   high_availability = true
 
+  # Keep 14 days of backups instead of the default 7.
+  backup = {
+    retention = 14
+  }
+
   # deletion_protection defaults to true: the platform refuses to delete the
   # database until it is set to false and applied.
 }
