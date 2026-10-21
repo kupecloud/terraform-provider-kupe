@@ -207,8 +207,8 @@ func TestAccDatabaseResource_DeletionProtectionBlocksDestroy(t *testing.T) {
 // sharedDeleteNotice is the wording for what deleting a database does to its
 // data. Every Kupe surface (API docs, CLI, provider docs and diagnostics)
 // states it verbatim.
-const sharedDeleteNotice = "Deleting a database removes it immediately. Its storage is kept for 7 days for " +
-	"support-assisted recovery, then permanently deleted. There is no self-service restore in v1."
+const sharedDeleteNotice = "Deleting a database removes it and its automatic backups immediately, and they cannot be restored. " +
+	"Manual backups stay until you delete them."
 
 // wrappedText matches text in Terraform output, which may wrap it across lines.
 func wrappedText(text string) string {
