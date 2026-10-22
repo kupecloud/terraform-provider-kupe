@@ -42,6 +42,7 @@ For normal environments, use an `https://` API host. Plain HTTP is only supporte
 - `kupe_database`
 - `kupe_database_binding`
 - `kupe_registry`
+- `kupe_registry_binding`
 - `kupe_secret`
 - `kupe_tenant_member`
 - `kupe_api_key`
