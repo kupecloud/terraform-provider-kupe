@@ -130,7 +130,7 @@ func (r *RegistryTokenResource) Schema(ctx context.Context, _ resource.SchemaReq
 				PlanModifiers: replace,
 			},
 			"access": schema.StringAttribute{
-				Description: "`pull`, or `push` (which includes pull, and can delete images). Only a member with the " +
+				Description: "`pull`, or `push` (which includes pull). Only a member with the " +
 					"`admin` role, or an admin API key, can create a push token. A different value replaces the token.",
 				Required:      true,
 				Validators:    []validator.String{stringvalidator.OneOf("pull", "push")},
@@ -284,7 +284,11 @@ func (r *RegistryTokenResource) waitForIssued(ctx context.Context, timeout time.
 	case isTerminalAPIError(err):
 		diags.AddError("access token create failed while waiting for Ready", apiErrorDetail(err)+tainted)
 	default:
-		diags.AddError("access token create timed out while "+m.Phase.ValueString(),
+		phase := m.Phase.ValueString()
+		if phase == "" {
+			phase = "Pending"
+		}
+		diags.AddError("access token create timed out while "+phase,
 			fmt.Sprintf("Access token %q was not issued before the create timeout fired; until it is, the registry "+
 				"refuses it. To wait longer, set `timeouts.create = %q`.%s",
 				m.ID.ValueString(), longerTimeout(timeout, defaultRegistryTokenCreateTimeout), tainted))
