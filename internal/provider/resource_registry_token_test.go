@@ -405,6 +405,55 @@ func TestAccRegistryTokenResource_ImportRejectsOtherIDs(t *testing.T) {
 	}
 }
 
+// TestAccRegistryTokenResource_ImportRejectsSession (F-4): a login session is
+// a person's, not an access token: importing it fails, so nothing is written
+// to state, and the session is never revoked.
+func TestAccRegistryTokenResource_ImportRejectsSession(t *testing.T) {
+	const sessionID = "rt-00000000000000aa"
+	mock := newMockKupeAPI()
+	defer mock.close()
+	seedRegistry(mock, "")
+	mock.setState(func(m *mockKupeAPI) {
+		m.registryTokens[sessionID] = map[string]any{
+			"id": sessionID, "displayName": "kupe CLI", "kind": "session", "access": "push",
+			"createdBy": "admin@acme.com", "createdAt": "2026-10-21T10:00:00Z", "expiresAt": "2026-10-22T10:00:00Z",
+			"username": "kupe+acme+cli-00000000000000aa", "lastUsedAt": "",
+			"status": map[string]any{"phase": "Ready", "message": "", "conditions": []any{}},
+		}
+	})
+	acc.UnitTest(t, acc.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		// Destroy removes the access token the first step made; the session
+		// stays.
+		CheckDestroy: func(*terraform.State) error {
+			mock.mu.Lock()
+			defer mock.mu.Unlock()
+			if len(mock.registryTokens) != 1 || mock.registryTokens[sessionID] == nil {
+				return fmt.Errorf("tokens after destroy = %d, want the login session only", len(mock.registryTokens))
+			}
+			return nil
+		},
+		Steps: []acc.TestStep{
+			// An import step takes its configuration from the step before.
+			{Config: testAccRegistryTokenConfig(mock.url(), "ci", "pull", "")},
+			{
+				ResourceName:  tokenAddr,
+				ImportState:   true,
+				ImportStateId: "registry/" + sessionID,
+				ExpectError:   regexp.MustCompile(`not an access token`),
+			},
+		},
+	})
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if dels := mock.mockRegistryRequestsOf("DELETE", mockRegistriesPath+"/registry/tokens/"+sessionID); len(dels) != 0 {
+		t.Errorf("the login session got %d DELETE requests, want none", len(dels))
+	}
+	if gets := mock.mockRegistryRequestsOf("GET", mockRegistriesPath+"/registry/tokens/"+sessionID); len(gets) == 0 {
+		t.Error("the import never read the login session")
+	}
+}
+
 // TestAccRegistryTokenResource_SecretNotLogged: provider logs at TRACE carry
 // the token's id but never its secret.
 func TestAccRegistryTokenResource_SecretNotLogged(t *testing.T) {
