@@ -162,8 +162,8 @@ func TestAPIErrorDetail(t *testing.T) {
 				StatusCode: http.StatusConflict, Code: client.CodeTenantTerminating,
 				Message: "tenant acme is being deleted; cannot create new databases",
 			},
-			wantSubstr:   []string{"Your tenant is being deleted, so it cannot take new or larger clusters or databases."},
-			wantNoSubstr: []string{"already exists"},
+			wantSubstr:   []string{"Your tenant is being deleted, so nothing new can be created in it and nothing can be made larger."},
+			wantNoSubstr: []string{"already exists", "clusters or databases"},
 		},
 		{
 			name: "409 tenant_suspended points at support",
@@ -171,8 +171,8 @@ func TestAPIErrorDetail(t *testing.T) {
 				StatusCode: http.StatusConflict, Code: client.CodeTenantSuspended,
 				Message: "tenant acme is suspended; contact support before growing databases",
 			},
-			wantSubstr:   []string{"Contact Kupe Cloud support to lift the suspension."},
-			wantNoSubstr: []string{"already exists"},
+			wantSubstr:   []string{"Your tenant is suspended, so nothing new can be created", "Contact Kupe Cloud support to lift the suspension."},
+			wantNoSubstr: []string{"already exists", "clusters or databases"},
 		},
 		{
 			name: "409 payment_setup_required points at the Billing page",
@@ -207,6 +207,85 @@ func TestAPIErrorDetail(t *testing.T) {
 				"Error code: DATABASE_NAME_TOO_LONG", "Field: metadata.name",
 				"too long for your tenant, so nothing was created", "Choose a shorter `name`",
 			},
+		},
+		{
+			name: "404 registries_unavailable says what still works and that state is kept",
+			err: &client.APIError{
+				StatusCode: http.StatusNotFound, Code: client.CodeRegistriesUnavailable,
+				Message: "registries are not available on this platform",
+			},
+			wantSubstr: []string{
+				"Registries are not enabled for this Kupe Cloud environment",
+				"deletion protection can still be turned off", "Terraform state is kept unchanged.",
+				"Error code: registries_unavailable",
+			},
+			wantNoSubstr: []string{"does not exist on the server", "Databases are not enabled"},
+		},
+		{
+			name: "a registry route the API does not serve is not a missing resource",
+			err: &client.RegistriesNotServedError{Err: &client.APIError{
+				StatusCode: http.StatusNotFound, Message: "404 page not found\n",
+			}},
+			wantSubstr:   []string{"does not offer registries yet", "Terraform state is kept unchanged."},
+			wantNoSubstr: []string{"does not exist on the server"},
+		},
+		{
+			name: "409 REGISTRY_ALREADY_EXISTS gives the import command",
+			err: &client.APIError{
+				StatusCode: http.StatusConflict, Code: client.CodeRegistryAlreadyExists,
+				Message: "this tenant already has a registry",
+			},
+			wantSubstr:   []string{"A tenant has one registry.", "`terraform import kupe_registry.this registry`"},
+			wantNoSubstr: []string{"Usually means"},
+		},
+		{
+			name: "409 REGISTRY_BINDING_EXISTS gives the import command",
+			err: &client.APIError{
+				StatusCode: http.StatusConflict, Code: client.CodeRegistryBindingExists,
+				Message: `cluster "prod" is already connected to the registry`,
+			},
+			wantSubstr: []string{"`terraform import kupe_registry_binding.this registry/<cluster>`"},
+		},
+		{
+			name: "409 REGISTRY_TOKEN_LIMIT_REACHED says to revoke one",
+			err: &client.APIError{
+				StatusCode: http.StatusConflict, Code: client.CodeRegistryTokenLimitReached,
+				Message: "the registry already has 50 access tokens; revoke one first",
+			},
+			wantSubstr: []string{"the registry already has 50 access tokens", "Revoke one you no longer use"},
+		},
+		{
+			name: "400 REGISTRY_STORAGE_LIMIT_ABOVE_PLAN says to lower or remove the limit",
+			err: &client.APIError{
+				StatusCode: http.StatusBadRequest, Code: client.CodeRegistryStorageLimitAbovePlan,
+				Field: "spec.storageLimit", Message: "storage limit 80Gi is above the 50Gi your plan allows",
+			},
+			wantSubstr: []string{"Field: spec.storageLimit", "Set a lower `storage_limit`"},
+		},
+		{
+			name: "400 REGISTRY_PUSH_NAMESPACES_SERVICE_LIMIT explains it is apply-time",
+			err: &client.APIError{
+				StatusCode: http.StatusBadRequest, Code: client.CodeRegistryPushNamespacesServiceLimit,
+				Message: "the registry's cluster connections can give at most 20 namespaces a push credential",
+			},
+			wantSubstr: []string{"every cluster connection of the registry together", "the plan could not check it"},
+		},
+		{
+			name: "400 REGISTRY_TOKEN_EXPIRY_INVALID points at expires_in_days",
+			err: &client.APIError{
+				StatusCode: http.StatusBadRequest, Code: client.CodeRegistryTokenExpiryInvalid,
+				Message: "expiresInDays must be between 1 and 365",
+			},
+			wantSubstr: []string{"between 1 and 365", "`expires_in_days`"},
+		},
+		{
+			name: "403 REGISTRY_TOKEN_PUSH_ADMIN_ONLY explains push needs admin, not the generic role hint",
+			err: &client.APIError{
+				StatusCode: http.StatusForbidden, Code: client.CodeRegistryTokenPushAdminOnly,
+				Message: "only admins can create push access tokens",
+			},
+			wantSubstr:   []string{"A push access token can only be created by a member with the `admin` role"},
+			wantNoSubstr: []string{roleHint},
 		},
 		{
 			name: "503 while the tenant's limit is being set up gets the retry hint",
@@ -343,6 +422,16 @@ func TestIsTerminalAPIError(t *testing.T) {
 		{
 			"404 databases_unavailable is terminal",
 			&client.APIError{StatusCode: http.StatusNotFound, Code: client.CodeDatabasesUnavailable},
+			true,
+		},
+		{
+			"404 registries_unavailable is terminal",
+			&client.APIError{StatusCode: http.StatusNotFound, Code: client.CodeRegistriesUnavailable},
+			true,
+		},
+		{
+			"a registry route the API does not serve is terminal",
+			&client.RegistriesNotServedError{Err: &client.APIError{StatusCode: http.StatusNotFound, Message: "404 page not found"}},
 			true,
 		},
 		{"409 is not terminal", fakeAPIError(http.StatusConflict, "already exists"), false},
