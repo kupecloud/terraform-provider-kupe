@@ -120,3 +120,53 @@ func (v notPlatformNamespace) ValidateString(_ context.Context, req validator.St
 				req.Path, ns))
 	}
 }
+
+// registryName is the one name a tenant's registry has (kupe-control-operator
+// domain.RegistryName; the ManagedRegistry CRD's name rule).
+const registryName = "registry"
+
+// registryNameValidators accept only the registry's one name, with the
+// platform's own sentence for anything else.
+func registryNameValidators() []validator.String {
+	return []validator.String{fixedValue{value: registryName, why: "a tenant has one registry, named registry"}}
+}
+
+// fixedValue accepts one value only: an attribute the API fixes but that
+// configuration may still name, such as the registry's name.
+type fixedValue struct {
+	value, why string
+}
+
+func (v fixedValue) Description(_ context.Context) string {
+	return fmt.Sprintf("must be %q", v.value)
+}
+
+func (v fixedValue) MarkdownDescription(_ context.Context) string {
+	return fmt.Sprintf("must be `%s`", v.value)
+}
+
+func (v fixedValue) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() || req.ConfigValue.ValueString() == v.value {
+		return
+	}
+	resp.Diagnostics.AddAttributeError(req.Path, "Invalid "+req.Path.String(),
+		fmt.Sprintf("%s is %q: %s. Use %q or leave it out.", req.Path, req.ConfigValue.ValueString(), v.why, v.value))
+}
+
+// registryStorageLimitPattern is the ManagedRegistry CRD's spec.storageLimit
+// pattern: binary units only (Mi, Gi, Ti), so "1" can never mean one byte. It
+// is narrower than sizeQuantityPattern, which databases use.
+var registryStorageLimitPattern = regexp.MustCompile(`^(\d+(\.\d+)?)(Mi|Gi|Ti)$`)
+
+// registryStorageLimitValidators check a registry storage limit the way the
+// platform does: a binary-unit quantity of at most 20 characters, more than
+// zero. The plan's cap is checked by the platform
+// (REGISTRY_STORAGE_LIMIT_ABOVE_PLAN).
+func registryStorageLimitValidators() []validator.String {
+	return []validator.String{
+		stringvalidator.LengthAtMost(maxQuantityLength),
+		stringvalidator.RegexMatches(registryStorageLimitPattern,
+			`must be a number with a binary unit (Mi, Gi or Ti), e.g. "10Gi"`),
+		stringvalidator.RegexMatches(regexp.MustCompile(`[1-9]`), "must be more than zero"),
+	}
+}

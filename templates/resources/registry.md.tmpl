@@ -1,0 +1,35 @@
+---
+page_title: "{{.Name}} {{.Type}} - {{.ProviderName}}"
+subcategory: ""
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# {{.Name}} ({{.Type}})
+
+{{ .Description | trimspace }}
+
+## Example Usage
+
+{{ tffile "examples/resources/kupe_registry/resource.tf" }}
+
+### Deleting the registry
+
+Its cluster connections and access tokens are deleted with it. A stray `terraform destroy` is refused by the Kupe platform while `deletion_protection` is `true`, and the registry stays in state. To delete it, set `deletion_protection = false`, run `terraform apply`, then destroy it.
+
+### Storage
+
+`storage_limit` caps what the registry stores below the most your plan allows. Leave it out to use the plan's limit; `storage_limit_bytes` shows the limit in force. Lowering it below what the registry already stores is accepted: pushes are refused until images are deleted or the limit is raised.
+
+### Connecting clusters and CI
+
+- [`kupe_registry_binding`](registry_binding.md) lets every pod of a cluster pull from the registry, and gives chosen namespaces a push credential.
+- [`kupe_registry_token`](registry_token.md) is an access token for CI and anything else that signs in with `docker login`.
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Import
+
+Import is supported using the following syntax:
+
+{{ codefile "shell" "examples/resources/kupe_registry/import.sh" }}
