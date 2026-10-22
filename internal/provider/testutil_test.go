@@ -96,6 +96,9 @@ type mockKupeAPI struct {
 	databaseBindingBeforePatch []func(b map[string]any)
 	// databaseBindingRequests records each binding POST and PATCH body.
 	databaseBindingRequests []mockRequest
+	// The registry, its cluster connections and access tokens
+	// (testutil_registry_test.go).
+	mockRegistryState
 }
 
 // mockRequest is a request the mock received: its method, If-Match and body.
@@ -117,8 +120,9 @@ func newMockKupeAPI() *mockKupeAPI {
 		amETag:      `"1"`,
 		rvCounter:   1,
 
-		databases:        make(map[string]map[string]any),
-		databaseBindings: make(map[string]map[string]any),
+		mockRegistryState: newMockRegistryState(),
+		databases:         make(map[string]map[string]any),
+		databaseBindings:  make(map[string]map[string]any),
 		tenant: map[string]any{
 			"name": "acme", "displayName": "Acme Corp",
 			"contactEmail": "admin@acme.com", "plan": "starter",
@@ -544,6 +548,9 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 
 	case strings.HasPrefix(r.URL.Path, mockDatabasesPath):
 		m.serveDatabases(w, r)
+
+	case r.URL.Path == mockRegistriesPath || strings.HasPrefix(r.URL.Path, mockRegistriesPath+"/"):
+		m.serveRegistries(w, r)
 
 	default:
 		w.WriteHeader(404)
