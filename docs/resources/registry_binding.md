@@ -35,7 +35,7 @@ Once the connection is Ready, every pod of the cluster can pull `registry.kupe.c
 
 ### Pushing from inside the cluster
 
-Each namespace in `push_namespaces` gets a Secret named `secret_name` (default `kupe-registry-push`) of type `kubernetes.io/dockerconfigjson`. Build tools that read a Docker config file can push with it: mount its `.dockerconfigjson` key as `config.json`. Each namespace receives a Secret that can push to and delete from every repository in the registry, so list only the namespaces that build images.
+Each namespace in `push_namespaces` gets a Secret named `secret_name` (default `kupe-registry-push`) of type `kubernetes.io/dockerconfigjson`. Build tools that read a Docker config file can push with it: mount its `.dockerconfigjson` key as `config.json`. Each namespace receives a Secret named `secret_name` that can pull from and push to every repository in your registry, including replacing existing tags, so list only the namespaces that build images.
 
 `push_namespaces` changes in place, and the connection's pull credential is untouched: running pods keep pulling. A namespace taken out loses its Secret. Changing `secret_name`, `cluster` or `registry` replaces the connection instead: it is deleted and created again, so its pull and push credentials are reissued.
 
@@ -54,7 +54,7 @@ A push namespace is `Failed` when it already has a Secret named `secret_name` th
 
 ### Optional
 
-- `push_namespaces` (Set of String) Namespaces inside the cluster that receive a push credential Secret named `secret_name`: up to 10, none `kube-*` or `argocd`. Each namespace receives a Secret that can push to and delete from every repository in the registry. Default none: the cluster can pull only. Changes in place: a namespace added gets the Secret, one taken out loses it, and pulls keep working throughout. The registry's connections can list at most 20 push namespaces between them; the Kupe platform checks that when the change is applied.
+- `push_namespaces` (Set of String) Namespaces inside the cluster that receive a push credential Secret named `secret_name`: up to 10, none `kube-*` or `argocd`. Each namespace receives a Secret named `secret_name` that can pull from and push to every repository in your registry, including replacing existing tags. Default none: the cluster can pull only. Changes in place: a namespace added gets the Secret, one taken out loses it, and pulls keep working throughout. The registry's connections can list at most 20 push namespaces between them; the Kupe platform checks that when the change is applied.
 - `registry` (String) Registry to connect to. A tenant has one registry, named `registry`: this is the default and the only value accepted.
 - `secret_name` (String) Name of the push credential Secret in each push namespace. Default `kupe-registry-push`; it cannot be `kupe-registry-pull`. It cannot change in place: a different name replaces the cluster connection (it is deleted and created again, so its pull and push credentials are reissued).
 - `timeouts` (Attributes) (see [below for nested schema](#nestedatt--timeouts))
