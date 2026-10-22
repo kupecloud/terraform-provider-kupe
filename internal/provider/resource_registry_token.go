@@ -54,6 +54,11 @@ const registryTokenSecretDescription = "The token's secret, returned only when t
 // validRegistryTokenID is a token id: rt- and 16 lower-case hex characters.
 var validRegistryTokenID = regexp.MustCompile(`^rt-[a-f0-9]{16}$`)
 
+// printableDisplayName is the platform's display name rule (F-3): every
+// character printable, as Go's unicode.IsPrint (letters, marks, numbers,
+// punctuation, symbols and the ASCII space), so no control characters.
+var printableDisplayName = regexp.MustCompile(`^[\p{L}\p{M}\p{N}\p{P}\p{S} ]*$`)
+
 // registryTokenNow is the clock the expiry warning reads; tests set it.
 var registryTokenNow = time.Now
 
@@ -124,9 +129,13 @@ func (r *RegistryTokenResource) Schema(ctx context.Context, _ resource.SchemaReq
 				PlanModifiers: replace,
 			},
 			"display_name": schema.StringAttribute{
-				Description:   "A name to recognise the token by, 1 to 128 characters. A different name replaces the token.",
-				Required:      true,
-				Validators:    []validator.String{stringvalidator.UTF8LengthBetween(1, 128)},
+				Description: "A name to recognise the token by, 1 to 128 characters. A different name replaces the token.",
+				Required:    true,
+				Validators: []validator.String{
+					stringvalidator.UTF8LengthBetween(1, 128),
+					stringvalidator.RegexMatches(printableDisplayName,
+						"must be printable text, without control characters"),
+				},
 				PlanModifiers: replace,
 			},
 			"access": schema.StringAttribute{
