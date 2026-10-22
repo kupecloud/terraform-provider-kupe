@@ -376,6 +376,43 @@ func TestAccRegistryBindingResource_FailedNamespace(t *testing.T) {
 	})
 }
 
+// TestAccRegistryBindingResource_RemovedFailedNamespace (F-6): a namespace
+// taken out of push_namespaces whose status is still Failed does not fail
+// the Update: only the listed namespaces count.
+func TestAccRegistryBindingResource_RemovedFailedNamespace(t *testing.T) {
+	shrinkPollInterval(t)
+	mock := newMockKupeAPI()
+	defer mock.close()
+	seedRegistry(mock, "")
+	acc.UnitTest(t, acc.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		CheckDestroy:             testAccCheckNoRegistryBindings(mock),
+		Steps: []acc.TestStep{
+			{Config: testAccRegistryBindingConfig(mock.url(), "prod", ns("ci", "release"), "")},
+			{
+				// The platform still reports ci Failed while it withdraws it.
+				PreConfig: func() {
+					mock.setState(func(m *mockKupeAPI) {
+						m.registryBindingStatus = map[string]any{
+							"namespaces": []any{
+								map[string]any{"name": "ci", "phase": "Failed", "message": "a Secret of the same name exists"},
+								map[string]any{"name": "release", "phase": "Ready", "message": ""},
+							},
+						}
+					})
+				},
+				Config:           testAccRegistryBindingConfig(mock.url(), "prod", ns("release"), ""),
+				ConfigPlanChecks: expectBindingAction(plancheck.ResourceActionUpdate),
+				Check: acc.ComposeAggregateTestCheckFunc(
+					acc.TestCheckResourceAttr(bindingAddr, "phase", "Ready"),
+					acc.TestCheckResourceAttr(bindingAddr, "push_namespaces.#", "1"),
+					acc.TestCheckTypeSetElemAttr(bindingAddr, "push_namespaces.*", "release"),
+				),
+			},
+		},
+	})
+}
+
 // TestAccRegistryBindingResource_RegistriesUnavailable: with the registry
 // switched off, adding a push namespace is refused with the hint, taking
 // one out is served, and the connection can be destroyed.
