@@ -218,6 +218,33 @@ func TestAccRegistryBindingResource_CreateWithPushNamespaces(t *testing.T) {
 	})
 }
 
+// TestAccRegistryBindingResource_UpdateWaitsForNewNamespace: right after the
+// PATCH the platform still reports the old list as Ready; Update waits until
+// the namespace added is delivered, so state ends with its status.
+func TestAccRegistryBindingResource_UpdateWaitsForNewNamespace(t *testing.T) {
+	shrinkPollInterval(t)
+	mock := newMockKupeAPI()
+	defer mock.close()
+	seedRegistry(mock, "")
+	acc.UnitTest(t, acc.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		CheckDestroy:             testAccCheckNoRegistryBindings(mock),
+		Steps: []acc.TestStep{
+			{Config: testAccRegistryBindingConfig(mock.url(), "prod", ns("ci"), "")},
+			{
+				PreConfig:        func() { mock.setState(func(m *mockKupeAPI) { m.registryBindingLagOnPatch = 3 }) },
+				Config:           testAccRegistryBindingConfig(mock.url(), "prod", ns("ci", "release"), ""),
+				ConfigPlanChecks: expectBindingAction(plancheck.ResourceActionUpdate),
+				Check: acc.ComposeAggregateTestCheckFunc(
+					acc.TestCheckResourceAttr(bindingAddr, "namespace_status.#", "2"),
+					acc.TestCheckResourceAttr(bindingAddr, "namespace_status.1.name", "release"),
+					acc.TestCheckResourceAttr(bindingAddr, "namespace_status.1.phase", "Ready"),
+				),
+			},
+		},
+	})
+}
+
 func TestAccRegistryBindingResource_PlanTimeErrors(t *testing.T) {
 	eleven := make([]string, 11)
 	for i := range eleven {
