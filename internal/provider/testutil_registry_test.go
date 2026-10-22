@@ -52,6 +52,10 @@ type mockRegistryState struct {
 	// still report the push namespaces delivered before it (phase Ready),
 	// like the platform does until it reconciles the new list.
 	registryBindingLagOnPatch int
+	// registryBindingPatchStatuses, when set, are laid over the status of
+	// the connection's GETs after its next PATCH in turn, the last one
+	// repeating: the platform's reports while it reconciles the new list.
+	registryBindingPatchStatuses []map[string]any
 	// registryTokenPhases, when set, are the phases the next token GETs
 	// report in turn, the last one repeating (default Ready).
 	registryTokenPhases []string
@@ -453,6 +457,14 @@ func (m *mockKupeAPI) getRegistryBinding(w http.ResponseWriter, name string) {
 	for k, v := range m.registryBindingStatus {
 		status[k] = v
 	}
+	if seq, _ := binding["patchStatuses"].([]map[string]any); len(seq) > 0 {
+		for k, v := range seq[0] {
+			status[k] = v
+		}
+		if len(seq) > 1 {
+			binding["patchStatuses"] = seq[1:]
+		}
+	}
 	binding["status"] = status
 	w.Header().Set("ETag", `"`+binding["resourceVersion"].(string)+`"`)
 	mustEncodeJSON(w, mockRegistryBindingView(binding))
@@ -463,7 +475,7 @@ func (m *mockKupeAPI) getRegistryBinding(w http.ResponseWriter, name string) {
 func mockRegistryBindingView(binding map[string]any) map[string]any {
 	view := make(map[string]any, len(binding))
 	for k, v := range binding {
-		if k != "delivered" && k != "lag" {
+		if k != "delivered" && k != "lag" && k != "patchStatuses" {
 			view[k] = v
 		}
 	}
@@ -504,6 +516,9 @@ func (m *mockKupeAPI) patchRegistryBinding(w http.ResponseWriter, r *http.Reques
 	}
 	binding["pushNamespaces"] = push
 	binding["lag"] = m.registryBindingLagOnPatch
+	if len(m.registryBindingPatchStatuses) > 0 {
+		binding["patchStatuses"] = m.registryBindingPatchStatuses
+	}
 	rv := m.nextRV()
 	binding["resourceVersion"] = rv
 	w.Header().Set("ETag", `"`+rv+`"`)
