@@ -279,13 +279,13 @@ func TestAPIErrorDetail(t *testing.T) {
 			wantSubstr: []string{"between 1 and 365", "`expires_in_days`"},
 		},
 		{
-			name: "403 REGISTRY_TOKEN_PUSH_ADMIN_ONLY explains push needs admin, not the generic role hint",
+			name: "403 REGISTRY_TOKEN_PUSH_ADMIN_ONLY explains a token needs admin, not the generic role hint",
 			err: &client.APIError{
 				StatusCode: http.StatusForbidden, Code: client.CodeRegistryTokenPushAdminOnly,
 				Message: "only admins can create push access tokens",
 			},
-			wantSubstr:   []string{"A push access token can only be created by a member with the `admin` role"},
-			wantNoSubstr: []string{roleHint},
+			wantSubstr:   []string{"An access token can only be created by a member with the `admin` role"},
+			wantNoSubstr: []string{roleHint, "access = \"pull\""},
 		},
 		{
 			name: "503 while the tenant's limit is being set up gets the retry hint",

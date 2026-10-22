@@ -140,7 +140,7 @@ func (r *RegistryTokenResource) Schema(ctx context.Context, _ resource.SchemaReq
 			},
 			"access": schema.StringAttribute{
 				Description: "`pull`, or `push` (which includes pull). Only a member with the " +
-					"`admin` role, or an admin API key, can create a push token. A different value replaces the token.",
+					"`admin` role, or an admin API key, can create a token. A different value replaces the token.",
 				Required:      true,
 				Validators:    []validator.String{stringvalidator.OneOf("pull", "push")},
 				PlanModifiers: replace,

@@ -307,8 +307,8 @@ func apiErrorDetail(err error) string {
 		// still routed webhook denials through 403 (newer API uses
 		// 400). For non-RBAC bodies the role hint is misleading.
 		if apiErr.Code == client.CodeRegistryTokenPushAdminOnly {
-			return base + "\n\nA push access token can only be created by a member with the `admin` role, or an " +
-				"admin API key. Use admin credentials, or set `access = \"pull\"`."
+			return base + "\n\nAn access token can only be created by a member with the `admin` role, or an " +
+				"admin API key. Use admin credentials."
 		}
 		if strings.EqualFold(strings.TrimSpace(apiErr.Message), rbacForbiddenMessage) {
 			return base + "\n\nYour credentials authenticated but lack the role required for this operation. Most mutating operations require the `admin` role on the tenant; reads accept `readonly` as well."
