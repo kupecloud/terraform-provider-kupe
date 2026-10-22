@@ -212,7 +212,7 @@ func (r *RegistryTokenResource) Create(ctx context.Context, req resource.CreateR
 	}
 	created, err := r.client.CreateRegistryToken(ctx, registry, createReq)
 	if err != nil {
-		resp.Diagnostics.AddError("failed to create access token", apiErrorDetail(err))
+		resp.Diagnostics.AddError("failed to create access token", registryChildCreateErrorDetail(err))
 		return
 	}
 	// Ids only: the secret is never logged.

@@ -601,3 +601,40 @@ func TestDeleteUntilAccepted(t *testing.T) {
 		})
 	}
 }
+
+// TestRegistryChildCreateErrorDetail (F-2): only kupe-api's code-less 404 for
+// a missing registry gets the hint to create the registry first; every
+// other error keeps apiErrorDetail.
+func TestRegistryChildCreateErrorDetail(t *testing.T) {
+	notFound := func(code, msg string) *client.APIError {
+		return &client.APIError{StatusCode: http.StatusNotFound, Code: code, Message: msg}
+	}
+	tests := []struct {
+		name     string
+		err      error
+		wantHint bool
+	}{
+		{name: "missing registry", err: notFound("", `registry "registry" not found`), wantHint: true},
+		{name: "wrapped missing registry", err: fmt.Errorf("create: %w", notFound("", `registry "registry" not found`)), wantHint: true},
+		{name: "missing cluster connection", err: notFound("", `cluster connection "prod" not found`)},
+		{name: "missing cluster", err: notFound("", `cluster "prod" not found`)},
+		{name: "coded 404 naming the registry", err: notFound("registry_missing", `registry "registry" not found`)},
+		{name: "registries unavailable", err: notFound(client.CodeRegistriesUnavailable, "registries are not available on this platform")},
+		{name: "400 naming the registry", err: &client.APIError{StatusCode: http.StatusBadRequest, Message: `registry "registry" not found`}},
+		{name: "not an API error", err: errors.New(`registry "registry" not found`)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := registryChildCreateErrorDetail(tt.err)
+			if has := strings.Contains(got, registryMissingHint); has != tt.wantHint {
+				t.Fatalf("detail = %q, want the no-registry hint: %v", got, tt.wantHint)
+			}
+			if !tt.wantHint && got != apiErrorDetail(tt.err) {
+				t.Errorf("detail = %q, want apiErrorDetail %q", got, apiErrorDetail(tt.err))
+			}
+			if tt.wantHint && strings.Contains(got, "terraform refresh") {
+				t.Errorf("detail = %q still has the generic 404 hint", got)
+			}
+		})
+	}
+}
