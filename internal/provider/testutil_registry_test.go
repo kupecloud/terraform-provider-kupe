@@ -48,6 +48,10 @@ type mockRegistryState struct {
 	// registryBindingStatus, when set, is laid over every connection's
 	// built status.
 	registryBindingStatus map[string]any
+	// registryBindingLagOnPatch is how many connection GETs after a PATCH
+	// still report the push namespaces delivered before it (phase Ready),
+	// like the platform does until it reconciles the new list.
+	registryBindingLagOnPatch int
 	// registryTokenPhases, when set, are the phases the next token GETs
 	// report in turn, the last one repeating (default Ready).
 	registryTokenPhases []string
@@ -395,7 +399,7 @@ func (m *mockKupeAPI) createRegistryBinding(w http.ResponseWriter, r *http.Reque
 	m.registryBindings[cluster] = binding
 	w.Header().Set("ETag", `"`+rv+`"`)
 	w.WriteHeader(http.StatusCreated)
-	mustEncodeJSON(w, binding)
+	mustEncodeJSON(w, mockRegistryBindingView(binding))
 }
 
 // mockStringList is a list of strings from a request body; ok is false when
@@ -419,6 +423,12 @@ func (m *mockKupeAPI) getRegistryBinding(w http.ResponseWriter, name string) {
 		return
 	}
 	push := binding["pushNamespaces"].([]string)
+	if lag, _ := binding["lag"].(int); lag > 0 {
+		binding["lag"] = lag - 1
+		push, _ = binding["delivered"].([]string)
+	} else {
+		binding["delivered"] = push
+	}
 	entries := make([]any, 0, len(push))
 	for _, ns := range push {
 		entries = append(entries, map[string]any{"name": ns, "phase": "Ready", "message": ""})
@@ -441,7 +451,19 @@ func (m *mockKupeAPI) getRegistryBinding(w http.ResponseWriter, name string) {
 	}
 	binding["status"] = status
 	w.Header().Set("ETag", `"`+binding["resourceVersion"].(string)+`"`)
-	mustEncodeJSON(w, binding)
+	mustEncodeJSON(w, mockRegistryBindingView(binding))
+}
+
+// mockRegistryBindingView is the connection as kupe-api returns it, without
+// the mock's own record of what was delivered.
+func mockRegistryBindingView(binding map[string]any) map[string]any {
+	view := make(map[string]any, len(binding))
+	for k, v := range binding {
+		if k != "delivered" && k != "lag" {
+			view[k] = v
+		}
+	}
+	return view
 }
 
 func (m *mockKupeAPI) patchRegistryBinding(w http.ResponseWriter, r *http.Request, name string) {
@@ -477,10 +499,11 @@ func (m *mockKupeAPI) patchRegistryBinding(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	binding["pushNamespaces"] = push
+	binding["lag"] = m.registryBindingLagOnPatch
 	rv := m.nextRV()
 	binding["resourceVersion"] = rv
 	w.Header().Set("ETag", `"`+rv+`"`)
-	mustEncodeJSON(w, binding)
+	mustEncodeJSON(w, mockRegistryBindingView(binding))
 }
 
 // --- Access tokens ---
