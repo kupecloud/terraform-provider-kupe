@@ -327,6 +327,20 @@ func TestAccRegistryBindingResource_AlreadyConnected(t *testing.T) {
 	})
 }
 
+// TestAccRegistryBindingResource_NoRegistryYet (F-2): a connection created
+// before the registry exists gets the hint to reference kupe_registry.this.
+func TestAccRegistryBindingResource_NoRegistryYet(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+	acc.UnitTest(t, acc.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		Steps: []acc.TestStep{{
+			Config:      testAccRegistryBindingConfig(mock.url(), "prod", nil, ""),
+			ExpectError: regexp.MustCompile(`(?s)failed to create .*no\s+registry\s+yet.*kupe_registry\.this\.name`),
+		}},
+	})
+}
+
 // TestAccRegistryBindingResource_FailedNamespace: a push namespace the
 // platform cannot deliver into ends Create at once; the connection stays in
 // state, tainted, and the next apply replaces it.

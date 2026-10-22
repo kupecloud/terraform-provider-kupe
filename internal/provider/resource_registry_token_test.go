@@ -321,6 +321,20 @@ func TestAccRegistryTokenResource_LimitReached(t *testing.T) {
 	})
 }
 
+// TestAccRegistryTokenResource_NoRegistryYet (F-2): a token created before
+// the registry exists gets the hint to reference kupe_registry.this.
+func TestAccRegistryTokenResource_NoRegistryYet(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+	acc.UnitTest(t, acc.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		Steps: []acc.TestStep{{
+			Config:      testAccRegistryTokenConfig(mock.url(), "ci", "pull", ""),
+			ExpectError: regexp.MustCompile(`(?s)failed to create .*no\s+registry\s+yet.*kupe_registry\.this\.name`),
+		}},
+	})
+}
+
 // TestAccRegistryTokenResource_FailedOnCreate: a token the platform cannot
 // issue fails the apply; it stays in state, tainted, and is replaced next.
 func TestAccRegistryTokenResource_FailedOnCreate(t *testing.T) {

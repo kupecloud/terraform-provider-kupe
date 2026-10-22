@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -171,6 +172,29 @@ const registriesUnavailableHint = "Registries are not enabled for this Kupe Clou
 // the kupe API at this host predates registries.
 const registriesNotServedHint = "The kupe API at this host does not offer registries yet, so nothing was " +
 	"changed and Terraform state is kept unchanged. Check the provider's `host`, or contact Kupe Cloud support."
+
+// registryMissingHint explains a cluster connection or access token create
+// that found no registry: in one configuration, nothing ordered it after the
+// registry's own create (F-2).
+const registryMissingHint = "The tenant has no registry yet. Create it with `kupe_registry` first; in one " +
+	"configuration, reference it (`registry = kupe_registry.this.name`) so Terraform creates it before this " +
+	"resource."
+
+// registryMissingMessage is kupe-api's code-less 404 for a registry that
+// does not exist (`registry "registry" not found`).
+var registryMissingMessage = regexp.MustCompile(`^registry "[^"]*" not found$`)
+
+// registryChildCreateErrorDetail is apiErrorDetail for the create of a
+// cluster connection or access token: a 404 saying the registry does not
+// exist gets registryMissingHint in place of the generic 404 hint (F-2).
+func registryChildCreateErrorDetail(err error) string {
+	var apiErr *client.APIError
+	if client.IsNotFound(err) && errors.As(err, &apiErr) && apiErr.Code == "" &&
+		registryMissingMessage.MatchString(apiErr.Message) {
+		return apiErrorSummary(apiErr) + "\n\n" + registryMissingHint
+	}
+	return apiErrorDetail(err)
+}
 
 // apiErrorSummary is the status, message and, when present, the canonical
 // error code and field path of an API error. The code is a stable identifier

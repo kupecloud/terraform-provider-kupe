@@ -354,7 +354,7 @@ func (r *RegistryBindingResource) Create(ctx context.Context, req resource.Creat
 		SecretName:     plan.SecretName.ValueString(),
 	})
 	if err != nil {
-		detail := apiErrorDetail(err)
+		detail := registryChildCreateErrorDetail(err)
 		if client.ErrorCode(err) == client.CodeRegistryBindingExists {
 			// The generic hint has a placeholder; here the cluster is known.
 			detail = strings.Replace(detail, "registry/<cluster>", registryName+"/"+cluster, 1)
