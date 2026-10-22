@@ -98,7 +98,16 @@ func sizeQuantityValidators() []validator.String {
 }
 
 // notPlatformNamespace rejects the namespaces the platform reserves for
-// itself inside every cluster: kube-* and argocd.
+// itself inside every cluster: kube-* and argocd. Database binding namespaces
+// and registry push namespaces use it.
+//
+// The source of truth is kupe-control-operator's domain.IsPlatformNamespace
+// (internal/domain/platform_namespace.go), which the operator publishes as
+// services.<service>.reservedNamespaces{prefixes, names}; kupe-api refuses
+// whatever that publishes. The provider reads no platform config, so this is
+// a copy: if the two drift, the error moves from plan time to apply time and
+// the API stays authoritative. TestNotPlatformNamespace pins today's two
+// rules so a change on either side is a deliberate edit here.
 type notPlatformNamespace struct{}
 
 func (v notPlatformNamespace) Description(_ context.Context) string {
