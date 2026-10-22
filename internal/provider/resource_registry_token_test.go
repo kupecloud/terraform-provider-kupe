@@ -454,6 +454,43 @@ func TestAccRegistryTokenResource_ImportRejectsSession(t *testing.T) {
 	}
 }
 
+// TestAccRegistryTokenResource_DestroyAlreadyRevoked (F-5): a token revoked
+// or swept between the refresh and the DELETE answers 404, and the destroy
+// succeeds. (Removing it before the step would not reach Delete: the destroy
+// plan refreshes first and drops it from state.)
+func TestAccRegistryTokenResource_DestroyAlreadyRevoked(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+	seedRegistry(mock, "")
+	config := testAccRegistryTokenConfig(mock.url(), "ci", "pull", "")
+	var id string
+	acc.UnitTest(t, acc.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		CheckDestroy:             testAccCheckNoRegistryTokens(mock),
+		Steps: []acc.TestStep{
+			{
+				Config: config,
+				Check: func(*terraform.State) error {
+					id = tokenID(mock)
+					return nil
+				},
+			},
+			{
+				PreConfig: func() {
+					mock.setState(func(m *mockKupeAPI) { m.registryTokenRevokedBeforeDelete = true })
+				},
+				Config:  config,
+				Destroy: true,
+			},
+		},
+	})
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if dels := mock.mockRegistryRequestsOf("DELETE", mockRegistriesPath+"/registry/tokens/"+id); len(dels) != 1 {
+		t.Errorf("DELETE requests for %s = %d, want 1 (answered 404)", id, len(dels))
+	}
+}
+
 // TestAccRegistryTokenResource_SecretNotLogged: provider logs at TRACE carry
 // the token's id but never its secret.
 func TestAccRegistryTokenResource_SecretNotLogged(t *testing.T) {
