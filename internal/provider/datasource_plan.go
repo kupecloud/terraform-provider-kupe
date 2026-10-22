@@ -22,6 +22,10 @@ type PlanDataSourceModel struct {
 	PlatformFee  types.String `tfsdk:"platform_fee"`
 	MaxClusters  types.Int64  `tfsdk:"max_clusters"`
 	MaxDatabases types.Int64  `tfsdk:"max_databases"`
+	// RegistryMaxStorage and RegistryIncludedStorage are the plan's
+	// registry allowance, null when the plan includes no registry.
+	RegistryMaxStorage      types.String `tfsdk:"registry_max_storage"`
+	RegistryIncludedStorage types.String `tfsdk:"registry_included_storage"`
 }
 
 func NewPlanDataSource() datasource.DataSource {
@@ -56,6 +60,16 @@ func (d *PlanDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, r
 				Description: "Maximum number of databases allowed on the plan. `0` means unlimited. Null when the API does not report a database limit for the plan.",
 				Computed:    true,
 			},
+			"registry_max_storage": schema.StringAttribute{
+				Description: "Most a registry may store on the plan, with a binary unit, e.g. `5Gi`. `0` means " +
+					"unlimited. Null when the plan includes no registry.",
+				Computed: true,
+			},
+			"registry_included_storage": schema.StringAttribute{
+				Description: "Registry storage the plan includes, with a binary unit, e.g. `1Gi`. Null when the plan " +
+					"includes no registry.",
+				Computed: true,
+			},
 		},
 	}
 }
@@ -81,5 +95,10 @@ func (d *PlanDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 	state.PlatformFee = types.StringValue(plan.PlatformFee)
 	state.MaxClusters = types.Int64Value(plan.MaxClusters)
 	state.MaxDatabases = types.Int64PointerValue(plan.MaxDatabases)
+	state.RegistryMaxStorage, state.RegistryIncludedStorage = types.StringNull(), types.StringNull()
+	if plan.Registry != nil {
+		state.RegistryMaxStorage = types.StringValue(plan.Registry.MaxStorage)
+		state.RegistryIncludedStorage = types.StringValue(plan.Registry.IncludedStorage)
+	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }

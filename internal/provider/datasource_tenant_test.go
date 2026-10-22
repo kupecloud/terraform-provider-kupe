@@ -40,7 +40,10 @@ func TestAccPlanDataSource(t *testing.T) {
 		// maxDatabases is the plan's maxDatabases in the API response;
 		// nil leaves it out, as an older kupe-api does.
 		maxDatabases any
-		check        resource.TestCheckFunc
+		// registry is the plan's registry allowance; nil leaves it out, as a
+		// plan without a registry (or an older kupe-api) does.
+		registry map[string]any
+		check    resource.TestCheckFunc
 	}{
 		{
 			name:         "limited plan",
@@ -56,6 +59,26 @@ func TestAccPlanDataSource(t *testing.T) {
 			name:  "limit not reported stays null",
 			check: resource.TestCheckNoResourceAttr("data.kupe_plan.starter", "max_databases"),
 		},
+		{
+			name:     "registry allowance",
+			registry: map[string]any{"maxStorage": "5Gi", "includedStorage": "1Gi"},
+			check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr("data.kupe_plan.starter", "registry_max_storage", "5Gi"),
+				resource.TestCheckResourceAttr("data.kupe_plan.starter", "registry_included_storage", "1Gi"),
+			),
+		},
+		{
+			name:     "unlimited registry reports 0",
+			registry: map[string]any{"maxStorage": "0", "includedStorage": "0"},
+			check:    resource.TestCheckResourceAttr("data.kupe_plan.starter", "registry_max_storage", "0"),
+		},
+		{
+			name: "no registry stays null",
+			check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckNoResourceAttr("data.kupe_plan.starter", "registry_max_storage"),
+				resource.TestCheckNoResourceAttr("data.kupe_plan.starter", "registry_included_storage"),
+			),
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -63,6 +86,9 @@ func TestAccPlanDataSource(t *testing.T) {
 			defer mock.close()
 			if tt.maxDatabases != nil {
 				mock.plans["starter"]["maxDatabases"] = tt.maxDatabases
+			}
+			if tt.registry != nil {
+				mock.plans["starter"]["registry"] = tt.registry
 			}
 
 			resource.UnitTest(t, resource.TestCase{
