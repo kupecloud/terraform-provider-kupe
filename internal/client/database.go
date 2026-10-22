@@ -164,8 +164,8 @@ type PatchDatabaseBindingRequest struct {
 	Namespaces []string `json:"namespaces"`
 }
 
-// IsDeletionProtected reports whether err is the API refusing a database
-// delete because deletion protection is enabled.
+// IsDeletionProtected reports whether err is the API refusing a database or
+// registry delete because deletion protection is enabled.
 func IsDeletionProtected(err error) bool {
 	var apiErr *APIError
 	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusConflict && apiErr.Code == CodeDeletionProtected

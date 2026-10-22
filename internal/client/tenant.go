@@ -41,6 +41,18 @@ type Plan struct {
 	// MaxDatabases is nil when the API does not report a database limit
 	// (an older kupe-api, or a plan that does not set one).
 	MaxDatabases *int64 `json:"maxDatabases,omitempty"`
+	// Registry is the plan's registry storage allowance; nil when the plan
+	// includes no registry (or the API is older than registries).
+	Registry *PlanRegistry `json:"registry,omitempty"`
+}
+
+// PlanRegistry is a plan's registry storage allowance, in binary units.
+type PlanRegistry struct {
+	// MaxStorage is the most a tenant's registry may store; "0" means
+	// unlimited.
+	MaxStorage string `json:"maxStorage"`
+	// IncludedStorage is the storage the plan includes.
+	IncludedStorage string `json:"includedStorage"`
 }
 
 // GetPlan returns a platform plan.

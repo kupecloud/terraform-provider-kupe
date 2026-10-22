@@ -160,6 +160,18 @@ func deleteErrorDetail(err error) string {
 	return errDeleteNotAccepted.Error() + ": " + apiErrorDetail(apiErr)
 }
 
+// registriesUnavailableHint explains the 404 registries_unavailable: what
+// still works while the registry is switched off, and that state is kept.
+const registriesUnavailableHint = "Registries are not enabled for this Kupe Cloud environment. An existing " +
+	"registry, its cluster connections and its access tokens can still be read and deleted, deletion protection " +
+	"can still be turned off and push namespaces removed; other changes are refused. Terraform state is kept " +
+	"unchanged."
+
+// registriesNotServedHint explains a registry route the API does not have:
+// the kupe API at this host predates registries.
+const registriesNotServedHint = "The kupe API at this host does not offer registries yet, so nothing was " +
+	"changed and Terraform state is kept unchanged. Check the provider's `host`, or contact Kupe Cloud support."
+
 // apiErrorSummary is the status, message and, when present, the canonical
 // error code and field path of an API error. The code is a stable identifier
 // users can quote to support or branch on.
@@ -183,9 +195,13 @@ func apiErrorSummary(apiErr *client.APIError) string {
 // buries the real cause behind a generic "timed out" warning. A plain 404 is
 // deliberately excluded — it is the success signal for deletion polls and
 // for readiness polls means the object simply isn't observable yet, not a
-// permanent failure. The 404 that says managed databases are not enabled is
-// permanent and included.
+// permanent failure. The 404s that say managed databases or the registry are
+// not enabled are permanent and included, as is a registry route the API does
+// not serve at all.
 func isTerminalAPIError(err error) bool {
+	if client.IsRegistriesNotServed(err) {
+		return true
+	}
 	var apiErr *client.APIError
 	if !errors.As(err, &apiErr) {
 		return false
@@ -195,7 +211,7 @@ func isTerminalAPIError(err error) bool {
 		return true
 	case http.StatusNotFound:
 		// A disabled feature does not come back by waiting.
-		return apiErr.Code == client.CodeDatabasesUnavailable
+		return apiErr.Code == client.CodeDatabasesUnavailable || apiErr.Code == client.CodeRegistriesUnavailable
 	default:
 		return false
 	}
@@ -218,6 +234,9 @@ func apiErrorDetail(err error) string {
 	}
 
 	base := apiErrorSummary(apiErr)
+	if client.IsRegistriesNotServed(err) {
+		return base + "\n\n" + registriesNotServedHint
+	}
 	switch apiErr.StatusCode {
 	case http.StatusBadRequest:
 		// Codes with a known remedy get one. creation_paused is shared by
@@ -235,6 +254,15 @@ func apiErrorDetail(err error) string {
 			return base + "\n\nThe database name is too long for your tenant, so nothing was created. Database " +
 				"names may be at most 44 characters, and fewer when the tenant name is over 12 characters. Choose a " +
 				"shorter `name`, then run `terraform apply` again."
+		case client.CodeRegistryStorageLimitAbovePlan:
+			return base + "\n\nSet a lower `storage_limit`, or remove it to use the most your plan allows."
+		case client.CodeRegistryPushNamespacesServiceLimit:
+			return base + "\n\nThis limit counts the push namespaces of every cluster connection of the registry " +
+				"together, so the plan could not check it. Remove push namespaces from this or another cluster " +
+				"connection, then run `terraform apply` again."
+		case client.CodeRegistryTokenExpiryInvalid:
+			return base + "\n\nSet `expires_in_days` to a number of days the platform accepts, then run " +
+				"`terraform apply` again."
 		}
 		// 400 covers two server-side outcomes that surface here:
 		// (a) the request body failed schema decoding (typo in
@@ -254,6 +282,10 @@ func apiErrorDetail(err error) string {
 		// any other 403 message we receive is from an older API that
 		// still routed webhook denials through 403 (newer API uses
 		// 400). For non-RBAC bodies the role hint is misleading.
+		if apiErr.Code == client.CodeRegistryTokenPushAdminOnly {
+			return base + "\n\nA push access token can only be created by a member with the `admin` role, or an " +
+				"admin API key. Use admin credentials, or set `access = \"pull\"`."
+		}
 		if strings.EqualFold(strings.TrimSpace(apiErr.Message), rbacForbiddenMessage) {
 			return base + "\n\nYour credentials authenticated but lack the role required for this operation. Most mutating operations require the `admin` role on the tenant; reads accept `readonly` as well."
 		}
@@ -261,6 +293,9 @@ func apiErrorDetail(err error) string {
 	case http.StatusNotFound:
 		if apiErr.Code == client.CodeDatabasesUnavailable {
 			return base + "\n\nDatabases are not enabled for this Kupe Cloud environment. Existing databases can still be read, have deletion protection turned off, and be deleted, and their bindings deleted or have namespaces removed; other changes are refused. Terraform state is kept unchanged. Contact Kupe Cloud support if you expected databases to be available."
+		}
+		if apiErr.Code == client.CodeRegistriesUnavailable {
+			return base + "\n\n" + registriesUnavailableHint
 		}
 		return base + "\n\nThe resource does not exist on the server. If you expected it to exist it may have been deleted out-of-band; run `terraform refresh` to reconcile or `terraform import` to re-attach."
 	case http.StatusConflict:
@@ -274,10 +309,19 @@ func apiErrorDetail(err error) string {
 			return base + "\n\nIt is being deleted, so it can no longer be changed or bound. Once it is gone, " +
 				"`terraform apply` creates it again; remove it from the configuration if that is not wanted."
 		case client.CodeTenantTerminating:
-			return base + "\n\nYour tenant is being deleted, so it cannot take new or larger clusters or databases."
+			return base + "\n\nYour tenant is being deleted, so nothing new can be created in it and nothing can " +
+				"be made larger."
 		case client.CodeTenantSuspended:
-			return base + "\n\nYour tenant is suspended, so it cannot take new or larger clusters or databases. " +
-				"Contact Kupe Cloud support to lift the suspension."
+			return base + "\n\nYour tenant is suspended, so nothing new can be created in it and nothing can be " +
+				"made larger. Contact Kupe Cloud support to lift the suspension."
+		case client.CodeRegistryAlreadyExists:
+			return base + "\n\nA tenant has one registry. Import it: `terraform import kupe_registry.this registry`."
+		case client.CodeRegistryBindingExists:
+			return base + "\n\nA cluster has one cluster connection. Import it: " +
+				"`terraform import kupe_registry_binding.this registry/<cluster>`."
+		case client.CodeRegistryTokenLimitReached:
+			return base + "\n\nThe registry holds as many access tokens as it can. Revoke one you no longer use " +
+				"(destroy its `kupe_registry_token`, or revoke it in the Kupe Console), then run `terraform apply` again."
 		case client.CodePaymentSetupRequired:
 			return base + "\n\nAdd a payment method on the Billing page of the Kupe Console, then run " +
 				"`terraform apply` again."
