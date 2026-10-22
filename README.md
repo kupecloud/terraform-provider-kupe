@@ -31,12 +31,15 @@ the rest of your infrastructure code.
 * clusters with `kupe_cluster`
 * PostgreSQL databases with `kupe_database`, bound into cluster
   namespaces with `kupe_database_binding`
+* the container registry with `kupe_registry`, clusters connected to it
+  with `kupe_registry_binding`, and CI access tokens with
+  `kupe_registry_token`
 * tenant secrets and sync targets with `kupe_secret`
 * tenant membership with `kupe_tenant_member`
 * machine-to-machine credentials with `kupe_api_key`
 * per-tenant Alertmanager configuration with `kupe_alertmanager_global`,
   `kupe_alertmanager_receiver`, and `kupe_alertmanager_routes`
-* tenant, cluster, database, and plan metadata through data sources
+* tenant, cluster, database, registry, and plan metadata through data sources
 
 ## Quick start
 
