@@ -36,6 +36,10 @@ Use `KUPE_API_KEY` for authentication in hosted Kupe Cloud environments.
 
 For normal environments, use an `https://` API host. Plain HTTP is only supported for local development endpoints such as `http://localhost:8080`.
 
+## State contains secrets
+
+`kupe_api_key.key` and `kupe_registry_token.secret` are stored in Terraform state in plain text. Marking them Sensitive hides them from plan and apply output but does not keep them out of the state file. Keep state in an encrypted backend with restricted access, or create API keys and access tokens outside Terraform.
+
 ## Available Resources
 
 - `kupe_cluster`
@@ -43,6 +47,7 @@ For normal environments, use an `https://` API host. Plain HTTP is only supporte
 - `kupe_database_binding`
 - `kupe_registry`
 - `kupe_registry_binding`
+- `kupe_registry_token`
 - `kupe_secret`
 - `kupe_tenant_member`
 - `kupe_api_key`
