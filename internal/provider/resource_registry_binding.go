@@ -260,11 +260,12 @@ func (r *RegistryBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 			},
 			"push_namespaces": schema.SetAttribute{
 				Description: "Namespaces inside the cluster that receive a push credential Secret named " +
-					"`secret_name`: up to 10, none `kube-*` or `argocd`. Each namespace receives a Secret that can " +
-					"push to and delete from every repository in the registry. Default none: the cluster can pull " +
-					"only. Changes in place: a namespace added gets the Secret, one taken out loses it, and pulls " +
-					"keep working throughout. The registry's connections can list at most 20 push namespaces " +
-					"between them; the Kupe platform checks that when the change is applied.",
+					"`secret_name`: up to 10, none `kube-*` or `argocd`. Each namespace receives a Secret named " +
+					"`secret_name` that can pull from and push to every repository in your registry, including " +
+					"replacing existing tags. Default none: the cluster can pull only. Changes in place: a namespace " +
+					"added gets the Secret, one taken out loses it, and pulls keep working throughout. The " +
+					"registry's connections can list at most 20 push namespaces between them; the Kupe platform " +
+					"checks that when the change is applied.",
 				ElementType: types.StringType,
 				Optional:    true,
 				Computed:    true,

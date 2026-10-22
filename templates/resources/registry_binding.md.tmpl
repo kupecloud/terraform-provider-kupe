@@ -19,7 +19,7 @@ Once the connection is Ready, every pod of the cluster can pull `registry.kupe.c
 
 ### Pushing from inside the cluster
 
-Each namespace in `push_namespaces` gets a Secret named `secret_name` (default `kupe-registry-push`) of type `kubernetes.io/dockerconfigjson`. Build tools that read a Docker config file can push with it: mount its `.dockerconfigjson` key as `config.json`. Each namespace receives a Secret that can push to and delete from every repository in the registry, so list only the namespaces that build images.
+Each namespace in `push_namespaces` gets a Secret named `secret_name` (default `kupe-registry-push`) of type `kubernetes.io/dockerconfigjson`. Build tools that read a Docker config file can push with it: mount its `.dockerconfigjson` key as `config.json`. Each namespace receives a Secret named `secret_name` that can pull from and push to every repository in your registry, including replacing existing tags, so list only the namespaces that build images.
 
 `push_namespaces` changes in place, and the connection's pull credential is untouched: running pods keep pulling. A namespace taken out loses its Secret. Changing `secret_name`, `cluster` or `registry` replaces the connection instead: it is deleted and created again, so its pull and push credentials are reissued.
 
