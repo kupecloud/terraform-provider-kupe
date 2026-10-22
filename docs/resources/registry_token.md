@@ -55,7 +55,7 @@ A token is also revoked when the member whose credentials created it leaves the 
 
 ### Required
 
-- `access` (String) `pull`, or `push` (which includes pull). Only a member with the `admin` role, or an admin API key, can create a push token. A different value replaces the token.
+- `access` (String) `pull`, or `push` (which includes pull). Only a member with the `admin` role, or an admin API key, can create a token. A different value replaces the token.
 - `display_name` (String) A name to recognise the token by, 1 to 128 characters. A different name replaces the token.
 
 ### Optional
