@@ -60,6 +60,10 @@ type mockRegistryState struct {
 	registryTokenIssuedUsername string
 	// registryTokenLimit is the most access tokens the registry holds.
 	registryTokenLimit int
+	// registryTokenRevokedBeforeDelete answers a token DELETE like a token
+	// revoked or swept between the refresh and the DELETE: it is gone and
+	// the answer is 404.
+	registryTokenRevokedBeforeDelete bool
 	// registryRequests records every registry request in order.
 	registryRequests []mockRegistryRequest
 }
@@ -523,6 +527,9 @@ func (m *mockKupeAPI) serveRegistryTokens(w http.ResponseWriter, r *http.Request
 	case len(segs) == 3 && r.Method == http.MethodGet:
 		m.getRegistryToken(w, segs[2])
 	case len(segs) == 3 && r.Method == http.MethodDelete:
+		if m.registryTokenRevokedBeforeDelete {
+			delete(m.registryTokens, segs[2])
+		}
 		if _, ok := m.registryTokens[segs[2]]; !ok {
 			mockNotFound(w, "access token", segs[2])
 			return
