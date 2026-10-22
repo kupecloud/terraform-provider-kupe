@@ -1,0 +1,38 @@
+---
+page_title: "{{.Name}} {{.Type}} - {{.ProviderName}}"
+subcategory: ""
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# {{.Name}} ({{.Type}})
+
+{{ .Description | trimspace }}
+
+## Example Usage
+
+{{ tffile "examples/resources/kupe_registry_binding/resource.tf" }}
+
+### Pulling
+
+Once the connection is Ready, every pod of the cluster can pull `registry.kupe.cloud/<tenant>/<repository>:<tag>` with no `imagePullSecrets`. The pull credential stays on the platform. Create gives a warning as a reminder: pods that were already running pick it up only when they restart.
+
+### Pushing from inside the cluster
+
+Each namespace in `push_namespaces` gets a Secret named `secret_name` (default `kupe-registry-push`) of type `kubernetes.io/dockerconfigjson`. Build tools that read a Docker config file can push with it: mount its `.dockerconfigjson` key as `config.json`. Each namespace receives a Secret that can push to and delete from every repository in the registry, so list only the namespaces that build images.
+
+`push_namespaces` changes in place, and the connection's pull credential is untouched: running pods keep pulling. A namespace taken out loses its Secret. Changing `secret_name`, `cluster` or `registry` replaces the connection instead: it is deleted and created again, so its pull and push credentials are reissued.
+
+A connection lists at most 10 push namespaces, which the plan checks. The registry's connections list at most 20 between them; the Kupe platform refuses a change that breaks that when it is applied.
+
+### When a connection fails
+
+A push namespace is `Failed` when it already has a Secret named `secret_name` that the Kupe platform did not create. Create and Update stop at once with an error that names the namespace; every pod of the cluster can still pull. Rename or remove that Secret, or set a different `secret_name`. After a failed Create, Terraform keeps the connection in state, marked tainted, and the next `terraform apply` replaces it.
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Import
+
+Import is supported using the following syntax:
+
+{{ codefile "shell" "examples/resources/kupe_registry_binding/import.sh" }}
