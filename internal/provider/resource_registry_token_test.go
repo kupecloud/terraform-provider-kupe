@@ -241,6 +241,8 @@ func TestAccRegistryTokenResource_PlanTimeErrors(t *testing.T) {
 		{name: "lifetime 366", displayName: "ci", access: "pull", extra: "  expires_in_days = 366\n", wantErr: `between 1 and 365`},
 		{name: "empty name", displayName: "", access: "pull", wantErr: `character count must be between 1 and 128`},
 		{name: "129 characters", displayName: strings.Repeat("é", 129), access: "pull", wantErr: `character count must be between 1 and 128`},
+		{name: "tab", displayName: "ci\tbuild", access: "pull", wantErr: `must be printable text,\s+without control\s+characters`},
+		{name: "newline", displayName: "ci\nbuild", access: "pull", wantErr: `must be printable text,\s+without control\s+characters`},
 		{name: "access", displayName: "ci", access: "admin", wantErr: `value must be one of`},
 		{name: "another registry", displayName: "ci", access: "pull", extra: "  registry = \"images\"\n", wantErr: `a tenant has one registry, named\s+registry`},
 	}
