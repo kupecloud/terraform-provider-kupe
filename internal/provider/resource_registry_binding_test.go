@@ -378,35 +378,46 @@ func TestAccRegistryBindingResource_FailedNamespace(t *testing.T) {
 
 // TestAccRegistryBindingResource_RemovedFailedNamespace (F-6): a namespace
 // taken out of push_namespaces whose status is still Failed does not fail
-// the Update: only the listed namespaces count.
+// the Update: only the listed namespaces count. The update also adds tools,
+// which the platform delivers a poll later, so the wait sees ci Failed
+// before the new list is Ready.
 func TestAccRegistryBindingResource_RemovedFailedNamespace(t *testing.T) {
 	shrinkPollInterval(t)
 	mock := newMockKupeAPI()
 	defer mock.close()
 	seedRegistry(mock, "")
+	ciFailed := map[string]any{"name": "ci", "phase": "Failed", "message": "a Secret of the same name exists"}
+	ready := func(name string) map[string]any { return map[string]any{"name": name, "phase": "Ready", "message": ""} }
 	acc.UnitTest(t, acc.TestCase{
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
 		CheckDestroy:             testAccCheckNoRegistryBindings(mock),
 		Steps: []acc.TestStep{
 			{Config: testAccRegistryBindingConfig(mock.url(), "prod", ns("ci", "release"), "")},
 			{
-				// The platform still reports ci Failed while it withdraws it.
+				// After the PATCH the platform still reports ci Failed while
+				// it withdraws it, and delivers tools on the second poll.
 				PreConfig: func() {
 					mock.setState(func(m *mockKupeAPI) {
-						m.registryBindingStatus = map[string]any{
-							"namespaces": []any{
-								map[string]any{"name": "ci", "phase": "Failed", "message": "a Secret of the same name exists"},
-								map[string]any{"name": "release", "phase": "Ready", "message": ""},
-							},
+						m.registryBindingPatchStatuses = []map[string]any{
+							{"namespaces": []any{ciFailed, ready("release")}},
+							{"namespaces": []any{ciFailed, ready("release"), ready("tools")}},
 						}
 					})
 				},
-				Config:           testAccRegistryBindingConfig(mock.url(), "prod", ns("release"), ""),
+				Config:           testAccRegistryBindingConfig(mock.url(), "prod", ns("release", "tools"), ""),
 				ConfigPlanChecks: expectBindingAction(plancheck.ResourceActionUpdate),
 				Check: acc.ComposeAggregateTestCheckFunc(
 					acc.TestCheckResourceAttr(bindingAddr, "phase", "Ready"),
-					acc.TestCheckResourceAttr(bindingAddr, "push_namespaces.#", "1"),
+					acc.TestCheckResourceAttr(bindingAddr, "push_namespaces.#", "2"),
 					acc.TestCheckTypeSetElemAttr(bindingAddr, "push_namespaces.*", "release"),
+					acc.TestCheckTypeSetElemAttr(bindingAddr, "push_namespaces.*", "tools"),
+					func(*terraform.State) error {
+						req, _ := lastBindingWrite(mock, "PATCH")
+						if fmt.Sprint(req.body["pushNamespaces"]) != "[release tools]" {
+							return fmt.Errorf("PATCH body = %v, want pushNamespaces [release tools]", req.body)
+						}
+						return nil
+					},
 				),
 			},
 		},
