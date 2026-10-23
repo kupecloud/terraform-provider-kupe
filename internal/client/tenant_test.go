@@ -40,7 +40,6 @@ func TestGetPlan(t *testing.T) {
 	mock.onJSON("GET", "/api/v1/plans/starter", http.StatusOK, Plan{
 		Name:        "starter",
 		DisplayName: "Starter",
-		PlatformFee: "29.00",
 		MaxClusters: 3,
 	})
 

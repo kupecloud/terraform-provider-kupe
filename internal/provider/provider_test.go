@@ -1,9 +1,15 @@
 package provider
 
 import (
+	"context"
+	"strings"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	dsschema "github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	rschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/kupecloud/terraform-provider-kupe/internal/client"
@@ -229,5 +235,81 @@ func TestNormalizeHost(t *testing.T) {
 				t.Fatalf("expected %q, got %q", tt.want, got)
 			}
 		})
+	}
+}
+
+// amountWords mark an attribute name as an amount: Terraform returns no
+// platform costs (no prices in alpha, D-40; kupecloud/kupe-api#42).
+var amountWords = []string{"fee", "price", "cost", "amount", "currency", "total", "credit", "tax", "charge"}
+
+// TestNoAmountAttributes fails when any resource or data source attribute,
+// nested ones included, is named as an amount and is not deprecated. The
+// only deprecated one allowed is kupe_plan.platform_fee, which is always
+// null (TestAccPlanDataSource).
+func TestNoAmountAttributes(t *testing.T) {
+	ctx := context.Background()
+	p := &KupeProvider{}
+	allowedDeprecated := map[string]bool{"kupe_plan.platform_fee": true}
+
+	check := func(path, deprecation string) {
+		name := strings.ToLower(path[strings.LastIndex(path, ".")+1:])
+		for _, w := range amountWords {
+			if !strings.Contains(name, w) {
+				continue
+			}
+			if !allowedDeprecated[path] || deprecation == "" {
+				t.Errorf("%s looks like an amount (%q); Terraform returns no platform costs", path, w)
+			}
+		}
+	}
+
+	var walkDS func(prefix string, attrs map[string]dsschema.Attribute)
+	walkDS = func(prefix string, attrs map[string]dsschema.Attribute) {
+		for name, a := range attrs {
+			path := prefix + "." + name
+			check(path, a.GetDeprecationMessage())
+			switch n := a.(type) {
+			case dsschema.SingleNestedAttribute:
+				walkDS(path, n.Attributes)
+			case dsschema.ListNestedAttribute:
+				walkDS(path, n.NestedObject.Attributes)
+			}
+		}
+	}
+	var walkR func(prefix string, attrs map[string]rschema.Attribute)
+	walkR = func(prefix string, attrs map[string]rschema.Attribute) {
+		for name, a := range attrs {
+			path := prefix + "." + name
+			check(path, a.GetDeprecationMessage())
+			switch n := a.(type) {
+			case rschema.SingleNestedAttribute:
+				walkR(path, n.Attributes)
+			case rschema.ListNestedAttribute:
+				walkR(path, n.NestedObject.Attributes)
+			}
+		}
+	}
+
+	for _, newDS := range p.DataSources(ctx) {
+		ds := newDS()
+		var meta datasource.MetadataResponse
+		ds.Metadata(ctx, datasource.MetadataRequest{ProviderTypeName: "kupe"}, &meta)
+		var sch datasource.SchemaResponse
+		ds.Schema(ctx, datasource.SchemaRequest{}, &sch)
+		if len(sch.Schema.Blocks) > 0 {
+			t.Errorf("%s has blocks this test does not walk", meta.TypeName)
+		}
+		walkDS(meta.TypeName, sch.Schema.Attributes)
+	}
+	for _, newR := range p.Resources(ctx) {
+		r := newR()
+		var meta resource.MetadataResponse
+		r.Metadata(ctx, resource.MetadataRequest{ProviderTypeName: "kupe"}, &meta)
+		var sch resource.SchemaResponse
+		r.Schema(ctx, resource.SchemaRequest{}, &sch)
+		if len(sch.Schema.Blocks) > 0 {
+			t.Errorf("%s has blocks this test does not walk", meta.TypeName)
+		}
+		walkR(meta.TypeName, sch.Schema.Attributes)
 	}
 }

@@ -30,6 +30,6 @@ data "kupe_plan" "pro" {
 - `display_name` (String) Human-readable plan name.
 - `max_clusters` (Number) Maximum number of clusters allowed on the plan. `0` means unlimited.
 - `max_databases` (Number) Maximum number of databases allowed on the plan. `0` means unlimited. Null when the API does not report a database limit for the plan.
-- `platform_fee` (String) Base monthly platform fee for the plan.
+- `platform_fee` (String, Deprecated) Deprecated: not returned (no platform costs in Terraform).
 - `registry_included_storage` (String) Registry storage the plan includes, with a binary unit, e.g. `1Gi`. Null when the plan includes no registry.
 - `registry_max_storage` (String) Most a registry may store on the plan, with a binary unit, e.g. `5Gi`. `0` means unlimited. Null when the plan includes no registry.
