@@ -50,7 +50,7 @@ jobs:
     name: Release
     needs:
       - build
-    uses: kupecloud/github-workflows/.github/workflows/semantic-release.yaml@6c631aa5e3dc896ff8bf5cf5244df96e219fbe6f # v2.5.2
+    uses: kupecloud/github-workflows/.github/workflows/semantic-release.yaml@b25db2fd2e7b3944d95f905a9b3534ee7df535b0 # v2.8.0
     permissions:
       contents: write
       issues: write
