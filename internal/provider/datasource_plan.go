@@ -17,8 +17,12 @@ type PlanDataSource struct {
 }
 
 type PlanDataSourceModel struct {
-	Name         types.String `tfsdk:"name"`
-	DisplayName  types.String `tfsdk:"display_name"`
+	Name        types.String `tfsdk:"name"`
+	DisplayName types.String `tfsdk:"display_name"`
+	// PlatformFee is deprecated and always null: Terraform returns no
+	// platform costs (kupecloud/kupe-api#42). It stays in the schema so
+	// configurations that reference it keep working until a major version
+	// removes it.
 	PlatformFee  types.String `tfsdk:"platform_fee"`
 	MaxClusters  types.Int64  `tfsdk:"max_clusters"`
 	MaxDatabases types.Int64  `tfsdk:"max_databases"`
@@ -49,8 +53,10 @@ func (d *PlanDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, r
 				Computed:    true,
 			},
 			"platform_fee": schema.StringAttribute{
-				Description: "Base monthly platform fee for the plan.",
-				Computed:    true,
+				Description: "Deprecated: not returned (no platform costs in Terraform).",
+				DeprecationMessage: "platform_fee is always null: Terraform returns no platform costs. " +
+					"Remove references to it; a future major version removes the attribute.",
+				Computed: true,
 			},
 			"max_clusters": schema.Int64Attribute{
 				Description: "Maximum number of clusters allowed on the plan. `0` means unlimited.",
@@ -92,7 +98,7 @@ func (d *PlanDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 	}
 
 	state.DisplayName = types.StringValue(plan.DisplayName)
-	state.PlatformFee = types.StringValue(plan.PlatformFee)
+	state.PlatformFee = types.StringNull()
 	state.MaxClusters = types.Int64Value(plan.MaxClusters)
 	state.MaxDatabases = types.Int64PointerValue(plan.MaxDatabases)
 	state.RegistryMaxStorage, state.RegistryIncludedStorage = types.StringNull(), types.StringNull()

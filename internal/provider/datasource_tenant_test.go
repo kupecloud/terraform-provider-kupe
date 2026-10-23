@@ -108,7 +108,10 @@ data "kupe_plan" "starter" {
 `, mock.url()),
 						Check: resource.ComposeAggregateTestCheckFunc(
 							resource.TestCheckResourceAttr("data.kupe_plan.starter", "display_name", "Starter"),
-							resource.TestCheckResourceAttr("data.kupe_plan.starter", "platform_fee", "29.00"),
+							// The mock serves platformFee "29.00"; the
+							// attribute stays null all the same (no platform
+							// costs in Terraform, kupecloud/kupe-api#42).
+							resource.TestCheckNoResourceAttr("data.kupe_plan.starter", "platform_fee"),
 							resource.TestCheckResourceAttr("data.kupe_plan.starter", "max_clusters", "3"),
 							tt.check,
 						),

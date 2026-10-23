@@ -30,11 +30,13 @@ func (c *Client) GetTenant(ctx context.Context) (*Tenant, string, error) {
 	return &tenant, etag, nil
 }
 
-// Plan represents a platform plan.
+// Plan represents a platform plan. It carries no amount: kupe-api's
+// platformFee is not decoded, so kupe_plan.platform_fee is always null (no
+// platform costs in Terraform; kupecloud/kupe-api#42). Do not add a price,
+// fee, cost or currency field here.
 type Plan struct {
 	Name              string `json:"name"`
 	DisplayName       string `json:"displayName"`
-	PlatformFee       string `json:"platformFee"`
 	ResourcePool      any    `json:"resourcePool,omitempty"`
 	ObservabilityPool any    `json:"observabilityPool,omitempty"`
 	MaxClusters       int64  `json:"maxClusters"`
