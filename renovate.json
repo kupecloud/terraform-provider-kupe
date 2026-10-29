@@ -1,4 +1,19 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["local>kupecloud/github-workflows//renovate/default"]
+  "description": "Policy copied from kupecloud/github-workflows renovate/default.json at fa2920f22d9c44f8d76b8c994d3e7b861a31d396, because that repo is private and a public repo cannot extend a preset hosted there (Renovate: Cannot find preset's package). Keep in step with that file by hand.",
+  "extends": [
+    "config:recommended",
+    ":semanticCommits",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "pinDigests": true,
+  "minimumReleaseAge": "7 days",
+  "automerge": false,
+  "postUpdateOptions": ["gomodTidy"],
+  "osvVulnerabilityAlerts": true,
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "minimumReleaseAge": "0 days",
+    "schedule": ["at any time"]
+  }
 }
