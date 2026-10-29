@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "Policy copied from kupecloud/github-workflows renovate/default.json at fa2920f22d9c44f8d76b8c994d3e7b861a31d396, because that repo is private and a public repo cannot extend a preset hosted there (Renovate: Cannot find preset's package). Keep in step with that file by hand.",
+  "description": "Security policy taken from kupecloud/github-workflows renovate/default.json at fa2920f22d9c44f8d76b8c994d3e7b861a31d396, because that repo is private and a public repo cannot extend a preset hosted there (Renovate: Cannot find preset's package). This is a deliberate security subset of that preset (vulnerability alerts, minimum release age, digest pinning, no automerge), not a full copy: its grouping, labelling, schedule and custom-manager rules are left out. Review it when the preset changes.",
   "extends": [
     "config:recommended",
     ":semanticCommits",
