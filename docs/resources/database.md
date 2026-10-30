@@ -74,7 +74,7 @@ Kupe takes a full backup of every database each day and saves the write-ahead lo
 
 A change applies in place, and `terraform apply` waits for the database to take it, as it does for a resize. Fields you leave out keep their current value, and removing `backup` keeps the current settings: to go back to the defaults, set them.
 
-`last_backup_at`, `recovery_window` and `backup_size_bytes` report the newest full backup, the oldest and newest points you can recover to, and the storage the backups take up. The `kupe_database` data source returns the same values.
+`last_backup_at`, `recovery_window` and `backup_size_bytes` report the newest full backup, the restore window (the oldest and newest points you can restore to), and the storage the backups take up. The `kupe_database` data source returns the same values.
 
 ### Connecting applications
 
@@ -105,7 +105,7 @@ Grant access with [`kupe_database_binding`](database_binding.md). Each binding p
 - `etag` (String) Resource version used for optimistic locking during updates.
 - `last_backup_at` (String) When the newest full backup finished (RFC 3339). Empty until the first backup completes.
 - `phase` (String) Current phase: Pending, Provisioning, Running, Degraded or Terminating.
-- `recovery_window` (Attributes) The oldest and newest points you can recover the database to. Null until the backups report them. (see [below for nested schema](#nestedatt--recovery_window))
+- `recovery_window` (Attributes) The restore window: the oldest and newest points you can restore the database to. Null until the backups report them. (see [below for nested schema](#nestedatt--recovery_window))
 
 <a id="nestedatt--resources"></a>
 ### Nested Schema for `resources`
@@ -123,7 +123,7 @@ Required:
 Optional:
 
 - `retention` (Number) How far back the backups reach, in days: 7 to 35, default 7. The Kupe platform sets the range and refuses a value outside it (error code `DATABASE_BACKUP_RETENTION_OUT_OF_RANGE`). Shortening retention deletes the backups that fall outside the new window.
-- `schedule` (String) How many full backups are kept within the retention period: `Daily` keeps one for every day; `DailyThenWeekly` keeps one for each of the last 7 days and one a week before that. The points you can recover to are the same either way; recovering to an older point takes longer. Default `Daily`.
+- `schedule` (String) How many full backups are kept within the retention period: `Daily` keeps one for every day; `DailyThenWeekly` keeps one for each of the last 7 days and one a week before that. The points you can restore to are the same either way; restoring to an older point takes longer. Default `Daily`.
 
 
 <a id="nestedatt--timeouts"></a>
@@ -141,8 +141,8 @@ Optional:
 
 Read-Only:
 
-- `earliest` (String) The oldest point you can recover to (RFC 3339).
-- `latest` (String) The newest point you can recover to: the newest WAL saved (RFC 3339).
+- `earliest` (String) The oldest point you can restore to (RFC 3339).
+- `latest` (String) The newest point you can restore to: the newest WAL saved (RFC 3339).
 
 ## Import
 
