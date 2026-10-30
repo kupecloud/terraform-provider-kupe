@@ -30,7 +30,9 @@ the rest of your infrastructure code.
 
 * clusters with `kupe_cluster`
 * PostgreSQL databases with `kupe_database`, bound into cluster
-  namespaces with `kupe_database_binding`
+  namespaces with `kupe_database_binding`; manual backups with
+  `kupe_database_backup`, and new databases restored from them with
+  `source` on `kupe_database`
 * the container registry with `kupe_registry`, clusters connected to it
   with `kupe_registry_binding`, and CI access tokens with
   `kupe_registry_token`
@@ -39,7 +41,7 @@ the rest of your infrastructure code.
 * machine-to-machine credentials with `kupe_api_key`
 * per-tenant Alertmanager configuration with `kupe_alertmanager_global`,
   `kupe_alertmanager_receiver`, and `kupe_alertmanager_routes`
-* tenant, cluster, database, registry, and plan metadata through data sources
+* tenant, cluster, database, backup, registry, and plan metadata through data sources
 
 ## Quick start
 
