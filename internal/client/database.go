@@ -18,6 +18,9 @@ type Database struct {
 	// Backup is nil while the database has never set its backup settings:
 	// the platform defaults apply.
 	Backup *DatabaseBackup `json:"backup,omitempty"`
+	// Source is what a restored database was restored from, nil for a
+	// database that was not restored.
+	Source *DatabaseSource `json:"source,omitempty"`
 	Status *DatabaseStatus `json:"status,omitempty"`
 	// Generation increments on every spec change; the operator has applied
 	// a change once Status.ObservedGeneration catches up with it.
@@ -81,6 +84,9 @@ type CreateDatabaseRequest struct {
 	// Backup is sent only when set; the platform defaults what it leaves
 	// out.
 	Backup *DatabaseBackup `json:"backup,omitempty"`
+	// Source, when set, restores the new database from it. Version may then
+	// be empty: the platform runs the source's major version.
+	Source *DatabaseSource `json:"source,omitempty"`
 }
 
 // PatchDatabaseRequest is the JSON merge patch for a database. Nil fields

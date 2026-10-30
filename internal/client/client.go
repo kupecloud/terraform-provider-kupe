@@ -171,7 +171,7 @@ func (e *APIError) Error() string {
 
 // IsNotFound returns true if the error is a 404 for the requested resource.
 // A 404 meaning a whole feature is unavailable (CodeDatabasesUnavailable,
-// CodeRegistriesUnavailable) is excluded, and so is a registry route the API
+// CodeRegistriesUnavailable, CodeBackupsUnavailable) is excluded, and so is a registry route the API
 // does not serve at all (IsRegistriesNotServed): treating either as "not
 // found" would drop existing resources from state on refresh and report
 // deletes as complete.
@@ -182,7 +182,8 @@ func IsNotFound(err error) bool {
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
 		return apiErr.StatusCode == http.StatusNotFound &&
-			apiErr.Code != CodeDatabasesUnavailable && apiErr.Code != CodeRegistriesUnavailable
+			apiErr.Code != CodeDatabasesUnavailable && apiErr.Code != CodeRegistriesUnavailable &&
+			apiErr.Code != CodeBackupsUnavailable
 	}
 	return false
 }

@@ -168,6 +168,29 @@ const registriesUnavailableHint = "Registries are not enabled for this Kupe Clou
 	"can still be turned off and push namespaces removed; other changes are refused. Terraform state is kept " +
 	"unchanged."
 
+// backupsUnavailableHint explains the 400 backups_unavailable by the field
+// it names: the backup settings (spec.backup), a restore (spec.source), or
+// none for a manual backup, whose route is the request.
+func backupsUnavailableHint(field string) string {
+	switch field {
+	case "spec.source":
+		return "Backups are not available on this Kupe platform, so a database cannot be restored and nothing " +
+			"was created. Remove `source` from the configuration, then run `terraform apply` again."
+	case "":
+		return "Backups are not available on this Kupe platform, so no backup was taken. Remove the " +
+			"`kupe_database_backup` resource from the configuration, then run `terraform apply` again."
+	default:
+		return "Backups are not available on this Kupe platform. Remove `backup` from the configuration, then " +
+			"run `terraform apply` again."
+	}
+}
+
+// backupsNotOfferedHint explains the 404 backups_unavailable: this Kupe
+// platform has no manual backups or restores at all.
+const backupsNotOfferedHint = "This Kupe platform does not offer manual backups or restores yet, so nothing was " +
+	"created. Remove the `kupe_database_backup` resource or `source` from the configuration, or contact Kupe " +
+	"Cloud support."
+
 // registriesNotServedHint explains a registry route the API does not have:
 // the kupe API at this host predates registries.
 const registriesNotServedHint = "The kupe API at this host does not offer registries yet, so nothing was " +
@@ -235,7 +258,8 @@ func isTerminalAPIError(err error) bool {
 		return true
 	case http.StatusNotFound:
 		// A disabled feature does not come back by waiting.
-		return apiErr.Code == client.CodeDatabasesUnavailable || apiErr.Code == client.CodeRegistriesUnavailable
+		return apiErr.Code == client.CodeDatabasesUnavailable || apiErr.Code == client.CodeRegistriesUnavailable ||
+			apiErr.Code == client.CodeBackupsUnavailable
 	default:
 		return false
 	}
@@ -288,8 +312,21 @@ func apiErrorDetail(err error) string {
 			return base + "\n\nSet `expires_in_days` to a number of days the platform accepts, then run " +
 				"`terraform apply` again."
 		case client.CodeBackupsUnavailable:
-			return base + "\n\nBackups are not available on this Kupe platform. Remove `backup` from the " +
-				"configuration, then run `terraform apply` again."
+			return base + "\n\n" + backupsUnavailableHint(apiErr.Field)
+		case client.CodeRestoreSourceNotFound:
+			return base + "\n\nThe backup or database named in `source` does not exist, so nothing was created. " +
+				"Check the name, then run `terraform apply` again."
+		case client.CodeRestorePointOutsideWindow:
+			return base + "\n\n`source.point_in_time` is outside the restore window of the database named in " +
+				"`source`, so nothing was created. Choose a point between its `recovery_window.earliest` and " +
+				"`recovery_window.latest`, then run `terraform apply` again."
+		case client.CodeRestoreVersionMismatch:
+			return base + "\n\nA restored database runs its source's major version, so nothing was created. " +
+				"Remove `version`, or set the source's version, then run `terraform apply` again."
+		case client.CodeRestoreStorageTooSmall:
+			return base + "\n\nA restored database needs at least the storage its source had, so nothing was " +
+				"created. Set `resources.storage` to at least that size (a backup's `source_storage`), then run " +
+				"`terraform apply` again."
 		}
 		// 400 covers two server-side outcomes that surface here:
 		// (a) the request body failed schema decoding (typo in
@@ -324,6 +361,9 @@ func apiErrorDetail(err error) string {
 		if apiErr.Code == client.CodeRegistriesUnavailable {
 			return base + "\n\n" + registriesUnavailableHint
 		}
+		if apiErr.Code == client.CodeBackupsUnavailable {
+			return base + "\n\n" + backupsNotOfferedHint
+		}
 		return base + "\n\nThe resource does not exist on the server. If you expected it to exist it may have been deleted out-of-band; run `terraform refresh` to reconcile or `terraform import` to re-attach."
 	case http.StatusConflict:
 		// A code names the refusal; only a plain conflict is about the name
@@ -349,6 +389,15 @@ func apiErrorDetail(err error) string {
 		case client.CodeRegistryTokenLimitReached:
 			return base + "\n\nThe registry holds as many access tokens as it can. Revoke one you no longer use " +
 				"(destroy its `kupe_registry_token`, or revoke it in the Kupe Console), then run `terraform apply` again."
+		case client.CodeRestoreSourceNotReady:
+			return base + "\n\nThe backup named in `source` has not completed, or the database named in `source` " +
+				"has no restore window yet, so nothing was created. Wait for it, then run `terraform apply` again."
+		case client.CodeBackupLimitReached:
+			return base + "\n\nThe database already keeps 20 manual backups, the most it can, so no backup was " +
+				"taken. Delete one you no longer need, then run `terraform apply` again."
+		case client.CodeDatabaseNotReady:
+			return base + "\n\nThe database is not running, so no backup was taken. Wait until its phase is " +
+				"Running, then run `terraform apply` again."
 		case client.CodePaymentSetupRequired:
 			return base + "\n\nAdd a payment method on the Billing page of the Kupe Console, then run " +
 				"`terraform apply` again."

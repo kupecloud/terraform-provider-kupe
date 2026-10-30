@@ -47,8 +47,36 @@ const (
 	// of the tenant name when that is less. The platform's own code.
 	CodeDatabaseNameTooLong = "DATABASE_NAME_TOO_LONG"
 	// CodeBackupsUnavailable comes with a 400 when a create or PATCH sets
-	// backup settings while the platform does not offer backups.
+	// backup settings, a manual backup is taken or a database is restored
+	// while the platform does not offer backups; the field says which
+	// (spec.backup, none, spec.source). It comes with a 404 when the
+	// platform has no manual backups at all.
 	CodeBackupsUnavailable = "backups_unavailable"
+)
+
+// Manual backup and restore codes, all kupe-api's own.
+const (
+	// CodeDatabaseNotReady comes with a 409 when a manual backup is taken of
+	// a database that is not running.
+	CodeDatabaseNotReady = "database_not_ready"
+	// CodeBackupLimitReached comes with a 409 when the database already
+	// keeps as many manual backups as it may.
+	CodeBackupLimitReached = "backup_limit_reached"
+	// CodeRestoreSourceNotFound comes with a 400 when the backup or database
+	// a restore names does not exist.
+	CodeRestoreSourceNotFound = "restore_source_not_found"
+	// CodeRestoreSourceNotReady comes with a 409 when a restore's backup has
+	// not completed or its database has no restore window yet.
+	CodeRestoreSourceNotReady = "restore_source_not_ready"
+	// CodeRestorePointOutsideWindow comes with a 400 when a restore's point
+	// in time is outside the source database's restore window.
+	CodeRestorePointOutsideWindow = "restore_point_outside_window"
+	// CodeRestoreVersionMismatch comes with a 400 when a restore asks for a
+	// major version other than its source's.
+	CodeRestoreVersionMismatch = "restore_version_mismatch"
+	// CodeRestoreStorageTooSmall comes with a 400 when a restore asks for
+	// less storage than its source had.
+	CodeRestoreStorageTooSmall = "restore_storage_too_small"
 )
 
 // Registry codes. kupe-api's own are lower case; the platform's (the
