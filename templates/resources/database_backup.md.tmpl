@@ -17,11 +17,13 @@ description: |-
 
 Restore a backup into a new database with `source.backup` on [`kupe_database`](database.md). The new database runs `source_version` and needs at least `source_storage`. The backup is unchanged and can be restored from again.
 
+Give the backup a `name` when a `kupe_database` refers to it in `source.backup`. A backup without `name` that is taken again, for example after it was deleted in the Kupe Console, gets a new name, and the new name replaces the restored database.
+
 ### Keeping a backup after its database
 
 A manual backup stays when its database is deleted, and `database_deleted` reads `true` from the next refresh. In one configuration a backup usually refers to its database, as in `database = kupe_database.orders.name`. Before you remove the database from the configuration, set `database` to the name itself (`database = "orders-db"`). The value is the same, so the backup is not replaced.
 
-`terraform destroy` deletes every backup in the configuration along with everything else. To keep a backup, remove it from the state first, for example `terraform state rm kupe_database_backup.before_migration`.
+`terraform destroy` deletes every backup in the configuration along with everything else. It deletes the backups before their database, so they are deleted even when the database's own delete is then refused by its deletion protection. To keep a backup, remove it from the state first, for example `terraform state rm kupe_database_backup.before_migration`.
 
 {{ .SchemaMarkdown | trimspace }}
 

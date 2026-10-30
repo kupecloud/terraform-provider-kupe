@@ -39,7 +39,17 @@ A change applies in place, and `terraform apply` waits for the database to take 
 - Its storage must be at least the source's: a backup's `source_storage`, or the `resources.storage` of the source database.
 - `point_in_time` is in UTC with whole seconds, for example `2026-10-30T09:00:00Z`, between the source database's `recovery_window.earliest` and `recovery_window.latest`.
 - A restore copies the source's data, so it takes longer than creating an empty database. Raise `timeouts.create` for a large one.
-- `source` applies only when the database is created. Changing it replaces the database: Terraform deletes it and restores a new one, so set `deletion_protection = false` and apply first. Removing `source` from the configuration keeps the database as it is.
+
+#### Keep `source` stable
+
+`source` is read only when the database is created. Any change to it replaces the database: Terraform deletes it, with the data written since the restore and its automatic backups, and restores a new one. A value Terraform knows only at apply time counts as a change, so these replace a restored database:
+
+- `source.backup` refers to a `kupe_database_backup` without `name`, and that backup is taken again (for example after it was deleted in the Kupe Console). Its new name is not known until apply.
+- `source.point_in_time` is computed when Terraform plans, for example with `timestamp()`. It changes on every plan.
+
+Once the restored database exists, remove `source` from the configuration: the database keeps what it was restored from and the plan is empty. To keep `source` in the configuration, name the backup with a literal or with a backup resource that sets `name`, and write `point_in_time` literally.
+
+Leave `deletion_protection` at `true`, its default. A planned replacement of a protected database then fails at apply instead of deleting it.
 
 Take manual backups with [`kupe_database_backup`](database_backup.md).
 

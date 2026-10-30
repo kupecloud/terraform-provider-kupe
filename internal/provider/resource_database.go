@@ -88,16 +88,21 @@ const (
 		"starting it empty. Set exactly one of `backup` and `database`. The new database runs the source's major " +
 		"version: leave `version` unset, or set that one. Its storage must be at least the source's. The source " +
 		"is unchanged, and the new database counts against the plan's database limit like any other. `source` " +
-		"applies only when the database is created: changing it replaces the database, and removing it from the " +
-		"configuration keeps the database as it is. Null on a database that was not restored. While the Kupe " +
-		"platform does not offer backups, setting `source` fails with error code `backups_unavailable`."
+		"is read only when the database is created, and any change to it replaces the database: Terraform " +
+		"deletes it and restores a new one. That includes a value Terraform knows only at apply time, such as " +
+		"the name of a `kupe_database_backup` without `name` that is taken again. Once the database exists, " +
+		"remove `source` from the configuration (the database keeps it), or keep it constant: name the backup " +
+		"with a literal or a backup resource that sets `name`, and write `point_in_time` literally. Null on a " +
+		"database that was not restored. While the Kupe platform does not offer backups, setting `source` " +
+		"fails with error code `backups_unavailable`."
 	sourceBackupDescription = "Name of a manual backup to restore. The database it was taken of may have been " +
 		"deleted. The new database holds the data as it was when the backup completed."
 	sourceDatabaseDescription = "Name of a database to restore. The new database holds its data as it was at " +
 		"`point_in_time`, or at the latest point when that is unset."
 	sourcePointInTimeDescription = "The moment to restore `database` to, in UTC with whole seconds, for example " +
 		"`2026-10-30T09:00:00Z`. It must be inside that database's restore window (its `recovery_window`). " +
-		"Leave it unset to restore to the latest point. Only with `database`."
+		"Leave it unset to restore to the latest point. Only with `database`. Write it literally: a time computed " +
+		"when Terraform plans, such as `timestamp()`, changes on every plan and replaces the database each time."
 )
 
 // Default timeouts for database operations, overridable in the `timeouts`
