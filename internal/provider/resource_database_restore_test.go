@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -183,6 +184,39 @@ func TestAccDatabaseResource_RestoreFromDatabase(t *testing.T) {
 					testAccCheckRestoreRequest(mock, `{"database":"orders-db"}`),
 					resource.TestCheckNoResourceAttr(testCopyAddr, "source.point_in_time"),
 				),
+			},
+		},
+	})
+}
+
+// TestAccDatabaseResource_RestoredStaysStable: on a restored database an
+// unrelated change is an in-place update that plans the recorded version
+// and source, with `source` in the configuration and after it is removed.
+func TestAccDatabaseResource_RestoredStaysStable(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+	src := `database = kupe_database.test.name, point_in_time = "2026-10-20T09:00:00Z"`
+	withCPU := func(source, cpu string) string {
+		return testAccRestoreSources(mock.url()) +
+			strings.Replace(testRestore(source, ""), `cpu     = "500m"`, `cpu     = "`+cpu+`"`, 1)
+	}
+	kept := []plancheck.PlanCheck{
+		plancheck.ExpectResourceAction(testCopyAddr, plancheck.ResourceActionUpdate),
+		plancheck.ExpectKnownValue(testCopyAddr, tfjsonpath.New("version"), knownvalue.StringExact("17")),
+		plancheck.ExpectKnownValue(testCopyAddr, tfjsonpath.New("source").AtMapKey("point_in_time"),
+			knownvalue.StringExact("2026-10-20T09:00:00Z")),
+	}
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		CheckDestroy:             testAccCheckNoBackups(mock),
+		Steps: []resource.TestStep{
+			{Config: withCPU(src, "500m")},
+			{Config: withCPU(src, "1"), ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: kept}},
+			{Config: withCPU("", "2"), ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: kept}},
+			{
+				Config:           withCPU("", "2"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()}},
+				Check:            resource.TestCheckResourceAttr(testCopyAddr, "version", "17"),
 			},
 		},
 	})
