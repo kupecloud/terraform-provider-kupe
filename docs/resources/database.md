@@ -94,8 +94,9 @@ Grant access with [`kupe_database_binding`](database_binding.md). Each binding p
 - `deletion_protection` (Boolean) While `true`, the Kupe platform refuses to delete the database. Set it to `false` and apply before destroying. Default `true`, also for an existing database: importing an unprotected database without this attribute in configuration plans turning protection on.
 - `engine` (String) Database engine. Only `postgres` is supported, and it is the default. The engine of an existing database cannot change: a different value fails the plan instead of replacing the database.
 - `high_availability` (Boolean) Run two instances with a synchronous standby. Can be turned on or off in place. When unset, a new database is created without it and an existing or imported database keeps its current setting, so removing the attribute from configuration does not turn HA off: set it to `false` to do that.
+- `source` (Attributes) Restore the new database from a manual backup or from another database, instead of starting it empty. Set exactly one of `backup` and `database`. The new database runs the source's major version: leave `version` unset, or set that one. Its storage must be at least the source's. The source is unchanged, and the new database counts against the plan's database limit like any other. `source` applies only when the database is created: changing it replaces the database, and removing it from the configuration keeps the database as it is. Null on a database that was not restored. While the Kupe platform does not offer backups, setting `source` fails with error code `backups_unavailable`. (see [below for nested schema](#nestedatt--source))
 - `timeouts` (Attributes) (see [below for nested schema](#nestedatt--timeouts))
-- `version` (String) Engine major version, e.g. `18`. When unset, the platform default is used and recorded here. Major version upgrades are not available yet, so changing the version of an existing database fails the plan.
+- `version` (String) Engine major version, e.g. `18`. When unset, the platform default is used and recorded here; a database restored with `source` runs the source's major version. Major version upgrades are not available yet, so changing the version of an existing database fails the plan.
 
 ### Read-Only
 
@@ -124,6 +125,16 @@ Optional:
 
 - `retention` (Number) How far back the backups reach, in days: 7 to 35, default 7. The Kupe platform sets the range and refuses a value outside it (error code `DATABASE_BACKUP_RETENTION_OUT_OF_RANGE`). Shortening retention deletes the backups that fall outside the new window.
 - `schedule` (String) How many full backups are kept within the retention period: `Daily` keeps one for every day; `DailyThenWeekly` keeps one for each of the last 7 days and one a week before that. The points you can restore to are the same either way; restoring to an older point takes longer. Default `Daily`.
+
+
+<a id="nestedatt--source"></a>
+### Nested Schema for `source`
+
+Optional:
+
+- `backup` (String) Name of a manual backup to restore. The database it was taken of may have been deleted. The new database holds the data as it was when the backup completed.
+- `database` (String) Name of a database to restore. The new database holds its data as it was at `point_in_time`, or at the latest point when that is unset.
+- `point_in_time` (String) The moment to restore `database` to, in UTC with whole seconds, for example `2026-10-30T09:00:00Z`. It must be inside that database's restore window (its `recovery_window`). Leave it unset to restore to the latest point. Only with `database`.
 
 
 <a id="nestedatt--timeouts"></a>

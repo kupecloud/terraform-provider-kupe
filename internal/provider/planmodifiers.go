@@ -127,3 +127,37 @@ func (m databaseBindingNameDefaultModifier) PlanModifyString(ctx context.Context
 	}
 	resp.PlanValue = types.StringValue(name)
 }
+
+// sourcePlan plans `source` on kupe_database, which only matters on create.
+// Unset in configuration, the database keeps what it was restored from
+// (null when it was not restored, and null for a new database). Set, it is
+// planned exactly as configured: its fields are computed so that an unset
+// `source` keeps them, but a field left out of a configured `source` is
+// null, not the value it had, so dropping `point_in_time` is a change.
+func sourcePlan() planmodifier.Object {
+	return sourcePlanModifier{}
+}
+
+type sourcePlanModifier struct{}
+
+func (m sourcePlanModifier) Description(_ context.Context) string {
+	return "Kept from state when unset; planned as configured when set."
+}
+
+func (m sourcePlanModifier) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (m sourcePlanModifier) PlanModifyObject(ctx context.Context, req planmodifier.ObjectRequest, resp *planmodifier.ObjectResponse) {
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+	switch {
+	case !req.ConfigValue.IsNull():
+		resp.PlanValue = req.ConfigValue
+	case req.State.Raw.IsNull():
+		resp.PlanValue = types.ObjectNull(req.ConfigValue.AttributeTypes(ctx))
+	default:
+		resp.PlanValue = req.StateValue
+	}
+}

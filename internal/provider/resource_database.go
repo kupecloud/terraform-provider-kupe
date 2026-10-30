@@ -82,6 +82,24 @@ const (
 		"storage, manual backups included. 0 until measured."
 )
 
+// Descriptions of the `source` attributes.
+const (
+	sourceDescription = "Restore the new database from a manual backup or from another database, instead of " +
+		"starting it empty. Set exactly one of `backup` and `database`. The new database runs the source's major " +
+		"version: leave `version` unset, or set that one. Its storage must be at least the source's. The source " +
+		"is unchanged, and the new database counts against the plan's database limit like any other. `source` " +
+		"applies only when the database is created: changing it replaces the database, and removing it from the " +
+		"configuration keeps the database as it is. Null on a database that was not restored. While the Kupe " +
+		"platform does not offer backups, setting `source` fails with error code `backups_unavailable`."
+	sourceBackupDescription = "Name of a manual backup to restore. The database it was taken of may have been " +
+		"deleted. The new database holds the data as it was when the backup completed."
+	sourceDatabaseDescription = "Name of a database to restore. The new database holds its data as it was at " +
+		"`point_in_time`, or at the latest point when that is unset."
+	sourcePointInTimeDescription = "The moment to restore `database` to, in UTC with whole seconds, for example " +
+		"`2026-10-30T09:00:00Z`. It must be inside that database's restore window (its `recovery_window`). " +
+		"Leave it unset to restore to the latest point. Only with `database`."
+)
+
 // Default timeouts for database operations, overridable in the `timeouts`
 // block. Provisioning starts instances and storage; an upgrade or resize
 // rolls every instance, so both get generous headroom.
@@ -116,7 +134,9 @@ type databaseModel struct {
 	// Resources: a plan can hold them unknown (Backup on create without a
 	// `backup` attribute, RecoveryWindow on every change), which a struct
 	// pointer cannot represent.
-	Backup          types.Object `tfsdk:"backup"`
+	Backup types.Object `tfsdk:"backup"`
+	// Source is null on a database that was not restored.
+	Source          types.Object `tfsdk:"source"`
 	Phase           types.String `tfsdk:"phase"`
 	CurrentVersion  types.String `tfsdk:"current_version"`
 	LastBackupAt    types.String `tfsdk:"last_backup_at"`
@@ -129,6 +149,13 @@ type databaseModel struct {
 var databaseBackupAttrTypes = map[string]attr.Type{
 	"retention": types.Int64Type,
 	"schedule":  types.StringType,
+}
+
+// databaseSourceAttrTypes are the attributes of `source`.
+var databaseSourceAttrTypes = map[string]attr.Type{
+	"backup":        types.StringType,
+	"database":      types.StringType,
+	"point_in_time": types.StringType,
 }
 
 // recoveryWindowAttrTypes are the attributes of `recovery_window`.
@@ -258,7 +285,8 @@ func (r *DatabaseResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 				},
 			},
 			"version": schema.StringAttribute{
-				Description: "Engine major version, e.g. `18`. When unset, the platform default is used and recorded here. " +
+				Description: "Engine major version, e.g. `18`. When unset, the platform default is used and recorded here; " +
+					"a database restored with `source` runs the source's major version. " +
 					"Major version upgrades are not available yet, so changing the version of an existing database " +
 					"fails the plan.",
 				Optional: true,
@@ -338,6 +366,44 @@ func (r *DatabaseResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 					},
 				},
 			},
+			"source": schema.SingleNestedAttribute{
+				Description: sourceDescription,
+				Optional:    true,
+				// Computed, with computed fields, so that removing `source`
+				// from the configuration, or importing a restored database,
+				// keeps what the API echoes instead of planning a
+				// replacement. sourcePlan keeps a configured `source` exactly
+				// as configured.
+				Computed: true,
+				PlanModifiers: []planmodifier.Object{
+					sourcePlan(),
+					objectplanmodifier.RequiresReplace(),
+				},
+				Attributes: map[string]schema.Attribute{
+					"backup": schema.StringAttribute{
+						Description: sourceBackupDescription,
+						Optional:    true,
+						Computed:    true,
+						Validators: append(backupNameValidators(),
+							stringvalidator.ExactlyOneOf(path.MatchRelative().AtParent().AtName("database"))),
+					},
+					"database": schema.StringAttribute{
+						Description: sourceDatabaseDescription,
+						Optional:    true,
+						Computed:    true,
+						Validators:  databaseRefValidators(),
+					},
+					"point_in_time": schema.StringAttribute{
+						Description: sourcePointInTimeDescription,
+						Optional:    true,
+						Computed:    true,
+						Validators: []validator.String{
+							utcSecondsTime{},
+							stringvalidator.AlsoRequires(path.MatchRelative().AtParent().AtName("database")),
+						},
+					},
+				},
+			},
 			"phase": schema.StringAttribute{
 				Description: "Current phase: Pending, Provisioning, Running, Degraded or Terminating.",
 				Computed:    true,
@@ -395,6 +461,7 @@ func (r *DatabaseResource) Create(ctx context.Context, req resource.CreateReques
 		HighAvailability:   plan.HighAvailability.ValueBool(),
 		DeletionProtection: &deletionProtection,
 		Backup:             backupOnCreate(plan.Backup),
+		Source:             sourceOnCreate(plan.Source),
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("failed to create database", apiErrorDetail(err))
@@ -476,6 +543,24 @@ func backupOnCreate(plan types.Object) *client.DatabaseBackup {
 		return nil
 	}
 	return backupChanges(plan, types.ObjectNull(databaseBackupAttrTypes))
+}
+
+// sourceOnCreate is what a new database is restored from: the planned
+// `source` keys that are set, nil when `source` is unset.
+func sourceOnCreate(plan types.Object) *client.DatabaseSource {
+	if !isSet(plan) {
+		return nil
+	}
+	attrs := plan.Attributes()
+	value := func(key string) string {
+		v, _ := attrs[key].(types.String)
+		return v.ValueString()
+	}
+	return &client.DatabaseSource{
+		Backup:      value("backup"),
+		Database:    value("database"),
+		PointInTime: value("point_in_time"),
+	}
 }
 
 // backupChanges is the backup settings to send: the planned keys with a
@@ -597,6 +682,7 @@ func databaseModelFromAPI(db *client.Database) databaseModel {
 		HighAvailability:   types.BoolValue(db.HighAvailability),
 		DeletionProtection: types.BoolValue(db.DeletionProtection),
 		Backup:             backupFromAPI(db.Backup),
+		Source:             sourceFromAPI(db.Source),
 		Phase:              types.StringValue(status.Phase),
 		CurrentVersion:     types.StringValue(status.CurrentVersion),
 		LastBackupAt:       types.StringValue(status.LastBackupAt),
@@ -622,6 +708,20 @@ func backupFromAPI(backup *client.DatabaseBackup) types.Object {
 	return types.ObjectValueMust(databaseBackupAttrTypes, map[string]attr.Value{
 		"retention": retention,
 		"schedule":  schedule,
+	})
+}
+
+// sourceFromAPI is the `source` object for what the API echoes a restored
+// database was restored from: null for a database that was not restored,
+// and a null field for a key it does not send.
+func sourceFromAPI(source *client.DatabaseSource) types.Object {
+	if source == nil {
+		return types.ObjectNull(databaseSourceAttrTypes)
+	}
+	return types.ObjectValueMust(databaseSourceAttrTypes, map[string]attr.Value{
+		"backup":        stringOrNull(source.Backup),
+		"database":      stringOrNull(source.Database),
+		"point_in_time": stringOrNull(source.PointInTime),
 	})
 }
 
