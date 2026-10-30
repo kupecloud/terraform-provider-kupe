@@ -47,6 +47,7 @@ For normal environments, use an `https://` API host. Plain HTTP is only supporte
 - `kupe_cluster`
 - `kupe_database`
 - `kupe_database_binding`
+- `kupe_database_backup`
 - `kupe_registry`
 - `kupe_registry_binding`
 - `kupe_registry_token`
@@ -62,5 +63,6 @@ For normal environments, use an `https://` API host. Plain HTTP is only supporte
 - `kupe_tenant`
 - `kupe_cluster`
 - `kupe_database`
+- `kupe_database_backup`
 - `kupe_registry`
 - `kupe_plan`

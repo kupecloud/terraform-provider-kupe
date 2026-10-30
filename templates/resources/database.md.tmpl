@@ -29,6 +29,20 @@ A change applies in place, and `terraform apply` waits for the database to take 
 
 `last_backup_at`, `recovery_window` and `backup_size_bytes` report the newest full backup, the restore window (the oldest and newest points you can restore to), and the storage the backups take up. The `kupe_database` data source returns the same values.
 
+### Restoring from a backup or another database
+
+`source` creates the database from a manual backup (`source.backup`) or from another database at a point inside its restore window (`source.database` and `source.point_in_time`; without a point, the latest one), instead of starting it empty. The source is unchanged.
+
+{{ tffile "examples/resources/kupe_database/restore.tf" }}
+
+- The new database runs the source's major version. Leave `version` unset, or set that version.
+- Its storage must be at least the source's: a backup's `source_storage`, or the `resources.storage` of the source database.
+- `point_in_time` is in UTC with whole seconds, for example `2026-10-30T09:00:00Z`, between the source database's `recovery_window.earliest` and `recovery_window.latest`.
+- A restore copies the source's data, so it takes longer than creating an empty database. Raise `timeouts.create` for a large one.
+- `source` applies only when the database is created. Changing it replaces the database: Terraform deletes it and restores a new one, so set `deletion_protection = false` and apply first. Removing `source` from the configuration keeps the database as it is.
+
+Take manual backups with [`kupe_database_backup`](database_backup.md).
+
 ### Connecting applications
 
 Grant access with [`kupe_database_binding`](database_binding.md). Each binding places a Service named after the database and a credentials Secret into each namespace it lists, in one cluster.
