@@ -148,16 +148,15 @@ func (m sourcePlanModifier) MarkdownDescription(ctx context.Context) string {
 	return m.Description(ctx)
 }
 
-func (m sourcePlanModifier) PlanModifyObject(ctx context.Context, req planmodifier.ObjectRequest, resp *planmodifier.ObjectResponse) {
+func (m sourcePlanModifier) PlanModifyObject(_ context.Context, req planmodifier.ObjectRequest, resp *planmodifier.ObjectResponse) {
 	if req.Plan.Raw.IsNull() {
 		return
 	}
-	switch {
-	case !req.ConfigValue.IsNull():
-		resp.PlanValue = req.ConfigValue
-	case req.State.Raw.IsNull():
-		resp.PlanValue = types.ObjectNull(req.ConfigValue.AttributeTypes(ctx))
-	default:
+	// On create the state value is a null object, so an unset `source`
+	// plans null.
+	if req.ConfigValue.IsNull() {
 		resp.PlanValue = req.StateValue
+		return
 	}
+	resp.PlanValue = req.ConfigValue
 }
