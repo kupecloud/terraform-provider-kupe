@@ -83,6 +83,25 @@ func (d *DatabaseDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 					},
 				},
 			},
+			"source": schema.SingleNestedAttribute{
+				Description: "What the database was restored from. Null for a database that was not restored.",
+				Computed:    true,
+				Attributes: map[string]schema.Attribute{
+					"backup": schema.StringAttribute{
+						Description: "Name of the manual backup the database was restored from.",
+						Computed:    true,
+					},
+					"database": schema.StringAttribute{
+						Description: "Name of the database it was restored from.",
+						Computed:    true,
+					},
+					"point_in_time": schema.StringAttribute{
+						Description: "The point it was restored to (RFC 3339). Null when it was restored to the " +
+							"latest point or from a backup.",
+						Computed: true,
+					},
+				},
+			},
 			"phase": schema.StringAttribute{
 				Description: "Current phase: Pending, Provisioning, Running, Degraded or Terminating.",
 				Computed:    true,
