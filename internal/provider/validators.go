@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -201,4 +202,30 @@ func (v configMapKey) ValidateString(ctx context.Context, req validator.StringRe
 	if req.ConfigValue.IsNull() || len(key) > 253 || !configMapKeyPattern.MatchString(key) || key == "." || strings.HasPrefix(key, "..") {
 		resp.Diagnostics.AddAttributeError(req.Path, "Invalid secret key", v.Description(ctx)+".")
 	}
+}
+
+// utcSecondsTime accepts an RFC 3339 time in UTC with whole seconds, the
+// form kupe-api stores and echoes a restore's point in time in, e.g.
+// "2026-10-30T09:00:00Z". Any other spelling of the same moment would read
+// back differently and look like a change to it.
+type utcSecondsTime struct{}
+
+func (v utcSecondsTime) Description(_ context.Context) string {
+	return "must be a time in UTC with whole seconds, for example 2026-10-30T09:00:00Z"
+}
+
+func (v utcSecondsTime) MarkdownDescription(ctx context.Context) string {
+	return v.Description(ctx)
+}
+
+func (v utcSecondsTime) ValidateString(ctx context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	value := req.ConfigValue.ValueString()
+	if at, err := time.Parse(time.RFC3339, value); err == nil && at.UTC().Format(time.RFC3339) == value {
+		return
+	}
+	resp.Diagnostics.AddAttributeError(req.Path, "Invalid point in time",
+		fmt.Sprintf("Attribute %s %s, got: %s", req.Path, v.Description(ctx), value))
 }
