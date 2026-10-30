@@ -150,6 +150,7 @@ func (p *KupeProvider) Resources(_ context.Context) []func() resource.Resource {
 		NewAlertmanagerGlobalResource,
 		NewDatabaseResource,
 		NewDatabaseBindingResource,
+		NewDatabaseBackupResource,
 		NewRegistryResource,
 		NewRegistryBindingResource,
 		NewRegistryTokenResource,
@@ -162,6 +163,7 @@ func (p *KupeProvider) DataSources(_ context.Context) []func() datasource.DataSo
 		NewClusterDataSource,
 		NewPlanDataSource,
 		NewDatabaseDataSource,
+		NewDatabaseBackupDataSource,
 		NewRegistryDataSource,
 	}
 }
