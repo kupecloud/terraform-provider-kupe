@@ -82,7 +82,9 @@ A change applies in place, and `terraform apply` waits for the database to take 
 
 ```terraform
 # A new database restored from a manual backup. It runs the backup's major
-# version, so `version` is left unset.
+# version, so `version` is left unset. The backup resource sets `name`, so
+# this reference is known when Terraform plans; a changing `source` would
+# replace the database. Once the database exists, `source` can be removed.
 resource "kupe_database" "orders_copy" {
   name = "orders-copy"
 
@@ -97,7 +99,9 @@ resource "kupe_database" "orders_copy" {
   }
 }
 
-# A new database holding the data orders-db had at 09:00 UTC.
+# A new database holding the data orders-db had at 09:00 UTC. The time is
+# written literally: a computed one, such as timestamp(), would replace the
+# database on every apply.
 resource "kupe_database" "orders_at_nine" {
   name = "orders-at-nine"
 
@@ -118,7 +122,17 @@ resource "kupe_database" "orders_at_nine" {
 - Its storage must be at least the source's: a backup's `source_storage`, or the `resources.storage` of the source database.
 - `point_in_time` is in UTC with whole seconds, for example `2026-10-30T09:00:00Z`, between the source database's `recovery_window.earliest` and `recovery_window.latest`.
 - A restore copies the source's data, so it takes longer than creating an empty database. Raise `timeouts.create` for a large one.
-- `source` applies only when the database is created. Changing it replaces the database: Terraform deletes it and restores a new one, so set `deletion_protection = false` and apply first. Removing `source` from the configuration keeps the database as it is.
+
+#### Keep `source` stable
+
+`source` is read only when the database is created. Any change to it replaces the database: Terraform deletes it, with the data written since the restore and its automatic backups, and restores a new one. A value Terraform knows only at apply time counts as a change, so these replace a restored database:
+
+- `source.backup` refers to a `kupe_database_backup` without `name`, and that backup is taken again (for example after it was deleted in the Kupe Console). Its new name is not known until apply.
+- `source.point_in_time` is computed when Terraform plans, for example with `timestamp()`. It changes on every plan.
+
+Once the restored database exists, remove `source` from the configuration: the database keeps what it was restored from and the plan is empty. To keep `source` in the configuration, name the backup with a literal or with a backup resource that sets `name`, and write `point_in_time` literally.
+
+Leave `deletion_protection` at `true`, its default. A planned replacement of a protected database then fails at apply instead of deleting it.
 
 Take manual backups with [`kupe_database_backup`](database_backup.md).
 
@@ -140,7 +154,7 @@ Grant access with [`kupe_database_binding`](database_binding.md). Each binding p
 - `deletion_protection` (Boolean) While `true`, the Kupe platform refuses to delete the database. Set it to `false` and apply before destroying. Default `true`, also for an existing database: importing an unprotected database without this attribute in configuration plans turning protection on.
 - `engine` (String) Database engine. Only `postgres` is supported, and it is the default. The engine of an existing database cannot change: a different value fails the plan instead of replacing the database.
 - `high_availability` (Boolean) Run two instances with a synchronous standby. Can be turned on or off in place. When unset, a new database is created without it and an existing or imported database keeps its current setting, so removing the attribute from configuration does not turn HA off: set it to `false` to do that.
-- `source` (Attributes) Restore the new database from a manual backup or from another database, instead of starting it empty. Set exactly one of `backup` and `database`. The new database runs the source's major version: leave `version` unset, or set that one. Its storage must be at least the source's. The source is unchanged, and the new database counts against the plan's database limit like any other. `source` applies only when the database is created: changing it replaces the database, and removing it from the configuration keeps the database as it is. Null on a database that was not restored. While the Kupe platform does not offer backups, setting `source` fails with error code `backups_unavailable`. (see [below for nested schema](#nestedatt--source))
+- `source` (Attributes) Restore the new database from a manual backup or from another database, instead of starting it empty. Set exactly one of `backup` and `database`. The new database runs the source's major version: leave `version` unset, or set that one. Its storage must be at least the source's. The source is unchanged, and the new database counts against the plan's database limit like any other. `source` is read only when the database is created, and any change to it replaces the database: Terraform deletes it and restores a new one. That includes a value Terraform knows only at apply time, such as the name of a `kupe_database_backup` without `name` that is taken again. Once the database exists, remove `source` from the configuration (the database keeps it), or keep it constant: name the backup with a literal or a backup resource that sets `name`, and write `point_in_time` literally. Null on a database that was not restored. While the Kupe platform does not offer backups, setting `source` fails with error code `backups_unavailable`. (see [below for nested schema](#nestedatt--source))
 - `timeouts` (Attributes) (see [below for nested schema](#nestedatt--timeouts))
 - `version` (String) Engine major version, e.g. `18`. When unset, the platform default is used and recorded here; a database restored with `source` runs the source's major version. Major version upgrades are not available yet, so changing the version of an existing database fails the plan.
 
@@ -180,7 +194,7 @@ Optional:
 
 - `backup` (String) Name of a manual backup to restore. The database it was taken of may have been deleted. The new database holds the data as it was when the backup completed.
 - `database` (String) Name of a database to restore. The new database holds its data as it was at `point_in_time`, or at the latest point when that is unset.
-- `point_in_time` (String) The moment to restore `database` to, in UTC with whole seconds, for example `2026-10-30T09:00:00Z`. It must be inside that database's restore window (its `recovery_window`). Leave it unset to restore to the latest point. Only with `database`.
+- `point_in_time` (String) The moment to restore `database` to, in UTC with whole seconds, for example `2026-10-30T09:00:00Z`. It must be inside that database's restore window (its `recovery_window`). Leave it unset to restore to the latest point. Only with `database`. Write it literally: a time computed when Terraform plans, such as `timestamp()`, changes on every plan and replaces the database each time.
 
 
 <a id="nestedatt--timeouts"></a>

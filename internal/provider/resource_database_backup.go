@@ -174,7 +174,9 @@ func (r *DatabaseBackupResource) Schema(ctx context.Context, _ resource.SchemaRe
 			"database can keep up to 20 manual backups. Reading and deleting a backup works even while the Kupe " +
 			"platform has databases or backups switched off.\n\n" +
 			"### Destroy semantics\n\n" +
-			"Destroying this resource deletes the backup: it can no longer be restored from. " + databaseDeleteNotice,
+			"Destroying this resource deletes the backup: it can no longer be restored from. Destroying the " +
+			"`kupe_database` it was taken of leaves this backup in place. From the `kupe_database` page: " +
+			databaseDeleteNotice,
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
 				Description: "Backup name: lowercase letters, digits and `-`, starting and ending with a letter or " +
