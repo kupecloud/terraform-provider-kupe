@@ -106,6 +106,8 @@ type mockKupeAPI struct {
 	// The registry, its cluster connections and access tokens
 	// (testutil_registry_test.go).
 	mockRegistryState
+	// Manual backups and restores (testutil_backup_test.go).
+	mockBackupState
 }
 
 // mockRequest is a request the mock received: its method, If-Match and body.
@@ -128,6 +130,7 @@ func newMockKupeAPI() *mockKupeAPI {
 		rvCounter:   1,
 
 		mockRegistryState: newMockRegistryState(),
+		mockBackupState:   newMockBackupState(),
 		databases:         make(map[string]map[string]any),
 		databaseBindings:  make(map[string]map[string]any),
 		tenant: map[string]any{
@@ -556,6 +559,9 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(r.URL.Path, mockDatabasesPath):
 		m.serveDatabases(w, r)
 
+	case strings.HasPrefix(r.URL.Path, mockBackupsPath+"/"):
+		m.serveBackups(w, r)
+
 	case r.URL.Path == mockRegistriesPath || strings.HasPrefix(r.URL.Path, mockRegistriesPath+"/"):
 		m.serveRegistries(w, r)
 
@@ -798,7 +804,8 @@ func (m *mockKupeAPI) mockBackup(w http.ResponseWriter, sent any, stored map[str
 	return merged, true
 }
 
-// serveDatabases routes /databases[/{name}[/bindings[/{binding}]]]. Like the
+// serveDatabases routes /databases[/{name}[/bindings[/{binding}]]] and
+// POST /databases/{name}/backups (testutil_backup_test.go). Like the
 // other mock routes it advances status on GET: a database goes Pending ->
 // Running and catches observedGeneration up with generation; a binding goes
 // Pending -> Ready. Called with m.mu held.
@@ -826,6 +833,8 @@ func (m *mockKupeAPI) serveDatabases(w http.ResponseWriter, r *http.Request) {
 		m.patchDatabase(w, r, segs[0])
 	case len(segs) == 1 && r.Method == http.MethodDelete:
 		m.deleteDatabase(w, segs[0])
+	case len(segs) == 2 && segs[1] == "backups" && r.Method == http.MethodPost:
+		m.createBackup(w, r, segs[0])
 	case len(segs) == 2 && segs[1] == "bindings" && r.Method == http.MethodPost:
 		m.createDatabaseBinding(w, r, segs[0])
 	case len(segs) == 3 && segs[1] == "bindings" && r.Method == http.MethodGet:
@@ -911,6 +920,14 @@ func (m *mockKupeAPI) createDatabase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	version := strOrEmpty(body["version"])
+	// A restore runs its source's major version (MDB2-1v, D-13).
+	var source map[string]any
+	if _, ok := body["source"]; ok {
+		var restored bool
+		if version, source, restored = m.mockRestore(w, body); !restored {
+			return
+		}
+	}
 	if version == "" {
 		version = "18"
 	}
@@ -939,6 +956,9 @@ func (m *mockKupeAPI) createDatabase(w http.ResponseWriter, r *http.Request) {
 		"status":             map[string]any{"phase": "Pending", "observedGeneration": 0, "currentVersion": ""},
 		"resourceVersion":    rv, "createdAt": "2026-10-09T10:00:00Z",
 	}
+	if source != nil {
+		db["source"] = source
+	}
 	m.databases[name] = db
 	w.Header().Set("ETag", `"`+rv+`"`)
 	w.WriteHeader(http.StatusCreated)
@@ -964,7 +984,7 @@ func (m *mockKupeAPI) getDatabase(w http.ResponseWriter, name string) {
 	// A database with backup settings reports the backups taken.
 	if backup, _ := db["backup"].(map[string]any); backup != nil {
 		status["lastBackupAt"] = "2026-10-21T03:17:00Z"
-		status["recoveryWindow"] = map[string]any{"earliest": "2026-10-14T03:17:00Z", "latest": "2026-10-21T09:00:00Z"}
+		status["recoveryWindow"] = map[string]any{"earliest": mockRecoveryWindowEarliest, "latest": mockRecoveryWindowLatest}
 		status["backupSizeBytes"] = int64(5368709120)
 	}
 	if len(m.databaseStatuses) > 0 {
@@ -1068,6 +1088,7 @@ func (m *mockKupeAPI) deleteDatabase(w http.ResponseWriter, name string) {
 			fmt.Sprintf("database %q has deletionProtection enabled: set it to false before deleting", name))
 		return
 	}
+	// Its bindings go with it; its manual backups stay (D-9).
 	delete(m.databases, name)
 	for key := range m.databaseBindings {
 		if strings.HasPrefix(key, name+"/") {
