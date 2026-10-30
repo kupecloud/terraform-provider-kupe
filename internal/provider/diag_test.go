@@ -299,6 +299,92 @@ func TestAPIErrorDetail(t *testing.T) {
 			},
 		},
 		{
+			name: "400 backups_unavailable on a restore says to remove source",
+			err: &client.APIError{
+				StatusCode: http.StatusBadRequest, Code: client.CodeBackupsUnavailable, Field: "spec.source",
+				Message: "backups are not available on this platform",
+			},
+			wantSubstr:   []string{"Field: spec.source", "cannot be restored", "Remove `source` from the configuration"},
+			wantNoSubstr: []string{"Remove `backup`", "kupe_database_backup"},
+		},
+		{
+			name: "400 backups_unavailable on a manual backup says no backup was taken",
+			err: &client.APIError{
+				StatusCode: http.StatusBadRequest, Code: client.CodeBackupsUnavailable,
+				Message: "backups are not available on this platform",
+			},
+			wantSubstr:   []string{"no backup was taken", "Remove the `kupe_database_backup` resource"},
+			wantNoSubstr: []string{"Remove `backup`", "Remove `source`"},
+		},
+		{
+			name: "404 backups_unavailable says the platform has no manual backups, not that something is gone",
+			err: &client.APIError{
+				StatusCode: http.StatusNotFound, Code: client.CodeBackupsUnavailable,
+				Message: "backups are not available on this platform",
+			},
+			wantSubstr:   []string{"does not offer manual backups or restores yet"},
+			wantNoSubstr: []string{"does not exist on the server", "terraform import"},
+		},
+		{
+			name: "400 restore_source_not_found",
+			err: &client.APIError{
+				StatusCode: http.StatusBadRequest, Code: client.CodeRestoreSourceNotFound, Field: "spec.source",
+				Message: `backup "nightly" not found`,
+			},
+			wantSubstr: []string{"Error code: restore_source_not_found", "named in `source` does not exist"},
+		},
+		{
+			name: "400 restore_point_outside_window points at the restore window",
+			err: &client.APIError{
+				StatusCode: http.StatusBadRequest, Code: client.CodeRestorePointOutsideWindow,
+				Field: "spec.source.pointInTime", Message: "the point is outside the restore window",
+			},
+			wantSubstr: []string{"`source.point_in_time` is outside the restore window", "`recovery_window.earliest`"},
+		},
+		{
+			name: "400 restore_version_mismatch",
+			err: &client.APIError{
+				StatusCode: http.StatusBadRequest, Code: client.CodeRestoreVersionMismatch, Field: "spec.version",
+				Message: "the version differs from the source's",
+			},
+			wantSubstr: []string{"runs its source's major version", "Remove `version`"},
+		},
+		{
+			name: "400 restore_storage_too_small names source_storage",
+			err: &client.APIError{
+				StatusCode: http.StatusBadRequest, Code: client.CodeRestoreStorageTooSmall,
+				Field: "spec.resources.storage", Message: "storage is smaller than the source's",
+			},
+			wantSubstr: []string{"at least the storage its source had", "`source_storage`"},
+		},
+		{
+			name: "409 restore_source_not_ready says to wait",
+			err: &client.APIError{
+				StatusCode: http.StatusConflict, Code: client.CodeRestoreSourceNotReady,
+				Message: "the backup has not completed",
+			},
+			wantSubstr:   []string{"has not completed", "Wait for it"},
+			wantNoSubstr: []string{"already exists on the tenant"},
+		},
+		{
+			name: "409 backup_limit_reached says to delete one",
+			err: &client.APIError{
+				StatusCode: http.StatusConflict, Code: client.CodeBackupLimitReached,
+				Message: "the database already has 20 manual backups",
+			},
+			wantSubstr:   []string{"keeps 20 manual backups", "Delete one you no longer need"},
+			wantNoSubstr: []string{"already exists on the tenant"},
+		},
+		{
+			name: "409 database_not_ready says to wait for Running",
+			err: &client.APIError{
+				StatusCode: http.StatusConflict, Code: client.CodeDatabaseNotReady,
+				Message: "the database is not running",
+			},
+			wantSubstr:   []string{"no backup was taken", "phase is Running"},
+			wantNoSubstr: []string{"already exists on the tenant"},
+		},
+		{
 			name: "503 while the tenant's limit is being set up gets the retry hint",
 			err: &client.APIError{
 				StatusCode: http.StatusServiceUnavailable,
@@ -438,6 +524,11 @@ func TestIsTerminalAPIError(t *testing.T) {
 		{
 			"404 registries_unavailable is terminal",
 			&client.APIError{StatusCode: http.StatusNotFound, Code: client.CodeRegistriesUnavailable},
+			true,
+		},
+		{
+			"404 backups_unavailable is terminal",
+			&client.APIError{StatusCode: http.StatusNotFound, Code: client.CodeBackupsUnavailable},
 			true,
 		},
 		{

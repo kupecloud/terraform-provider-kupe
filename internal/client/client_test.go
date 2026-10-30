@@ -207,6 +207,9 @@ func TestIsNotFound(t *testing.T) {
 	if IsNotFound(&APIError{StatusCode: 404, Code: CodeDatabasesUnavailable}) {
 		t.Error("404 databases_unavailable must not be not-found: it says nothing about the resource")
 	}
+	if IsNotFound(&APIError{StatusCode: 404, Code: CodeBackupsUnavailable}) {
+		t.Error("404 backups_unavailable must not be not-found: it says nothing about the resource")
+	}
 }
 
 func TestIsConflict(t *testing.T) {
