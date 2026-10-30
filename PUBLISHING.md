@@ -100,10 +100,8 @@ flows as follows:
 ```
 push → main
   └─ Main workflow
-       ├─ go-lint, action-lint
-       ├─ unit-tests
-       ├─ gosec
-       ├─ build (lint provider + validate examples + generate docs)
+       ├─ gates              (pre-commit --hook-stage manual: lint, tests, gosec,
+       │                      build, validate examples, generated docs)
        ├─ release            (semantic-release: cut vX.Y.Z + GitHub release notes)
        └─ publish            (only if new_release_published == 'true')
             ├─ Import GPG key

@@ -1,0 +1,257 @@
+name: Security
+
+# govulncheck used to run on every push to main (go-security.yaml v2.5.2). It
+# now runs weekly, and on demand, with the same version (v1.1.4) and the same
+# gate: it fails only on a vulnerability that is reachable from our code AND
+# has a published fix (kupecloud/github-workflows#14). It is a security check,
+# so it is not behind the KUPE_CI_HEAVY toggle. gosec runs in the PR gates.
+# Inline because this repository is public and github-workflows is private.
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    name: Go Vulnerability Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install govulncheck
+        shell: bash
+        run: |
+          GOBIN="$RUNNER_TEMP/bin" go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Run govulncheck
+        shell: bash
+        run: |
+          set +e
+          govulncheck ./... 2>&1 | tee govulncheck-output.txt
+          EXIT_CODE=$?
+          set -e
+
+          PARSED="$(mktemp)"
+          summary() {
+            printf '%s\n' "$*" >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          awk '
+          function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
+          function flush() {
+            if (!in_v) { return }
+            gsub(/\t/, " ", desc)
+            gsub(/\t/, " ", url)
+            gsub(/\t/, " ", module)
+            gsub(/\t/, " ", found)
+            gsub(/\t/, " ", fixed)
+            print "VULN\t" id "\t" trim(desc) "\t" trim(url) "\t" trim(module) "\t" trim(found) "\t" trim(fixed) "\t" (called ? "yes" : "no")
+            for (i = 1; i <= trace_count; i++) {
+              print "TRACE\t" id "\t" trace[i]
+            }
+          }
+          BEGIN {
+            in_v = 0
+            trace_count = 0
+            called = 0
+            desc = ""
+            url = ""
+            module = ""
+            found = ""
+            fixed = ""
+          }
+          /^Vulnerability #[0-9]+:/ {
+            flush()
+            in_v = 1
+            trace_count = 0
+            called = 0
+            desc = ""
+            url = ""
+            module = ""
+            found = ""
+            fixed = ""
+            id = $3
+            next
+          }
+          {
+            line = $0
+            if (in_v && line ~ /^[[:space:]]+#/) {
+              gsub(/^[[:space:]]+/, "", line)
+              trace[++trace_count] = line
+              called = 1
+              next
+            }
+            if (in_v && line ~ /^[[:space:]]*\.{3}$/) {
+              next
+            }
+            if (in_v && line ~ /^[[:space:]]*More info:/) {
+              sub(/^[[:space:]]*More info:[[:space:]]*/, "", line)
+              url = line
+              next
+            }
+            if (in_v && line ~ /^[[:space:]]*Module:/) {
+              sub(/^[[:space:]]*Module:[[:space:]]*/, "", line)
+              module = line
+              next
+            }
+            if (in_v && line ~ /^[[:space:]]*Found in:/) {
+              sub(/^[[:space:]]*Found in:[[:space:]]*/, "", line)
+              found = line
+              next
+            }
+            if (in_v && line ~ /^[[:space:]]*Fixed in:/) {
+              sub(/^[[:space:]]*Fixed in:[[:space:]]*/, "", line)
+              fixed = line
+              next
+            }
+            if (in_v && line ~ /^[[:space:]]*Example traces found:/) {
+              called = 1
+              next
+            }
+            if (in_v && line ~ /^[[:space:]]+/) {
+              sub(/^[[:space:]]+/, "", line)
+              if (line != "") {
+                desc = (desc == "" ? line : desc " " line)
+              }
+              next
+            }
+          }
+          END { flush() }
+          ' govulncheck-output.txt > "$PARSED"
+
+          declare -A VULN_DESC VULN_URL VULN_MODULE VULN_FOUND VULN_FIXED VULN_CALLED
+          declare -A VULN_TRACES VULN_TRACE_COUNT MODULES_CALLED
+          ORDER=()
+
+          while IFS=$'\t' read -r record_type id field1 field2 field3 field4 field5 field6; do
+            if [ "$record_type" = "VULN" ]; then
+              ORDER+=("$id")
+              VULN_DESC["$id"]="$field1"
+              VULN_URL["$id"]="$field2"
+              VULN_MODULE["$id"]="$field3"
+              VULN_FOUND["$id"]="$field4"
+              VULN_FIXED["$id"]="$field5"
+              VULN_CALLED["$id"]="$field6"
+            elif [ "$record_type" = "TRACE" ]; then
+              VULN_TRACE_COUNT["$id"]=$(( ${VULN_TRACE_COUNT[$id]:-0} + 1 ))
+              if [ -n "${VULN_TRACES[$id]}" ]; then
+                VULN_TRACES["$id"]+=$'\n'"$field1"
+              else
+                VULN_TRACES["$id"]="$field1"
+              fi
+            fi
+          done < "$PARSED"
+
+          CALLED_COUNT=0
+          UNCALLED_COUNT=0
+          CALLED_FIXABLE=0
+          UNCALLED_FIXABLE=0
+
+          for id in "${ORDER[@]}"; do
+            module="${VULN_MODULE[$id]}"
+            fixed="${VULN_FIXED[$id]}"
+            called="${VULN_CALLED[$id]}"
+            fixable="no"
+            if [ -n "$fixed" ] && [ "$fixed" != "N/A" ]; then
+              fixable="yes"
+            fi
+
+            if [ "$called" = "yes" ]; then
+              CALLED_COUNT=$((CALLED_COUNT + 1))
+              [ -n "$module" ] && MODULES_CALLED["$module"]=1
+              if [ "$fixable" = "yes" ]; then
+                CALLED_FIXABLE=$((CALLED_FIXABLE + 1))
+              fi
+            else
+              UNCALLED_COUNT=$((UNCALLED_COUNT + 1))
+              if [ "$fixable" = "yes" ]; then
+                UNCALLED_FIXABLE=$((UNCALLED_FIXABLE + 1))
+              fi
+            fi
+          done
+
+          CALLED_MODULES=${#MODULES_CALLED[@]}
+
+          if [ "$CALLED_COUNT" -gt 0 ]; then
+            summary "- **Used in code:** ${CALLED_COUNT} vulns across ${CALLED_MODULES} module(s) (fixes available: ${CALLED_FIXABLE})."
+          else
+            summary "- **Used in code:** 0"
+          fi
+
+          if [ "$UNCALLED_COUNT" -gt 0 ]; then
+            summary "- **Imported only:** ${UNCALLED_COUNT} vulns (fixes available: ${UNCALLED_FIXABLE})."
+          else
+            summary "- **Imported only:** 0"
+          fi
+
+          if [ "$EXIT_CODE" -ne 0 ] && [ "${#ORDER[@]}" -eq 0 ]; then
+            summary ""
+            summary "❌ **Error:** govulncheck exited non-zero but no vulnerabilities were parsed."
+            echo "::error::govulncheck exited non-zero but no vulnerabilities were parsed."
+            exit 1
+          fi
+
+          if [ "${#ORDER[@]}" -gt 0 ]; then
+            summary ""
+            summary "### Vulnerabilities"
+          fi
+
+          for id in "${ORDER[@]}"; do
+            desc="${VULN_DESC[$id]}"
+            url="${VULN_URL[$id]}"
+            module="${VULN_MODULE[$id]}"
+            found="${VULN_FOUND[$id]}"
+            fixed="${VULN_FIXED[$id]}"
+            called="${VULN_CALLED[$id]}"
+            reachability="Imported only"
+            if [ "$called" = "yes" ]; then
+              reachability="Used in code"
+            fi
+
+            {
+              echo ""
+              echo "- **${id}** (${reachability})"
+              echo "  Module: ${module}"
+              echo "  Found in: ${found}"
+              echo "  Fixed in: ${fixed}"
+              echo "  Details: ${desc}"
+              if [ -n "$url" ]; then
+                echo "  More info: ${url}"
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+          done
+
+          # Gate on what is actionable: a vulnerability fails the job only when
+          # it is reachable from our code AND upstream has published a fix.
+          # govulncheck's own exit code is 3 for *any* affecting vuln, which
+          # pinned repos on permanent red for advisories with no fix available
+          # (k8s.io/kubernetes, docker/docker) — unactionable noise that trains
+          # people to ignore the job. Unfixable-but-reachable vulns still surface
+          # as a warning annotation and in the step summary.
+          if [ "$CALLED_FIXABLE" -gt 0 ]; then
+            summary ""
+            summary "❌ **Failing:** ${CALLED_FIXABLE} reachable vulnerability(ies) with a published fix — upgrade the module(s) above."
+            echo "::error::${CALLED_FIXABLE} reachable vulnerability(ies) have fixes available; upgrade to clear them."
+            exit 1
+          fi
+
+          UNFIXABLE_CALLED=$((CALLED_COUNT - CALLED_FIXABLE))
+          if [ "$UNFIXABLE_CALLED" -gt 0 ]; then
+            summary ""
+            summary "⚠️ **${UNFIXABLE_CALLED} reachable vulnerability(ies) have no upstream fix yet** — not failing the build; re-check when upstream ships one."
+            echo "::warning::${UNFIXABLE_CALLED} reachable vulnerability(ies) have no fix available yet."
+          fi
+
+          exit 0
