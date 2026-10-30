@@ -211,6 +211,37 @@ func TestAccDatabaseBackupResource_Failed(t *testing.T) {
 	})
 }
 
+// TestAccDatabaseBackupResource_Deleting: a backup being deleted while
+// Create waits ends Create at once, not at the timeout, and stays in state,
+// tainted, so the next apply takes it again.
+func TestAccDatabaseBackupResource_Deleting(t *testing.T) {
+	shrinkPollInterval(t)
+	mock := newMockKupeAPI()
+	defer mock.close()
+	mock.setState(func(m *mockKupeAPI) { m.backupStatuses = []map[string]any{{"phase": "Deleting"}} })
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		CheckDestroy:             testAccCheckNoBackups(mock),
+		Steps: []resource.TestStep{
+			{
+				// A short timeout: Deleting must end the wait, not the timeout.
+				Config: testAccBackupConfig(mock.url(), "  name = \"nightly\"\n  timeouts = { create = \"30s\" }"),
+				ExpectError: regexp.MustCompile(`(?s)database backup deleting.*` +
+					wrappedText(`Backup "nightly" is being deleted, so it did not complete.`)),
+			},
+			{
+				PreConfig: func() { mock.setState(func(m *mockKupeAPI) { m.backupStatuses = nil }) },
+				Config:    testAccBackupConfig(mock.url(), `  name = "nightly"`),
+				ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+					plancheck.ExpectResourceAction(testBackupAddr, plancheck.ResourceActionDestroyBeforeCreate),
+				}},
+				Check: resource.TestCheckResourceAttr(testBackupAddr, "phase", "Completed"),
+			},
+		},
+	})
+}
+
 // TestAccDatabaseBackupResource_SurvivesDatabaseDestroy: destroying the
 // database leaves its manual backup, which reports the database deleted
 // (D-9). A destroy of both deletes the backup too.
