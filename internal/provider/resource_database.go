@@ -49,6 +49,12 @@ const databaseEngine = "postgres"
 const databaseDeleteNotice = "Deleting a database removes it and its automatic backups immediately, and they cannot be restored. " +
 	"Manual backups stay until you delete them."
 
+// restoredReplaceNotice ends the deletion-protection refusal of a restored
+// database, whose delete is most often a replacement a changed `source`
+// planned.
+const restoredReplaceNotice = "If you did not mean to replace it, remove `source` from the configuration and " +
+	"apply: the database stays as it is."
+
 // Backup schedules the platform offers. The platform also publishes the
 // retention range it accepts and refuses a value outside it, so the schema
 // checks only that a retention is a positive number of days.
@@ -229,10 +235,15 @@ var databaseKind = serviceKind[DatabaseResourceModel, client.Database]{
 		if !client.IsDeletionProtected(err) {
 			return "", "", false
 		}
-		return "database has deletion protection enabled",
-			fmt.Sprintf("Database %q was not deleted because deletion protection is enabled. To delete it, set "+
-				"`deletion_protection = false` on the resource, run `terraform apply`, then destroy it again. %s",
-				m.Name.ValueString(), databaseDeleteNotice), true
+		detail := fmt.Sprintf("Database %q was not deleted because deletion protection is enabled. To delete it, set "+
+			"`deletion_protection = false` on the resource, run `terraform apply`, then destroy it again. %s",
+			m.Name.ValueString(), databaseDeleteNotice)
+		// A restored database's delete is often a replacement planned by a
+		// changed `source` (M-1): say how to keep the database instead.
+		if isSet(m.Source) {
+			detail += " " + restoredReplaceNotice
+		}
+		return "database has deletion protection enabled", detail, true
 	},
 	stillDeleting: func(m *DatabaseResourceModel) string {
 		return fmt.Sprintf("DELETE was accepted but database %q is still terminating after the configured delete "+

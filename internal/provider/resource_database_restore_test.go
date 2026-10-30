@@ -3,6 +3,7 @@ package provider
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"regexp"
 	"strings"
 	"testing"
@@ -220,6 +221,55 @@ func TestAccDatabaseResource_RestoredStaysStable(t *testing.T) {
 			},
 		},
 	})
+}
+
+// TestAccDatabaseResource_ProtectedRestoreReplaceRefused: a changed
+// `source` plans a replacement of a protected restored database; the delete
+// is refused, and the error says how to keep the database. A database that
+// was not restored does not get that sentence.
+func TestAccDatabaseResource_ProtectedRestoreReplaceRefused(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+	protected := func(source string) string {
+		return testAccRestoreSources(mock.url()) +
+			strings.Replace(testRestore(source, ""), "deletion_protection = false", "deletion_protection = true", 1)
+	}
+	keep := wrappedText(restoredReplaceNotice)
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		CheckDestroy:             testAccCheckNoBackups(mock),
+		Steps: []resource.TestStep{
+			{Config: protected(`backup = kupe_database_backup.test.name`)},
+			{
+				Config: protected(`database = kupe_database.test.name`),
+				ExpectError: regexp.MustCompile(`(?s)database has deletion protection enabled.*` +
+					wrappedText(sharedDeleteNotice) + `\s+` + keep),
+			},
+			{
+				// Removing `source` keeps the database: nothing to do.
+				Config:           protected(""),
+				ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()}},
+			},
+			{Config: testAccRestoreConfig(mock.url(), "", "")},
+		},
+	})
+}
+
+// TestDatabaseDeleteRefusedDetail: only a restored database's refusal says
+// to remove `source`.
+func TestDatabaseDeleteRefusedDetail(t *testing.T) {
+	refusal := &client.APIError{StatusCode: http.StatusConflict, Code: client.CodeDeletionProtected, Message: "protected"}
+	plain := DatabaseResourceModel{databaseModel: databaseModel{Name: types.StringValue("orders-db"),
+		Source: types.ObjectNull(databaseSourceAttrTypes)}}
+	restored := plain
+	restored.Source = sourceFromAPI(&client.DatabaseSource{Backup: "nightly"})
+	if _, detail, ok := databaseKind.deleteRefused(&plain, refusal); !ok || strings.Contains(detail, restoredReplaceNotice) {
+		t.Errorf("plain database refusal = %q", detail)
+	}
+	if _, detail, ok := databaseKind.deleteRefused(&restored, refusal); !ok ||
+		!strings.HasSuffix(detail, databaseDeleteNotice+" "+restoredReplaceNotice) {
+		t.Errorf("restored database refusal = %q", detail)
+	}
 }
 
 // TestAccDatabaseResource_SourceAddedReplaces: a database that was not
