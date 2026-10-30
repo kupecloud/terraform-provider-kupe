@@ -286,6 +286,14 @@ func TestDatabaseDeleteNotice(t *testing.T) {
 	if !strings.Contains(string(doc), sharedDeleteNotice) {
 		t.Errorf("docs/resources/database.md does not state %q; run make docs", sharedDeleteNotice)
 	}
+	// The backup page states it too, for the database a backup was taken of.
+	doc, err = os.ReadFile("../../docs/resources/database_backup.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(doc), sharedDeleteNotice) {
+		t.Errorf("docs/resources/database_backup.md does not state %q; run make docs", sharedDeleteNotice)
+	}
 }
 
 // TestProtectionOnlyCoversEveryPatchField guards protectionOnly against the

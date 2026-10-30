@@ -42,6 +42,7 @@ output "orders_db_running_version" {
 - `phase` (String) Current phase: Pending, Provisioning, Running, Degraded or Terminating.
 - `recovery_window` (Attributes) The restore window: the oldest and newest points you can restore the database to. Null until the backups report them. (see [below for nested schema](#nestedatt--recovery_window))
 - `resources` (Attributes) Per-instance resources. (see [below for nested schema](#nestedatt--resources))
+- `source` (Attributes) What the database was restored from. Null for a database that was not restored. (see [below for nested schema](#nestedatt--source))
 - `version` (String) Requested engine major version, e.g. `18`.
 
 <a id="nestedatt--backup"></a>
@@ -70,3 +71,13 @@ Read-Only:
 - `cpu` (String) CPU, e.g. `500m`.
 - `memory` (String) Memory, e.g. `1Gi`.
 - `storage` (String) Storage, e.g. `10Gi`.
+
+
+<a id="nestedatt--source"></a>
+### Nested Schema for `source`
+
+Read-Only:
+
+- `backup` (String) Name of the manual backup the database was restored from.
+- `database` (String) Name of the database it was restored from.
+- `point_in_time` (String) The point it was restored to (RFC 3339). Null when it was restored to the latest point or from a backup.
