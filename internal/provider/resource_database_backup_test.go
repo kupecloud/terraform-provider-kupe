@@ -408,6 +408,35 @@ func TestAccDatabaseBackupResource_Refusals(t *testing.T) {
 	}
 }
 
+// TestAccDatabaseBackupResource_DatabaseMissing: a backup of a database
+// that does not exist says so, not that the backup was deleted elsewhere.
+func TestAccDatabaseBackupResource_DatabaseMissing(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		CheckDestroy:             testAccCheckNoBackups(mock),
+		Steps: []resource.TestStep{{
+			Config: testAccProviderConfig(mock.url()) + testBackupHCL(`"orders-dbb"`, ""),
+			ExpectError: regexp.MustCompile(`(?s)failed to create database backup.*kupe API returned 404.*` +
+				wrappedText("The database named in `database` does not exist, so no backup was taken.")),
+		}},
+	})
+}
+
+func TestBackupCreateErrorDetail(t *testing.T) {
+	notFound := &client.APIError{StatusCode: http.StatusNotFound, Message: `database "orders-dbb" not found`}
+	if got := backupCreateErrorDetail(notFound); strings.Contains(got, "terraform refresh") ||
+		!strings.Contains(got, "named in `database` does not exist") {
+		t.Errorf("plain 404 detail = %q", got)
+	}
+	// A coded 404 keeps its own hint.
+	off := &client.APIError{StatusCode: http.StatusNotFound, Code: client.CodeBackupsUnavailable, Message: "off"}
+	if got := backupCreateErrorDetail(off); !strings.Contains(got, "does not offer manual backups") {
+		t.Errorf("404 backups_unavailable detail = %q", got)
+	}
+}
+
 func TestAccDatabaseBackupResource_PlanTimeErrors(t *testing.T) {
 	tests := []struct {
 		name, config, wantErr string

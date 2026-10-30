@@ -260,11 +260,20 @@ func (r *DatabaseBackupResource) Create(ctx context.Context, req resource.Create
 }
 
 // backupCreateErrorDetail is apiErrorDetail for a backup create. A 409
-// terminating is about the database, which the shared hint does not say.
+// terminating and a plain 404 are about the database, which the shared
+// hints do not say: the shared 404 hint is about the resource itself.
 func backupCreateErrorDetail(err error) string {
 	var apiErr *client.APIError
-	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusConflict && apiErr.Code == client.CodeTerminating {
+	if !errors.As(err, &apiErr) {
+		return apiErrorDetail(err)
+	}
+	switch {
+	case apiErr.StatusCode == http.StatusConflict && apiErr.Code == client.CodeTerminating:
 		return apiErrorSummary(apiErr) + "\n\nThe database is being deleted, so it cannot be backed up."
+	case apiErr.StatusCode == http.StatusNotFound && apiErr.Code == "":
+		return apiErrorSummary(apiErr) + "\n\nThe database named in `database` does not exist, so no backup was " +
+			"taken. Check the name. In one configuration, refer to the database (`database = " +
+			"kupe_database.orders.name`) so Terraform creates it first."
 	}
 	return apiErrorDetail(err)
 }
