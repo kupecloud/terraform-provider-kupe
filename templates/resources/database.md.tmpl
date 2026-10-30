@@ -27,7 +27,7 @@ Kupe takes a full backup of every database each day and saves the write-ahead lo
 
 A change applies in place, and `terraform apply` waits for the database to take it, as it does for a resize. Fields you leave out keep their current value, and removing `backup` keeps the current settings: to go back to the defaults, set them.
 
-`last_backup_at`, `recovery_window` and `backup_size_bytes` report the newest full backup, the oldest and newest points you can recover to, and the storage the backups take up. The `kupe_database` data source returns the same values.
+`last_backup_at`, `recovery_window` and `backup_size_bytes` report the newest full backup, the restore window (the oldest and newest points you can restore to), and the storage the backups take up. The `kupe_database` data source returns the same values.
 
 ### Connecting applications
 
