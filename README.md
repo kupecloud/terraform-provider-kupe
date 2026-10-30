@@ -258,9 +258,15 @@ That generated docs tree is the source of truth for provider reference documenta
 
 The main CI flow is defined in `.github/workflows/main.yaml`.
 
-* lint, unit test, security, and build jobs run on every push to `main`
-* the semantic release step uses the reusable workflow from
-  `kupecloud/github-workflows` pinned to a commit SHA
+* one `Gates` job runs every check first: `pre-commit run --all-files
+  --hook-stage manual` (lint, unit and mock-backed acceptance tests, gosec,
+  build, example validation, and the generated-docs check), through
+  `.github/workflows/gates.yaml`. PRs run the same job
+* the semantic release step runs `.github/workflows/semantic-release.yaml`
+  and needs the gates job. It is a local copy of the shared workflow, because
+  this repository is public and cannot call the private
+  `kupecloud/github-workflows`
+* govulncheck runs weekly in `.github/workflows/security.yaml`
 * a `publish` job builds and signs both the Terraform and OpenTofu
   registry artifacts and attaches them to the GitHub release for the
   cut tag

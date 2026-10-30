@@ -4,38 +4,42 @@ on:
   pull_request:
     branches:
       - main
+    # Every file a gate hook reads.
     paths:
       - "go.mod"
       - "go.sum"
       - "**.go"
-      - ".github/workflows/**"
+      - ".github/**"
       - "docs/**"
       - "examples/**"
       - "scripts/**"
       - "templates/**"
+      - "test/**"
       - "Makefile"
+      - "README.md"
+      - ".pre-commit-config.yaml"
+      - ".golangci.yaml"
+      - ".goreleaser.yaml"
+      - ".markdownlint-cli2.yaml"
+      - ".releaserc.json"
+      - "terraform-registry-manifest.json"
+
+# A new push to the PR cancels the run for the previous one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  go-lint:
-    name: Go Lint
-    uses: ./.github/workflows/go-lint.yaml
-
-  action-lint:
-    name: Action Lint
-    uses: ./.github/workflows/action-lint.yaml
-
-  unit-tests:
-    name: Unit Tests
-    needs:
-      - go-lint
-      - action-lint
-    uses: ./.github/workflows/unit-tests.yaml
-
-  build:
-    name: Build
-    needs:
-      - unit-tests
-    uses: ./.github/workflows/build.yaml
+  # Every PR check is a pre-commit hook; the slow ones are manual-stage hooks,
+  # which this job runs (kupecloud/github-workflows#14).
+  gates:
+    name: Gates
+    uses: ./.github/workflows/gates.yaml
+    with:
+      pre-commit-args: --all-files --show-diff-on-failure --hook-stage manual
+      # govulncheck runs weekly in security.yaml with the fixable-and-reachable
+      # gate main used; the plain local hook would fail on unfixable advisories.
+      skip: govulncheck

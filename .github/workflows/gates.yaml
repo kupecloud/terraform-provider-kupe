@@ -1,0 +1,176 @@
+name: Gates
+
+# One gate job: `pre-commit run`, the same hooks an engineer runs locally, on
+# one runner with one checkout and one set of tool installs
+# (kupecloud/github-workflows#14). This is an inline copy of the shared
+# pre-commit-gates.yaml, trimmed to the tools this repository needs: this
+# repository is public and github-workflows is private, so it cannot call the
+# shared workflow. It always runs on GitHub-hosted runners; a public repository
+# (and its fork PRs) must never reach the self-hosted kupe-* runners.
+
+on:
+  workflow_call:
+    inputs:
+      pre-commit-args:
+        description: >-
+          Arguments passed to `pre-commit run`, as shell words. The value is
+          eval'd: write it as a literal in the caller and never interpolate
+          event data (`github.event.*`, `github.head_ref`, a PR title or
+          branch name) into it.
+        required: false
+        default: "--all-files --show-diff-on-failure"
+        type: string
+      skip:
+        description: >-
+          Comma-separated hook ids to skip in CI (pre-commit's SKIP variable).
+          Name the reason in the caller.
+        required: false
+        default: ""
+        type: string
+      paths:
+        description: |
+          Optional newline-separated git pathspecs. When set, the `changed`
+          output is "true" if any tracked file under them changed between the
+          event's base and head commits (an undiffable base reports "true").
+          Empty leaves `changed` "true".
+        required: false
+        default: ""
+        type: string
+    outputs:
+      changed:
+        description: '"true" if any `paths` entry changed (always "true" when `paths` is empty)'
+        value: ${{ jobs.gates.outputs.changed }}
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    name: gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      changed: ${{ steps.changes.outputs.changed }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history only when the path filter has to diff base and head.
+          fetch-depth: ${{ inputs.paths != '' && '0' || '1' }}
+
+      - name: Detect changed paths
+        id: changes
+        shell: bash
+        env:
+          PATHS: ${{ inputs.paths }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          # Running heavy jobs needlessly is the cheap failure, so anything
+          # undiffable reports changed=true.
+          if [ -z "$PATHS" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          args=()
+          while IFS= read -r line; do
+            [[ "$line" =~ ^[[:space:]]*$ ]] || args+=("$line")
+          done <<< "$PATHS"
+          if [ "${#args[@]}" -eq 0 ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          zero_sha="0000000000000000000000000000000000000000"
+          if [ -z "$BASE_SHA" ] || [ -z "$HEAD_SHA" ] || [ "$BASE_SHA" = "$zero_sha" ] \
+            || ! git cat-file -e "${BASE_SHA}^{commit}" \
+            || ! git cat-file -e "${HEAD_SHA}^{commit}"; then
+            echo "Base '${BASE_SHA}' or head '${HEAD_SHA}' is empty, the zero SHA or not reachable; reporting changed=true." >&2
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            diff_base="$BASE_SHA"
+          elif ! diff_base="$(git merge-base "$BASE_SHA" "$HEAD_SHA")"; then
+            echo "No merge-base between '${BASE_SHA}' and '${HEAD_SHA}'; reporting changed=true." >&2
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed_files="$(git diff --name-only "$diff_base" "$HEAD_SHA" -- "${args[@]}")"
+          if [ -n "$changed_files" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Python
+        id: python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.13"
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Same install as the old unit-tests.yaml and build.yaml (no version
+      # pin, so the latest release, as before). The acceptance tests, the
+      # example validation and the docs schema dump all run this binary.
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_wrapper: false
+
+      - name: Cache pre-commit environments
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pre-commit
+          # Hook environments are virtualenvs bound to this exact interpreter.
+          key: pre-commit-${{ runner.os }}-py${{ steps.python.outputs.python-version }}-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      - name: Install pre-commit
+        shell: bash
+        run: python -m pip install "pre-commit==4.2.0"
+
+      - name: Run pre-commit
+        id: pre-commit
+        shell: bash
+        env:
+          PRE_COMMIT_ARGS: ${{ inputs.pre-commit-args }}
+          SKIP: ${{ inputs.skip }}
+          PRE_COMMIT_COLOR: always
+        run: |
+          set -euo pipefail
+          # pre-commit-args is shell words, parsed with eval: callers must pass
+          # a literal, never event data.
+          eval "args=($PRE_COMMIT_ARGS)"
+          if [ -n "$SKIP" ]; then
+            echo "::warning::Skipping hooks in CI: $SKIP"
+          fi
+          pre-commit run "${args[@]}"
+
+      - name: pre-commit summary
+        if: always()
+        shell: bash
+        env:
+          OUTCOME: ${{ steps.pre-commit.outcome }}
+          SKIP: ${{ inputs.skip }}
+          CHANGED: ${{ steps.changes.outputs.changed }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### pre-commit gates"
+            case "$OUTCOME" in
+              success) echo "All hooks passed." ;;
+              skipped) echo "pre-commit did not run: an earlier step failed." ;;
+              *) echo "pre-commit failed. Review the job log for the failing hook." ;;
+            esac
+            if [ -n "$SKIP" ]; then
+              echo ""
+              echo "Skipped in CI: \`$SKIP\`"
+            fi
+            echo ""
+            echo "Paths changed: \`${CHANGED:-unknown}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

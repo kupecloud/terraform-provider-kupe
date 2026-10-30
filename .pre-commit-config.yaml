@@ -50,15 +50,69 @@ repos:
       - id: shellcheck
         files: ^scripts/.*\.sh$
 
-  - repo: https://github.com/golangci/golangci-lint
-    rev: 8f3b0c7ed018e57905fbd873c697e0b1ede605a5
-    hooks:
-      - id: golangci-lint
-        args:
-          - --timeout=10m
-
+  # Hooks under `stages: [manual]` are the slow CI gates: a local commit skips
+  # them, and CI (and `pre-commit run --all-files --hook-stage manual`) runs
+  # them (kupecloud/github-workflows#14).
   - repo: local
     hooks:
+      # v2.1.6 is the version CI's go-lint job really ran (the go-lint.yaml
+      # v2.5.2 default), with this repository's .golangci.yaml. Bump separately.
+      - id: golangci-lint
+        name: golangci-lint
+        entry: bash -c 'GOWORK=off go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.1.6 run --timeout=10m'
+        language: system
+        pass_filenames: false
+        files: (\.go|^go\.(mod|sum)|^\.golangci\.yaml)$
+        stages:
+          - manual
+      - id: go-vet
+        name: go vet
+        entry: go vet ./...
+        language: system
+        pass_filenames: false
+        files: (\.go|^go\.(mod|sum))$
+        stages:
+          - manual
+      - id: go-unit-tests
+        name: go test -race (unit and mock-backed acceptance tests)
+        entry: .github/hooks/go-unit-tests.sh
+        language: system
+        pass_filenames: false
+        files: (\.go|^go\.(mod|sum)|^\.github/hooks/go-unit-tests\.sh)$
+        stages:
+          - manual
+      - id: go-mod-tidy
+        name: go mod tidy check
+        entry: .github/hooks/go-mod-tidy.sh
+        language: system
+        pass_filenames: false
+        files: (\.go|^go\.(mod|sum)|^\.github/hooks/go-mod-tidy\.sh)$
+        stages:
+          - manual
+      - id: provider-build
+        name: make build
+        entry: make build
+        language: system
+        pass_filenames: false
+        files: (\.go|^go\.(mod|sum)|^Makefile)$
+        stages:
+          - manual
+      - id: tofu-validate-examples
+        name: tofu validate examples against the local provider build
+        entry: make tofu-validate
+        language: system
+        pass_filenames: false
+        files: ^(internal/.*\.go|examples/.*|scripts/.*|main\.go|go\.(mod|sum)|Makefile)$
+        stages:
+          - manual
+      - id: tfplugindocs-validate
+        name: tfplugindocs validate
+        entry: make docs-install docs-validate
+        language: system
+        pass_filenames: false
+        files: ^(internal/.*\.go|templates/.*|examples/.*|docs/.*|scripts/.*|main\.go|go\.(mod|sum)|Makefile)$
+        stages:
+          - manual
       - id: actionlint
         name: actionlint
         entry: bash -c 'GOWORK=off go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12'
@@ -76,7 +130,8 @@ repos:
         entry: make docs-install docs-generate
         language: system
         pass_filenames: false
-        files: ^(internal/.*\.go|templates/.*|examples/.*|main\.go|go\.mod)$
+        # Also the committed-docs check: CI fails when this rewrites docs/.
+        files: ^(internal/.*\.go|templates/.*|examples/.*|docs/.*|scripts/.*|main\.go|go\.(mod|sum)|Makefile)$
       - id: govulncheck
         name: govulncheck
         entry: bash -c 'GOWORK=off go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...'
@@ -89,6 +144,9 @@ repos:
         language: system
         pass_filenames: false
         files: ^(internal/|scripts/|main\.go|go\.mod|Makefile)
+        # Ran only on main before; now every PR runs it (manual stage).
+        stages:
+          - manual
 
   # Refuse any commit whose STAGED content contains a secret. Added org-wide on
   # 2026-10-06 after three OpenTofu state files carrying a dev SSH private key

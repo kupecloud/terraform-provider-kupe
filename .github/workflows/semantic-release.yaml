@@ -1,0 +1,97 @@
+name: Semantic Release
+
+# Inline copy of kupecloud/github-workflows semantic-release.yaml v2.5.2 (the
+# version main.yaml called), with the same steps and versions. This repository
+# is public and github-workflows is private, so it cannot call the shared
+# workflow. The one change: this repository has its own .releaserc.json, so the
+# shared-default download step is replaced by a check that the file exists.
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: >-
+          Runner label. Defaults to ubuntu-latest. Override to a self-hosted
+          runner label if you want to run CI on your own scale set.
+        required: false
+        default: ubuntu-latest
+        type: string
+    outputs:
+      new_release_published:
+        description: Whether a new release was published
+        value: ${{ jobs.release.outputs.new_release_published }}
+      new_release_version:
+        description: New release version
+        value: ${{ jobs.release.outputs.new_release_version }}
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  release:
+    name: Semantic Release
+    runs-on: ${{ inputs.runs-on }}
+    outputs:
+      new_release_published: ${{ steps.semantic.outputs.new_release_published }}
+      new_release_version: ${{ steps.semantic.outputs.new_release_version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          fetch-depth: 0
+          # `persist-credentials: true` puts GITHUB_TOKEN in the git
+          # remote URL so semantic-release plugins (notably
+          # @semantic-release/git) can push the post-release file bumps
+          # back to main. Pushes from GITHUB_TOKEN don't trigger CI,
+          # which is exactly what we want for `chore(release): ... [skip ci]`
+          # commits — they'd otherwise loop into the next release run.
+          persist-credentials: true
+
+      # semantic-release is a Node tool — the cycjimmy action below runs
+      # `npm ci` to install it and its plugins. Cloud-hosted runners
+      # (ubuntu-latest) ship Node pre-installed, but the minimal
+      # actions-runner image used by self-hosted scale sets does not, so
+      # the action would otherwise fail with `/bin/sh: 1: npm: not found`
+      # and silently skip the release. setup-node makes this work
+      # uniformly across both runner types.
+      - name: Set up Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v6.0.0
+        with:
+          node-version: "22"
+
+      - name: Check repository release configuration
+        run: test -f .releaserc.json
+
+      - name: Semantic Release
+        id: semantic
+        uses: cycjimmy/semantic-release-action@b12c8f6015dc215fe37bc154d4ad456dd3833c90 # v6.0.0
+        with:
+          semantic_version: 24
+          # @semantic-release/exec + @semantic-release/git are pre-installed
+          # so per-repo `.releaserc.json` can use them to bump in-repo files
+          # (e.g. chart/Chart.yaml appVersion) and commit the bump back to
+          # the release tag. Repos that don't reference these plugins are
+          # unaffected — the install is harmless.
+          # extra_plugins is a newline-separated package list — it does NOT accept
+          # comments; any '#' line is treated as a package name to install.
+          #
+          # conventional-changelog-conventionalcommits is PINNED. Unpinned it floats
+          # to latest, and 10.4.0 (published 2026-08-18 21:37) broke every release in
+          # the org: it requires conventional-changelog-writer@9+, while
+          # semantic-release 24's release-notes-generator depends on writer ^8.0.0
+          # ("Missing helper: conventional-changelog-conventionalcommits requires
+          # conventional-changelog-writer@9 or newer"). Bump only alongside a
+          # semantic-release major that ships writer 9.
+          extra_plugins: |
+            conventional-changelog-conventionalcommits@10.3.0
+            @semantic-release/exec
+            @semantic-release/git
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Release info
+        if: steps.semantic.outputs.new_release_published == 'true'
+        run: |
+          echo "New release published: v${{ steps.semantic.outputs.new_release_version }}"
