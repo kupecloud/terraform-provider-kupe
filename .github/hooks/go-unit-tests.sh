@@ -1,17 +1,25 @@
 #!/usr/bin/env bash
-# Unit and mock-backed acceptance tests, as the old unit-tests.yaml ran them:
-# `go test -race -coverprofile` with OpenTofu as the acceptance-test CLI.
+# Unit and all mock-backed acceptance tests, including write-only saved plans.
+# The matrix supplies a CLI; local runs prefer OpenTofu, then Terraform.
 # Without TF_ACC_TERRAFORM_PATH, terraform-plugin-testing downloads Terraform
 # through hc-install and checks a GPG signature that breaks when HashiCorp's
 # embedded key expires, so point it at the installed tofu.
 set -euo pipefail
 
-if ! TF_ACC_TERRAFORM_PATH="$(command -v tofu)"; then
-  echo "go-unit-tests: OpenTofu (tofu) is not on PATH; install it first." >&2
-  exit 1
+if [ -z "${TF_ACC_TERRAFORM_PATH:-}" ]; then
+  if ! TF_ACC_TERRAFORM_PATH="$(command -v tofu || command -v terraform)"; then
+    echo "go-unit-tests: OpenTofu or Terraform is required on PATH." >&2
+    exit 1
+  fi
 fi
 export TF_ACC_TERRAFORM_PATH
-export TF_ACC_PROVIDER_HOST=registry.opentofu.org
+if [ -z "${TF_ACC_PROVIDER_HOST:-}" ]; then
+  case "$(basename "$TF_ACC_TERRAFORM_PATH")" in
+    tofu) TF_ACC_PROVIDER_HOST=registry.opentofu.org ;;
+    *) TF_ACC_PROVIDER_HOST=registry.terraform.io ;;
+  esac
+fi
+export TF_ACC_PROVIDER_HOST
 export TF_ACC_PROVIDER_NAMESPACE=kupecloud
 
 profile="$(mktemp)"

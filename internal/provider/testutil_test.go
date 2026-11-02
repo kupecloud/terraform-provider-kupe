@@ -418,6 +418,10 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 		}
 
 	// Secret routes and scripted delivery observations live together.
+	case matchPath(r.URL.Path, "/api/v1/tenants/acme/vault/"):
+		m.handleVault(w, r)
+	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/refresh") && matchPath(r.URL.Path, "/api/v1/tenants/acme/secrets/"):
+		m.handleSecretRefresh(w, r)
 	case r.URL.Path == "/api/v1/tenants/acme/secrets" || matchPath(r.URL.Path, "/api/v1/tenants/acme/secrets/"):
 		m.handleSecret(w, r)
 
