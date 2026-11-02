@@ -1,0 +1,1 @@
+terraform import kupe_app_environment.this shop/production

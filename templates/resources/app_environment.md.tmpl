@@ -1,0 +1,44 @@
+---
+page_title: "{{.Name}} {{.Type}} - {{.ProviderName}}"
+subcategory: ""
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# {{.Name}} ({{.Type}})
+
+{{ .Description | trimspace }}
+
+## Example usage
+
+{{ tffile "examples/resources/kupe_app_environment/resource.tf" }}
+
+### Multiple environments
+
+{{ tffile "examples/resources/kupe_app_environment/for_each.tf" }}
+
+## Deploying and retrying
+
+An apply that changes `web`, a referenced secret path or `deployment_revision` requests a deployment and waits for its requested release. Domain and protection changes wait for the observed settings without starting a release. The default timeouts are create 30 minutes, update 20 minutes and delete 20 minutes.
+
+A failed first deploy, or one that times out while deploying, gives a warning. Terraform retains the resource without taint, so an unchanged apply plans no change. A failed update reports an error and retains the accepted configuration; an unchanged apply does not resubmit it.
+
+Increase `deployment_revision` by exactly one to retry. For example, after revision 1, set it to 2 and apply. A retry can accompany settings changes: the provider sends the settings first, then retries using the returned ETag. A failed requested release remains failed when recovery succeeds; the diagnostic names the release now serving.
+
+If another client changes the environment before its release can be identified, Create warns and Update errors: “the environment changed before its release could be identified; check its current state before deploying again”. This can also happen when the concurrent edit only changes domains or protection. The provider retains the accepted settings and sends no further deployment request during that apply. A later refresh can show another client’s settings; review the next plan before applying again. This outcome does not assert that the release was Superseded.
+
+## Vault references
+
+Each `secrets` entry points to a tenant Vault path. Write its values in the console Vault page. Environment variables reference its declared name and key. Secret values are never provider attributes.
+
+Do not also target the environment's namespace with an independent `kupe_secret` or service binding. Remove independent deliveries before deleting the environment. The API refuses removal of a secret entry while `web.env` still references it.
+
+## Deletion
+
+Destroying an environment deletes its namespace and everything in it. The cluster and Vault entries are kept. Set `deletion_protection = false` and apply first, then destroy it. Delete waits until the environment is gone; if cleanup exceeds the delete timeout, Terraform removes it from state with a warning while the platform continues cleanup.
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Import
+
+{{ codefile "shell" "examples/resources/kupe_app_environment/import.sh" }}

@@ -182,7 +182,7 @@ func IsNotFound(err error) bool {
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
 		return apiErr.StatusCode == http.StatusNotFound &&
-			apiErr.Code != CodeDatabasesUnavailable && apiErr.Code != CodeRegistriesUnavailable
+			apiErr.Code != CodeDatabasesUnavailable && apiErr.Code != CodeRegistriesUnavailable && apiErr.Code != CodeAppsUnavailable
 	}
 	return false
 }

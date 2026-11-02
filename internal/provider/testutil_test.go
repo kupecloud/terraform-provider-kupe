@@ -100,6 +100,7 @@ type mockKupeAPI struct {
 	// (testutil_registry_test.go).
 	mockRegistryState
 	mockSecretState
+	mockAppState
 }
 
 // mockRequest is a request the mock received: its method, If-Match and body.
@@ -122,6 +123,7 @@ func newMockKupeAPI() *mockKupeAPI {
 		rvCounter:   1,
 
 		mockRegistryState: newMockRegistryState(),
+		mockAppState:      newMockAppState(),
 		databases:         make(map[string]map[string]any),
 		databaseBindings:  make(map[string]map[string]any),
 		tenant: map[string]any{
@@ -208,6 +210,9 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 
 	// Route matching
 	switch {
+	case strings.HasPrefix(r.URL.Path, mockAppsPath):
+		m.serveApps(w, r)
+
 	// Plans
 	case r.Method == "GET" && r.URL.Path == "/api/v1/plans":
 		items := make([]any, 0)

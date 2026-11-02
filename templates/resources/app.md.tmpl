@@ -1,0 +1,26 @@
+---
+page_title: "{{.Name}} {{.Type}} - {{.ProviderName}}"
+subcategory: ""
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# {{.Name}} ({{.Type}})
+
+{{ .Description | trimspace }}
+
+## Example usage
+
+{{ tffile "examples/resources/kupe_app/resource.tf" }}
+
+## Environments and deletion
+
+Use `kupe_app_environment` for each environment. Reference the app's `name` so Terraform creates the app first and destroys its environments first.
+
+Protection defaults to true on both resources. Set `deletion_protection = false` and apply before destroying them. An app with any remaining environment is kept: Terraform does not authorise deletion of unmanaged environments. Destroying an environment deletes its namespace and everything in it. The cluster and Vault entries are kept.
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Import
+
+{{ codefile "shell" "examples/resources/kupe_app/import.sh" }}

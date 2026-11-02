@@ -85,6 +85,9 @@ const (
 	CodeRegistryTokenLimitReached = "REGISTRY_TOKEN_LIMIT_REACHED" // #nosec G101 -- an error code, not a credential
 )
 
+// CodeAppsUnavailable is a disabled App service, never a missing instance.
+const CodeAppsUnavailable = "apps_unavailable"
+
 // ErrorCode is the code of the API error err carries, "" when it carries
 // none or is not an API error.
 func ErrorCode(err error) string {
