@@ -3,50 +3,50 @@ package provider
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
+	"github.com/hashicorp/terraform-plugin-framework-validators/setvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
-	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/kupecloud/terraform-provider-kupe/internal/client"
 )
 
-// Secret phase the provider considers "ready" — Create and Update wait
-// for this value before returning. Other observed phases (Pending,
-// Degraded) are treated as in-progress until either Active is reached
-// or the user-configured Create/Update timeout fires.
-const secretPhaseActive = "Active"
-
-// Default timeouts for secret operations. Users can override via the
-// resource's `timeouts` attribute. Sync to target clusters typically
-// completes in seconds; 2 min is comfortable headroom.
 const (
+	secretPhaseActive          = "Active"
+	secretPhaseDeleting        = "Deleting"
 	defaultSecretCreateTimeout = 2 * time.Minute
 	defaultSecretUpdateTimeout = 2 * time.Minute
 	defaultSecretDeleteTimeout = 2 * time.Minute
+	maxSecretKeysPerTarget     = 64
+	maxSecretKeys              = 1024
 )
 
 var (
-	_ resource.Resource                = &SecretResource{}
-	_ resource.ResourceWithImportState = &SecretResource{}
+	_ resource.Resource                   = &SecretResource{}
+	_ resource.ResourceWithConfigure      = &SecretResource{}
+	_ resource.ResourceWithImportState    = &SecretResource{}
+	_ resource.ResourceWithValidateConfig = &SecretResource{}
 )
 
 type SecretResource struct {
-	client *client.Client
+	managedResource[SecretResourceModel, client.Secret]
 }
 
 type SecretResourceModel struct {
 	Name       types.String   `tfsdk:"name"`
 	SecretPath types.String   `tfsdk:"secret_path"`
 	Sync       types.List     `tfsdk:"sync"`
+	SyncStatus types.List     `tfsdk:"sync_status"`
 	Phase      types.String   `tfsdk:"phase"`
 	ETag       types.String   `tfsdk:"etag"`
 	CreatedAt  types.String   `tfsdk:"created_at"`
@@ -57,10 +57,125 @@ var syncTargetAttrTypes = map[string]attr.Type{
 	"cluster":     types.StringType,
 	"namespace":   types.StringType,
 	"secret_name": types.StringType,
+	"keys":        types.SetType{ElemType: types.StringType},
 }
 
+var secretTargetStatusType = types.ObjectType{AttrTypes: map[string]attr.Type{
+	"cluster":     types.StringType,
+	"namespace":   types.StringType,
+	"secret_name": types.StringType,
+	"phase":       types.StringType,
+	"reason":      types.StringType,
+}}
+
 func NewSecretResource() resource.Resource {
-	return &SecretResource{}
+	return &SecretResource{managedResource[SecretResourceModel, client.Secret]{kind: &secretKind}}
+}
+
+var secretKind = serviceKind[SecretResourceModel, client.Secret]{
+	noun: "secret",
+	name: func(m *SecretResourceModel) string { return m.Name.ValueString() },
+	get: func(ctx context.Context, c *client.Client, m *SecretResourceModel) (*client.Secret, string, error) {
+		return c.GetSecret(ctx, m.Name.ValueString())
+	},
+	del: func(ctx context.Context, c *client.Client, m *SecretResourceModel) error {
+		return c.DeleteSecret(ctx, m.Name.ValueString())
+	},
+	mapToState: mapSecretToState,
+	timeoutsOf: func(m *SecretResourceModel) timeouts.Value { return m.Timeouts },
+	defaults:   operationTimeouts{create: defaultSecretCreateTimeout, update: defaultSecretUpdateTimeout, delete: defaultSecretDeleteTimeout},
+	ready: readiness[SecretResourceModel, client.Secret]{
+		target:    "delivered",
+		phase:     secretPhase,
+		converged: secretDelivered,
+		failed: func(s *client.Secret) (time.Duration, bool) {
+			return 0, secretPhase(s) == secretPhaseDeleting || len(secretConflicts(s)) > 0
+		},
+		failedDetail: secretFailedDetail,
+		timedOutDetail: func(_ *SecretResourceModel, _ *client.Secret) string {
+			return " Delivery waits for the current generation, every target to be Synced, and removed targets to be withdrawn."
+		},
+		// The controller observes every pass, including ProviderError; it
+		// does not publish the ReconcileFailed condition used by notApplied.
+	},
+	settingsChanged: func(prior *SecretResourceModel, current *client.Secret) []string {
+		if secretTargetsEqual(extractSyncTargets(prior.Sync), current.Sync) {
+			return nil
+		}
+		return []string{"sync"}
+	},
+	stillDeleting: func(m *SecretResourceModel) string {
+		return fmt.Sprintf("DELETE was accepted but secret %q is still terminating after the configured delete timeout. "+
+			"Terraform has removed it from state; the Kupe platform finishes withdrawing copies in the background, "+
+			"and the secret name stays reserved until that completes (creating a secret with the same name may 409 until then). "+
+			"The copy inside the cluster goes shortly after, or later if the cluster is down. Stored values are kept.", m.Name.ValueString())
+	},
+}
+
+func secretPhase(s *client.Secret) string {
+	if s == nil || s.Status == nil {
+		return ""
+	}
+	return s.Status.Phase
+}
+
+// secretTargetMatches includes the effective name: a retained namespace may
+// still report delivery or a conflict for the name used before a rename.
+func secretTargetMatches(name string, target client.SyncTarget, status client.SecretTargetStatus) bool {
+	if target.SecretName != "" {
+		name = target.SecretName
+	}
+	return target.Cluster == status.Cluster && target.Namespace == status.Namespace && name == status.SecretName
+}
+
+func secretDelivered(s *client.Secret) bool {
+	if secretPhase(s) != secretPhaseActive || s.Generation < 1 || s.Status.ObservedGeneration != s.Generation {
+		return false
+	}
+	for _, status := range s.Status.SyncStatuses {
+		if status.Phase == "Withdrawing" {
+			return false
+		}
+	}
+	for _, target := range s.Sync {
+		if !slices.ContainsFunc(s.Status.SyncStatuses, func(status client.SecretTargetStatus) bool {
+			return secretTargetMatches(s.Name, target, status) && status.Phase == "Synced"
+		}) {
+			return false
+		}
+	}
+	return true
+}
+
+func secretConflicts(s *client.Secret) []string {
+	if s == nil || s.Status == nil || s.Generation < 1 || s.Status.ObservedGeneration != s.Generation {
+		return nil
+	}
+	var conflicts []string
+	for _, target := range s.Sync {
+		for _, status := range s.Status.SyncStatuses {
+			if secretTargetMatches(s.Name, target, status) && status.Phase == "Failed" && status.Reason == "TargetConflict" {
+				conflicts = append(conflicts, fmt.Sprintf("%s/%s (TargetConflict)", target.Cluster, target.Namespace))
+			}
+		}
+	}
+	slices.Sort(conflicts)
+	return conflicts
+}
+
+func secretFailedDetail(op string, m *SecretResourceModel, s *client.Secret) string {
+	if secretPhase(s) == secretPhaseDeleting {
+		return fmt.Sprintf("Secret %q is being deleted, so the %s did not complete. Once it is gone, "+
+			"`terraform apply` creates it again; remove it from the configuration if that is not wanted.", m.Name.ValueString(), op)
+	}
+	detail := fmt.Sprintf("Secret %q could not deliver to %s, so the %s did not complete. "+
+		"A Secret with this name already exists in the namespace and was not created by Kupe. "+
+		"Choose another `secret_name` for the target.", m.Name.ValueString(), strings.Join(secretConflicts(s), ", "), op)
+	if op == "create" {
+		return detail + "\n\nTerraform keeps the secret in state, marked tainted, so the next `terraform apply` plans to replace it. " +
+			"To keep it instead, run `terraform untaint` on it."
+	}
+	return detail + "\n\n" + changeRecordedNotice
 }
 
 func (r *SecretResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -69,63 +184,78 @@ func (r *SecretResource) Metadata(_ context.Context, req resource.MetadataReques
 
 func (r *SecretResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages a Kupe Cloud secret definition and its sync targets. Create and " +
-			"Update wait for the secret to reach phase=Active before returning, and fail if the timeout " +
-			"fires first; Delete waits for " +
-			"the underlying ManagedSecret CR to finish terminating. Set timeouts with the `timeouts` " +
-			"attribute, for example `timeouts = { create = \"5m\" }` (defaults: create/update/delete 2m).",
+		Description: "Manages a Kupe Cloud secret definition and its sync targets. Create and Update wait until every target " +
+			"has the current values and the platform has withdrawn removed targets. The copy inside the cluster goes shortly " +
+			"after withdrawal, or later if the cluster is down. A target name conflict ends the wait at once. For other delivery " +
+			"failures, the provider keeps polling until the timeout. If delivery fails or times out after a create is accepted, " +
+			"the definition stays in state, marked tainted. Delete waits until the " +
+			"platform has withdrawn the targets and removed the definition; stored values are kept. Set timeouts with the `timeouts` attribute, " +
+			"for example `timeouts = { create = \"5m\" }` (defaults: create/update/delete 2m).",
 		Attributes: map[string]schema.Attribute{
-			"name": schema.StringAttribute{
-				Description: "Secret name (immutable after creation).",
-				Required:    true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
-			"secret_path": schema.StringAttribute{
-				Description: "OpenBao KV v2 key path for the stored value. Immutable after creation.",
-				Required:    true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
-			},
+			"name": schema.StringAttribute{Description: "Secret name (immutable after creation).", Required: true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()}},
+			"secret_path": schema.StringAttribute{Description: "OpenBao KV v2 key path for the stored value. Immutable after creation.", Required: true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()}},
 			"sync": schema.ListNestedAttribute{
-				Description: "Cluster/namespace targets to sync this secret to.",
+				Description: "Cluster/namespace targets to sync this secret to. At most 1,024 selected keys across all targets. Changes in place.",
 				Optional:    true,
-				NestedObject: schema.NestedAttributeObject{
-					Attributes: map[string]schema.Attribute{
-						"cluster": schema.StringAttribute{
-							Description: "Target cluster name.",
-							Required:    true,
-						},
-						"namespace": schema.StringAttribute{
-							Description: "Target namespace in the cluster.",
-							Required:    true,
-						},
-						"secret_name": schema.StringAttribute{
-							Description: "Override the K8s secret name (defaults to the managed secret name).",
-							Optional:    true,
-						},
+				NestedObject: schema.NestedAttributeObject{Attributes: map[string]schema.Attribute{
+					"cluster":     schema.StringAttribute{Description: "Target cluster name.", Required: true},
+					"namespace":   schema.StringAttribute{Description: "Target namespace in the cluster.", Required: true},
+					"secret_name": schema.StringAttribute{Description: "Override the Kubernetes Secret name (defaults to the managed secret name).", Optional: true},
+					"keys": schema.SetAttribute{
+						Description: "Keys to deliver: 1 to 64 per target. Each key is 1 to 253 ASCII letters, digits, '-', '_' or '.', excluding '.', '..' and names starting with '..'. Omit to deliver the whole entry. Changes in place.",
+						ElementType: types.StringType, Optional: true,
+						Validators: []validator.Set{setvalidator.SizeBetween(1, maxSecretKeysPerTarget), setvalidator.ValueStringsAre(configMapKey{})},
 					},
-				},
+				}},
 			},
-			"phase": schema.StringAttribute{
-				Description: "Current sync phase for the managed secret.",
+			"sync_status": schema.ListNestedAttribute{
+				Description: "Per-target delivery status, sorted by cluster then namespace. Removed targets remain Withdrawing until the platform has withdrawn them.",
 				Computed:    true,
+				NestedObject: schema.NestedAttributeObject{Attributes: map[string]schema.Attribute{
+					"cluster":     schema.StringAttribute{Description: "Target cluster name.", Computed: true},
+					"namespace":   schema.StringAttribute{Description: "Target namespace in the cluster.", Computed: true},
+					"secret_name": schema.StringAttribute{Description: "Effective Secret name in the target namespace.", Computed: true},
+					"phase":       schema.StringAttribute{Description: "Pending, Synced, Failed or Withdrawing. Synced means the current values reached the namespace.", Computed: true},
+					"reason":      schema.StringAttribute{Description: "Delivery reason, such as TargetConflict, ProviderError or AwaitingCopy.", Computed: true},
+				}},
 			},
+			"phase":      schema.StringAttribute{Description: "Current phase: Pending, Active, Degraded or Deleting. Active alone does not confirm current delivery.", Computed: true},
 			"etag":       etagAttribute(),
 			"created_at": createdAtAttribute("the managed secret definition"),
-			"timeouts": timeouts.Attributes(ctx, timeouts.Opts{
-				Create: true,
-				Update: true,
-				Delete: true,
-			}),
+			"timeouts":   timeouts.Attributes(ctx, timeouts.Opts{Create: true, Update: true, Delete: true}),
 		},
 	}
 }
 
-func (r *SecretResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
-	r.client = configureClient(req.ProviderData, &resp.Diagnostics)
+func (r *SecretResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var sync types.List
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("sync"), &sync)...)
+	if resp.Diagnostics.HasError() || sync.IsNull() || sync.IsUnknown() {
+		return
+	}
+	count := 0
+	for _, elem := range sync.Elements() {
+		obj, ok := elem.(types.Object)
+		if !ok || obj.IsNull() || obj.IsUnknown() {
+			continue
+		}
+		keys, ok := obj.Attributes()["keys"].(types.Set)
+		if ok && !keys.IsNull() && !keys.IsUnknown() {
+			// Unknown elements can collapse to a known member of the set
+			// later, so only known key names prove the cap is exceeded.
+			for _, key := range keys.Elements() {
+				if !key.IsNull() && !key.IsUnknown() {
+					count++
+				}
+			}
+		}
+	}
+	if count > maxSecretKeys {
+		resp.Diagnostics.AddAttributeError(path.Root("sync"), "Too many selected keys",
+			"A secret can select at most 1,024 keys across all sync targets. Reduce the selected keys or split the definition.")
+	}
 }
 
 func (r *SecretResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -134,63 +264,14 @@ func (r *SecretResource) Create(ctx context.Context, req resource.CreateRequest,
 	if resp.Diagnostics.HasError() {
 		return
 	}
-
-	createReq := client.CreateSecretRequest{
-		Name:       plan.Name.ValueString(),
-		SecretPath: plan.SecretPath.ValueString(),
-		Sync:       extractSyncTargets(plan.Sync),
-	}
-
-	secret, etag, err := r.client.CreateSecret(ctx, createReq)
+	s, etag, err := r.client.CreateSecret(ctx, client.CreateSecretRequest{
+		Name: plan.Name.ValueString(), SecretPath: plan.SecretPath.ValueString(), Sync: extractSyncTargets(plan.Sync),
+	})
 	if err != nil {
 		resp.Diagnostics.AddError("failed to create secret", apiErrorDetail(err))
 		return
 	}
-
-	mapSecretToState(secret, etag, &plan, &resp.Diagnostics)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	// Wait for the operator to finish syncing to all target clusters
-	// before returning. The API returns 201 when the ManagedSecret CR
-	// is accepted (phase=Pending); the actual sync happens via
-	// ExternalSecrets and can take a few seconds per target cluster.
-	// User-overridable via `timeouts.create` (default 2m).
-	timeout, diags := plan.Timeouts.Create(ctx, defaultSecretCreateTimeout)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	r.waitForSecretReady(ctx, timeout, plan.Name.ValueString(), &plan, &resp.State, &resp.Diagnostics, "create")
-}
-
-func (r *SecretResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var state SecretResourceModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	secret, etag, err := r.client.GetSecret(ctx, state.Name.ValueString())
-	if err != nil {
-		if client.IsNotFound(err) {
-			resp.State.RemoveResource(ctx)
-			return
-		}
-		resp.Diagnostics.AddError("failed to read secret", apiErrorDetail(err))
-		return
-	}
-
-	mapSecretToState(secret, etag, &state, &resp.Diagnostics)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+	r.created(ctx, s, etag, &plan, &resp.State, &resp.Diagnostics)
 }
 
 func (r *SecretResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
@@ -200,155 +281,20 @@ func (r *SecretResource) Update(ctx context.Context, req resource.UpdateRequest,
 	if resp.Diagnostics.HasError() {
 		return
 	}
-
-	patchReq := client.PatchSecretRequest{
-		Sync: extractSyncTargets(plan.Sync),
-	}
-
-	secret, etag, err := r.client.UpdateSecret(ctx, plan.Name.ValueString(), state.ETag.ValueString(), patchReq)
-	if err != nil {
-		resp.Diagnostics.AddError("failed to update secret", apiErrorDetail(err))
-		return
-	}
-
-	mapSecretToState(secret, etag, &plan, &resp.Diagnostics)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	// Sync-target changes briefly transition phase Active → Pending →
-	// Active as the operator reconciles. Wait for the second Active
-	// observation so downstream resources see fully-synced state.
-	// User-overridable via `timeouts.update` (default 2m).
-	timeout, diags := plan.Timeouts.Update(ctx, defaultSecretUpdateTimeout)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	r.waitForSecretReady(ctx, timeout, plan.Name.ValueString(), &plan, &resp.State, &resp.Diagnostics, "update")
-}
-
-func (r *SecretResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-	var state SecretResourceModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	name := state.Name.ValueString()
-	if err := r.client.DeleteSecret(ctx, name); err != nil && !client.IsNotFound(err) {
-		resp.Diagnostics.AddError("failed to delete secret", apiErrorDetail(err))
-		return
-	}
-
-	// Poll until the ManagedSecret CR is genuinely gone. kupe-api's
-	// DELETE returns 204 once K8s accepts the request, but the
-	// operator's finalizer cleans up synced K8s Secrets across all
-	// target clusters before allowing the CR to be removed. Without
-	// this wait, an immediate re-apply with the same secret name 409s
-	// on the still-terminating CR. User-overridable via
-	// `timeouts.delete` (default 2m).
-	timeout, diags := state.Timeouts.Delete(ctx, defaultSecretDeleteTimeout)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	err := waitForDeletion(ctx, timeout, func(c context.Context) error {
-		_, _, err := r.client.GetSecret(c, name)
-		return err
-	})
-	switch {
-	case err == nil:
-		// confirmed gone
-	case isTerminalAPIError(err):
-		resp.Diagnostics.AddError("failed to confirm secret deletion", apiErrorDetail(err))
-	default:
-		resp.Diagnostics.AddWarning(
-			"secret still terminating",
-			fmt.Sprintf("DELETE was accepted but secret %q is still terminating after the configured "+
-				"delete timeout. Terraform has removed the secret from state; the Kupe platform "+
-				"continues cleaning up the synced Secrets in your target clusters in the background, "+
-				"and the secret name stays reserved until that completes (creating a secret with the "+
-				"same name may 409 until then). If the secret stays in this state, check it in the "+
-				"Kupe Console or contact Kupe Cloud support. Override with `timeouts.delete = \"5m\"` "+
-				"for secrets with many sync targets.", name),
-		)
-	}
-}
-
-func (r *SecretResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resource.ImportStatePassthroughID(ctx, path.Root("name"), req, resp)
-}
-
-// waitForSecretReady polls GetSecret until the observed phase is
-// "Active" or the context expires. Refreshes resource state on every
-// poll so an interrupted apply leaves Terraform with the latest
-// observed values. kind is "create" or "update", surfaced in the
-// timeout error so users can distinguish the two paths. See the
-// corresponding cluster helper for the design rationale.
-func (r *SecretResource) waitForSecretReady(
-	ctx context.Context,
-	timeout time.Duration,
-	name string,
-	plan *SecretResourceModel,
-	state *tfsdk.State,
-	diags *diag.Diagnostics,
-	kind string,
-) {
-	err := pollUntil(ctx, timeout, func(c context.Context) (bool, error) {
-		secret, etag, err := r.client.GetSecret(c, name)
-		if err != nil {
-			return false, err
+	var send patchFunc[client.Secret]
+	if !plan.Sync.Equal(state.Sync) {
+		send = func(ctx context.Context, etag string) (*client.Secret, string, error) {
+			return r.client.UpdateSecret(ctx, plan.Name.ValueString(), etag, client.PatchSecretRequest{Sync: extractSyncTargets(plan.Sync)})
 		}
-		mapSecretToState(secret, etag, plan, diags)
-		diags.Append(state.Set(c, plan)...)
-		phase := ""
-		if secret.Status != nil {
-			phase = secret.Status.Phase
-		}
-		return phase == secretPhaseActive, nil
-	})
-	switch {
-	case err == nil:
-		// converged
-	case isTerminalAPIError(err):
-		diags.AddError(
-			fmt.Sprintf("secret %s failed while waiting for Active", kind),
-			apiErrorDetail(err),
-		)
-	default:
-		detail := fmt.Sprintf("Secret %q was still at phase=%q, not Active, when the %s timeout fired, so the %s "+
-			"did not complete. Kupe Cloud carries on syncing the value to your target clusters in the "+
-			"background.\n\nIf the secret stays in this phase, check it in the Kupe Console or contact Kupe "+
-			"Cloud support. To wait longer, set `timeouts.%s = \"5m\"` for secrets with many sync targets.",
-			name, plan.Phase.ValueString(), kind, kind, kind)
-		switch kind {
-		case "create":
-			detail += "\n\nTerraform keeps the secret in state, marked tainted, so the next `terraform apply` " +
-				"plans to replace it. To keep it and wait for it instead, run `terraform untaint` on it before " +
-				"applying again."
-		case "update":
-			detail += "\n\n" + changeRecordedNotice
-		}
-		summary := fmt.Sprintf("secret %s timed out while %s", kind, plan.Phase.ValueString())
-		if plan.Phase.ValueString() == "" {
-			summary = fmt.Sprintf("secret %s timed out before reaching Active", kind)
-		}
-		diags.AddError(summary, detail)
 	}
+	r.update(ctx, &plan, &state, state.ETag.ValueString(), send, true, &resp.State, &resp.Diagnostics)
 }
 
 func extractSyncTargets(list types.List) []client.SyncTarget {
 	if list.IsNull() || list.IsUnknown() {
 		return nil
 	}
-	// Return a non-nil empty slice for sync = [] so the API receives
-	// "sync": [] rather than omitting the field — this lets the user
-	// explicitly clear all sync targets.
+	// Preserve [] so clearing the complete desired target list reaches the API.
 	targets := make([]client.SyncTarget, 0, len(list.Elements()))
 	for _, elem := range list.Elements() {
 		obj, ok := elem.(types.Object)
@@ -358,61 +304,80 @@ func extractSyncTargets(list types.List) []client.SyncTarget {
 		attrs := obj.Attributes()
 		cluster, _ := attrs["cluster"].(types.String)
 		namespace, _ := attrs["namespace"].(types.String)
-		t := client.SyncTarget{
-			Cluster:   cluster.ValueString(),
-			Namespace: namespace.ValueString(),
-		}
-		if sn, ok := attrs["secret_name"].(types.String); ok && !sn.IsNull() {
-			t.SecretName = sn.ValueString()
-		}
-		targets = append(targets, t)
+		secretName, _ := attrs["secret_name"].(types.String)
+		keys, _ := attrs["keys"].(types.Set)
+		targets = append(targets, client.SyncTarget{Cluster: cluster.ValueString(), Namespace: namespace.ValueString(),
+			SecretName: secretName.ValueString(), Keys: setStrings(keys)})
 	}
 	return targets
 }
 
-func mapSecretToState(s *client.Secret, etag string, state *SecretResourceModel, diags *diag.Diagnostics) {
+// secretTargetsEqual compares the complete mutable spec. Keys are a set;
+// the target list keeps its order, matching the sync schema.
+func secretTargetsEqual(a, b []client.SyncTarget) bool {
+	return slices.EqualFunc(a, b, func(a, b client.SyncTarget) bool {
+		return a.Cluster == b.Cluster && a.Namespace == b.Namespace && a.SecretName == b.SecretName &&
+			slices.Equal(sortedCopy(a.Keys), sortedCopy(b.Keys))
+	})
+}
+
+func mapSecretToState(s *client.Secret, etag string, state *SecretResourceModel) {
 	state.Name = types.StringValue(s.Name)
 	state.SecretPath = types.StringValue(s.SecretPath)
 	state.ETag = types.StringValue(etag)
 	state.CreatedAt = types.StringValue(s.CreatedAt)
-
-	if s.Status != nil {
-		state.Phase = types.StringValue(s.Status.Phase)
-	} else {
-		state.Phase = types.StringValue("")
-	}
-
-	// kupe-api always returns "sync": [] when a secret has no sync targets
-	// (transformSecret builds the field via sliceField, which never emits
-	// null/absent), so the wire response cannot distinguish "sync never
-	// set" from "user cleared sync". Disambiguate from the model instead:
-	// state holds the planned (Create/Update) or prior (Read) value, so
-	// when the server reports no targets and that value is null, keep
-	// null. Otherwise map what the server sent — including an empty list
-	// for explicit sync = [] configs. Without this, a config omitting
-	// sync (planned value: null) fails every apply with "Provider
-	// produced inconsistent result after apply" and shows a perpetual
-	// [] -> null diff on refresh.
+	state.Phase = types.StringValue(secretPhase(s))
+	state.SyncStatus = secretSyncStatus(s.Status)
+	// API [] cannot distinguish an omitted sync from an explicitly empty
+	// list; retain the planned/prior null for existing configurations.
 	if len(s.Sync) == 0 && state.Sync.IsNull() {
 		state.Sync = types.ListNull(types.ObjectType{AttrTypes: syncTargetAttrTypes})
-	} else {
-		syncElements := make([]attr.Value, 0, len(s.Sync))
-		for _, t := range s.Sync {
-			secretName := types.StringNull()
-			if t.SecretName != "" {
-				secretName = types.StringValue(t.SecretName)
-			}
-			attrs := map[string]attr.Value{
-				"cluster":     types.StringValue(t.Cluster),
-				"namespace":   types.StringValue(t.Namespace),
-				"secret_name": secretName,
-			}
-			objVal, d := types.ObjectValue(syncTargetAttrTypes, attrs)
-			diags.Append(d...)
-			syncElements = append(syncElements, objVal)
-		}
-		listVal, d := types.ListValue(types.ObjectType{AttrTypes: syncTargetAttrTypes}, syncElements)
-		diags.Append(d...)
-		state.Sync = listVal
+		return
 	}
+	elems := make([]attr.Value, 0, len(s.Sync))
+	for _, target := range s.Sync {
+		name := types.StringNull()
+		if target.SecretName != "" {
+			name = types.StringValue(target.SecretName)
+		}
+		keys := types.SetNull(types.StringType)
+		if len(target.Keys) > 0 {
+			keys = stringSet(target.Keys)
+		}
+		elems = append(elems, types.ObjectValueMust(syncTargetAttrTypes, map[string]attr.Value{
+			"cluster": types.StringValue(target.Cluster), "namespace": types.StringValue(target.Namespace),
+			"secret_name": name, "keys": keys,
+		}))
+	}
+	state.Sync = types.ListValueMust(types.ObjectType{AttrTypes: syncTargetAttrTypes}, elems)
+}
+
+func secretSyncStatus(status *client.SecretStatus) types.List {
+	var sorted []client.SecretTargetStatus
+	if status != nil {
+		sorted = slices.Clone(status.SyncStatuses)
+	}
+	slices.SortFunc(sorted, func(a, b client.SecretTargetStatus) int {
+		if c := strings.Compare(a.Cluster, b.Cluster); c != 0 {
+			return c
+		}
+		if c := strings.Compare(a.Namespace, b.Namespace); c != 0 {
+			return c
+		}
+		if c := strings.Compare(a.SecretName, b.SecretName); c != 0 {
+			return c
+		}
+		if c := strings.Compare(a.Phase, b.Phase); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Reason, b.Reason)
+	})
+	elems := make([]attr.Value, 0, len(sorted))
+	for _, target := range sorted {
+		elems = append(elems, types.ObjectValueMust(secretTargetStatusType.AttrTypes, map[string]attr.Value{
+			"cluster": types.StringValue(target.Cluster), "namespace": types.StringValue(target.Namespace),
+			"secret_name": types.StringValue(target.SecretName), "phase": types.StringValue(target.Phase), "reason": types.StringValue(target.Reason),
+		}))
+	}
+	return types.ListValueMust(secretTargetStatusType, elems)
 }

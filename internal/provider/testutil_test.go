@@ -99,6 +99,7 @@ type mockKupeAPI struct {
 	// The registry, its cluster connections and access tokens
 	// (testutil_registry_test.go).
 	mockRegistryState
+	mockSecretState
 }
 
 // mockRequest is a request the mock received: its method, If-Match and body.
@@ -411,71 +412,9 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 			mustEncodeJSON(w, map[string]string{"error": "not found"})
 		}
 
-	// Secrets
-	case r.Method == "POST" && r.URL.Path == "/api/v1/tenants/acme/secrets":
-		var body map[string]any
-		mustDecodeJSON(r, &body)
-		name := body["name"].(string)
-		rv := m.nextRV()
-		secret := map[string]any{
-			"name": name, "secretPath": body["secretPath"],
-			// Mirror kupe-api's transformSecret/sliceField contract: the
-			// response ALWAYS contains "sync": [] when no targets are set,
-			// never null/absent (kupe-api internal/server/handlers.go).
-			"sync":            sliceOrEmpty(body["sync"]),
-			"status":          map[string]any{"phase": "Pending"},
-			"resourceVersion": rv, "createdAt": "2024-01-01T00:00:00Z",
-		}
-		m.secrets[name] = secret
-		w.Header().Set("ETag", `"`+rv+`"`)
-		w.WriteHeader(201)
-		mustEncodeJSON(w, secret)
-
-	case r.Method == "GET" && matchPath(r.URL.Path, "/api/v1/tenants/acme/secrets/"):
-		name := lastSegment(r.URL.Path)
-		if s, ok := m.secrets[name]; ok {
-			// Same Pending → ready transition as the cluster handler;
-			// see that block for the reasoning. ManagedSecret reaches
-			// Active once ExternalSecrets has synced to every target.
-			if status, ok := s["status"].(map[string]any); ok {
-				if status["phase"] == "Pending" {
-					status["phase"] = "Active"
-				}
-			}
-			w.Header().Set("ETag", `"`+s["resourceVersion"].(string)+`"`)
-			mustEncodeJSON(w, s)
-		} else {
-			w.WriteHeader(404)
-			mustEncodeJSON(w, map[string]string{"error": "not found"})
-		}
-
-	case r.Method == "PATCH" && matchPath(r.URL.Path, "/api/v1/tenants/acme/secrets/"):
-		name := lastSegment(r.URL.Path)
-		s, ok := m.secrets[name]
-		if !ok {
-			w.WriteHeader(404)
-			mustEncodeJSON(w, map[string]string{"error": "not found"})
-			return
-		}
-		var body map[string]any
-		mustDecodeJSON(r, &body)
-		if v, ok := body["sync"]; ok {
-			s["sync"] = sliceOrEmpty(v)
-		}
-		rv := m.nextRV()
-		s["resourceVersion"] = rv
-		w.Header().Set("ETag", `"`+rv+`"`)
-		mustEncodeJSON(w, s)
-
-	case r.Method == "DELETE" && matchPath(r.URL.Path, "/api/v1/tenants/acme/secrets/"):
-		name := lastSegment(r.URL.Path)
-		if _, ok := m.secrets[name]; ok {
-			delete(m.secrets, name)
-			w.WriteHeader(204)
-		} else {
-			w.WriteHeader(404)
-			mustEncodeJSON(w, map[string]string{"error": "not found"})
-		}
+	// Secret routes and scripted delivery observations live together.
+	case r.URL.Path == "/api/v1/tenants/acme/secrets" || matchPath(r.URL.Path, "/api/v1/tenants/acme/secrets/"):
+		m.handleSecret(w, r)
 
 	// Alertmanager — receivers. Both PUT echoes and GETs mask
 	// credential-bearing values with "<secret>", mirroring kupe-api's

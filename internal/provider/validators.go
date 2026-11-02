@@ -179,3 +179,26 @@ func registryStorageLimitValidators() []validator.String {
 		stringvalidator.RegexMatches(regexp.MustCompile(`[1-9]`), "must be more than zero"),
 	}
 }
+
+// configMapKey mirrors Kubernetes IsConfigMapKey without adding a Kubernetes
+// dependency: ASCII [-._a-zA-Z0-9], 1-253 bytes, excluding the filesystem
+// traversal names checked by hasChDirPrefix in Kubernetes validation.
+type configMapKey struct{}
+
+var configMapKeyPattern = regexp.MustCompile(`^[-._a-zA-Z0-9]+$`)
+
+func (v configMapKey) Description(_ context.Context) string {
+	return "must be 1 to 253 ASCII letters, digits, '-', '_' or '.', excluding '.', '..' and names starting with '..'"
+}
+
+func (v configMapKey) MarkdownDescription(ctx context.Context) string { return v.Description(ctx) }
+
+func (v configMapKey) ValidateString(ctx context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsUnknown() {
+		return
+	}
+	key := req.ConfigValue.ValueString()
+	if req.ConfigValue.IsNull() || len(key) > 253 || !configMapKeyPattern.MatchString(key) || key == "." || strings.HasPrefix(key, "..") {
+		resp.Diagnostics.AddAttributeError(req.Path, "Invalid secret key", v.Description(ctx)+".")
+	}
+}
