@@ -8,6 +8,7 @@ import (
 // Secret represents a managed secret in the API response.
 type Secret struct {
 	Name            string        `json:"name"`
+	Generation      int64         `json:"generation"`
 	SecretPath      string        `json:"secretPath"`
 	Sync            []SyncTarget  `json:"sync,omitempty"`
 	Status          *SecretStatus `json:"status,omitempty"`
@@ -17,14 +18,28 @@ type Secret struct {
 
 // SyncTarget defines a cluster/namespace to sync a secret to.
 type SyncTarget struct {
-	Cluster    string `json:"cluster"`
-	Namespace  string `json:"namespace"`
-	SecretName string `json:"secretName,omitempty"`
+	Cluster    string   `json:"cluster"`
+	Namespace  string   `json:"namespace"`
+	SecretName string   `json:"secretName,omitempty"`
+	Keys       []string `json:"keys,omitempty"`
 }
 
 // SecretStatus contains secret status fields.
 type SecretStatus struct {
-	Phase string `json:"phase"`
+	Phase              string               `json:"phase"`
+	ObservedGeneration int64                `json:"observedGeneration"`
+	Conditions         []Condition          `json:"conditions,omitempty"`
+	SyncStatuses       []SecretTargetStatus `json:"syncStatuses,omitempty"`
+}
+
+// SecretTargetStatus describes delivery into one cluster namespace. Refresh
+// tokens and delivery timestamps are deliberately not read into provider state.
+type SecretTargetStatus struct {
+	Cluster    string `json:"cluster"`
+	Namespace  string `json:"namespace"`
+	SecretName string `json:"secretName,omitempty"`
+	Phase      string `json:"phase"`
+	Reason     string `json:"reason,omitempty"`
 }
 
 // CreateSecretRequest is the body for creating a secret. `sync` is sent

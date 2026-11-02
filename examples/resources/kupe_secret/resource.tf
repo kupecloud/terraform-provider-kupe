@@ -6,6 +6,7 @@ resource "kupe_secret" "app_config" {
     {
       cluster   = "prod"
       namespace = "hello"
+      keys      = ["username", "password"]
     },
     {
       cluster   = "staging"
