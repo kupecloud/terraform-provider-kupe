@@ -180,5 +180,7 @@ Remaining, in priority order:
 
 ## Related
 
+The write-only secret tests run in the existing gate workflow against four pinned CLIs: OpenTofu 1.11.0 and 1.13.2, and Terraform 1.11.1 and 1.17.1. Each entry runs the complete unit and mock-backed acceptance suite through `.github/hooks/go-unit-tests.sh`, with its runtime's provider registry host. The hook honours `TF_ACC_TERRAFORM_PATH` and `TF_ACC_PROVIDER_HOST` for the same local matrix. The secret tests inspect real saved-plan and state JSON, enforce the planned source version, and count PUTs across refused, uncertain and confirmed writes. Run the entire matrix before claiming any pinned version has passed.
+
 - [kupe-api testing guide](https://github.com/kupecloud/kupe-api/blob/main/docs/testing.md) — three-layer pattern (unit, kind-backed e2e, live).
 - [kupe-tests](https://github.com/kupecloud/kupe-tests) — shared fixtures (the kupe-test tenant lives there) and k6 load tests.

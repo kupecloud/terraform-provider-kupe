@@ -182,7 +182,7 @@ func IsNotFound(err error) bool {
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
 		return apiErr.StatusCode == http.StatusNotFound &&
-			apiErr.Code != CodeDatabasesUnavailable && apiErr.Code != CodeRegistriesUnavailable && apiErr.Code != CodeAppsUnavailable
+			apiErr.Code != CodeDatabasesUnavailable && apiErr.Code != CodeRegistriesUnavailable && apiErr.Code != CodeAppsUnavailable && apiErr.Code != CodeVaultNotConfigured
 	}
 	return false
 }
@@ -223,6 +223,12 @@ func (c *Client) request(ctx context.Context, method, path string, body, result 
 // requestWithETag executes an HTTP request with optional If-Match header.
 // Returns the ETag from the response.
 func (c *Client) requestWithETag(ctx context.Context, method, path, etag string, body, result any) (string, error) {
+	return c.requestWithPrecondition(ctx, method, path, etag, "", body, result)
+}
+
+// requestWithPrecondition shares encoding, authentication and error handling
+// for both conditional updates and create-only Vault writes.
+func (c *Client) requestWithPrecondition(ctx context.Context, method, path, etag, noneMatch string, body, result any) (string, error) {
 	// POSTs are non-idempotent (see the CheckRetry policy in New): tag the
 	// context so the transport does not retry them on a transient failure.
 	if method == http.MethodPost {
@@ -253,6 +259,9 @@ func (c *Client) requestWithETag(ctx context.Context, method, path, etag string,
 
 	if etag != "" {
 		req.Header.Set("If-Match", etag)
+	}
+	if noneMatch != "" {
+		req.Header.Set("If-None-Match", noneMatch)
 	}
 
 	resp, err := c.httpClient.Do(req)

@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 )
 
@@ -30,16 +31,25 @@ type SecretStatus struct {
 	ObservedGeneration int64                `json:"observedGeneration"`
 	Conditions         []Condition          `json:"conditions,omitempty"`
 	SyncStatuses       []SecretTargetStatus `json:"syncStatuses,omitempty"`
+	Refresh            *SecretRefreshStatus `json:"refresh,omitempty"`
+}
+
+// SecretRefreshStatus contains opaque delivery tokens, never secret values.
+type SecretRefreshStatus struct {
+	RequestedAt string `json:"requestedAt"`
+	ObservedAt  string `json:"observedAt"`
+	Pending     bool   `json:"pending"`
 }
 
 // SecretTargetStatus describes delivery into one cluster namespace. Refresh
 // tokens and delivery timestamps are deliberately not read into provider state.
 type SecretTargetStatus struct {
-	Cluster    string `json:"cluster"`
-	Namespace  string `json:"namespace"`
-	SecretName string `json:"secretName,omitempty"`
-	Phase      string `json:"phase"`
-	Reason     string `json:"reason,omitempty"`
+	Cluster          string `json:"cluster"`
+	Namespace        string `json:"namespace"`
+	SecretName       string `json:"secretName,omitempty"`
+	Phase            string `json:"phase"`
+	Reason           string `json:"reason,omitempty"`
+	DeliveredRefresh string `json:"deliveredRefresh,omitempty"`
 }
 
 // CreateSecretRequest is the body for creating a secret. `sync` is sent
@@ -94,4 +104,19 @@ func (c *Client) UpdateSecret(ctx context.Context, name, etag string, req PatchS
 func (c *Client) DeleteSecret(ctx context.Context, name string) error {
 	_, err := c.request(ctx, http.MethodDelete, c.tenantPath("secrets", name), nil, nil)
 	return err
+}
+
+// RefreshSecret requests delivery and returns the accepted opaque token.
+func (c *Client) RefreshSecret(ctx context.Context, name string) (string, error) {
+	var response struct {
+		RequestedAt string `json:"requestedAt"`
+	}
+	_, err := c.request(ctx, http.MethodPost, c.tenantPath("secrets", name, "refresh"), nil, &response)
+	if err != nil {
+		return "", err
+	}
+	if response.RequestedAt == "" {
+		return "", fmt.Errorf("secret refresh returned no delivery token")
+	}
+	return response.RequestedAt, nil
 }

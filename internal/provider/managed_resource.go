@@ -74,6 +74,12 @@ func (t operationTimeouts) of(op string) time.Duration {
 
 // readiness says what Create and Update wait for.
 type readiness[M, A any] struct {
+	// waitOnRead also waits when an update changed only an external source
+	// (secret values) and no definition PATCH was needed.
+	waitOnRead bool
+	// createTimeoutWarning preserves an accepted definition after a confirmed
+	// external value write. Only timeout is downgraded; failures stay errors.
+	createTimeoutWarning bool
 	// target is the phase waited for, as diagnostics name it: "Running".
 	target string
 	// phase is obj's phase, "" when unknown.
@@ -173,6 +179,13 @@ func (r *managedResource[M, A]) update(
 		}
 		r.kind.mapToState(obj, etag, plan)
 		diags.Append(state.Set(ctx, plan)...)
+		if wait && r.kind.ready.waitOnRead && !diags.HasError() {
+			timeout, d := r.kind.timeoutsOf(plan).Update(ctx, r.kind.defaults.update)
+			diags.Append(d...)
+			if !diags.HasError() {
+				r.waitForReady(ctx, timeout, "update", obj, plan, state, diags)
+			}
+		}
 		return
 	}
 
@@ -305,6 +318,10 @@ func (r *managedResource[M, A]) waitForReady(
 		// change, and the next plan would show nothing to do.
 		diags.AddError(r.kind.noun+" update not applied", r.notAppliedDetail(m, last))
 	default:
+		if op == "create" && ready.createTimeoutWarning && errors.Is(err, context.DeadlineExceeded) {
+			diags.AddWarning(r.kind.noun+" delivery still in progress", ready.timedOutDetail(m, last))
+			return
+		}
 		diags.AddError(fmt.Sprintf("%s %s timed out while %s", r.kind.noun, op, phase),
 			r.timedOutDetail(op, timeout, m, last))
 	}

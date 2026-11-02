@@ -16,6 +16,19 @@ type mockSecretState struct {
 	secretGetErrorStatus  int
 	// Positive: GETs before 404; -1: withdrawal never finishes.
 	secretDeleteLag int
+	vaultEntries    map[string]*mockVaultEntry
+	vaultRequests   []mockVaultRequest
+	vaultBeforePut  func()
+	// Runs once only after a value PUT is confirmed, so a planning read
+	// cannot consume a fault intended for the following delivery request.
+	vaultAfterPut            func()
+	vaultFaults              []mockVaultFault
+	vaultReadStatus          int
+	vaultReadCode            string
+	vaultReadValues          bool
+	vaultSkipStamp           bool
+	secretRefreshes          int
+	secretRefreshErrorStatus int
 }
 
 func (m *mockKupeAPI) handleSecret(w http.ResponseWriter, r *http.Request) {
@@ -124,8 +137,9 @@ func mockSecretDeliveredStatus(s map[string]any) map[string]any {
 			name = strOrEmpty(s["name"])
 		}
 		statuses = append(statuses, map[string]any{"cluster": target["cluster"], "namespace": target["namespace"],
-			"secretName": name, "phase": "Synced", "reason": "Delivered"})
+			"secretName": name, "phase": "Synced", "reason": "Delivered", "deliveredRefresh": s["_refresh"]})
 	}
 	return map[string]any{"phase": "Active", "observedGeneration": s["generation"], "syncStatuses": statuses,
+		"refresh":    map[string]any{"requestedAt": s["_refresh"], "observedAt": s["_refresh"], "pending": false},
 		"conditions": []any{map[string]any{"type": "Ready", "status": "True", "reason": "Delivered"}}}
 }

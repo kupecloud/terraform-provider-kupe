@@ -45,7 +45,7 @@ func TestGetSecretDeliveryContract(t *testing.T) {
 	defer mock.close()
 	mock.on("GET", "/api/v1/tenants/acme/secrets/config", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"name":"config","generation":4,"sync":[{"cluster":"prod","namespace":"app","keys":["password","username"]}],"status":{"phase":"Active","observedGeneration":3,"conditions":[{"type":"Ready","status":"False","reason":"Updating"}],"syncStatuses":[{"cluster":"prod","namespace":"app","secretName":"config","phase":"Pending","reason":"AwaitingCopy","deliveredRefresh":"ignored","lastDeliveredAt":"ignored"}]}}`))
+		_, _ = w.Write([]byte(`{"name":"config","generation":4,"sync":[{"cluster":"prod","namespace":"app","keys":["password","username"]}],"status":{"phase":"Active","observedGeneration":3,"conditions":[{"type":"Ready","status":"False","reason":"Updating"}],"syncStatuses":[{"cluster":"prod","namespace":"app","secretName":"config","phase":"Pending","reason":"AwaitingCopy","deliveredRefresh":"opaque-delivery-token","lastDeliveredAt":"ignored"}]}}`))
 	})
 	s, _, err := mock.client("acme").GetSecret(context.Background(), "config")
 	if err != nil {
@@ -60,8 +60,20 @@ func TestGetSecretDeliveryContract(t *testing.T) {
 	if ConditionReason(s.Status.Conditions, "Ready") != "Updating" {
 		t.Fatal("conditions contract not decoded")
 	}
-	if len(s.Status.SyncStatuses) != 1 || s.Status.SyncStatuses[0] != (SecretTargetStatus{Cluster: "prod", Namespace: "app", SecretName: "config", Phase: "Pending", Reason: "AwaitingCopy"}) {
+	if len(s.Status.SyncStatuses) != 1 || s.Status.SyncStatuses[0] != (SecretTargetStatus{Cluster: "prod", Namespace: "app", SecretName: "config", Phase: "Pending", Reason: "AwaitingCopy", DeliveredRefresh: "opaque-delivery-token"}) {
 		t.Fatal("target status contract not decoded")
+	}
+	// The refresh token is available to delivery waits; unknown timestamps stay ignored.
+	targetJSON, err := json.Marshal(s.Status.SyncStatuses[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var targetFields map[string]json.RawMessage
+	if err := json.Unmarshal(targetJSON, &targetFields); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := targetFields["lastDeliveredAt"]; present {
+		t.Fatal("unknown delivery timestamp was retained")
 	}
 }
 

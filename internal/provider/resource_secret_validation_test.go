@@ -121,6 +121,8 @@ func (p *legacySecretProvider) Resources(context.Context) []func() resource.Reso
 
 type legacySecretResource struct{ *SecretResource }
 
+func (*legacySecretResource) ConfigValidators(context.Context) []resource.ConfigValidator { return nil }
+
 var legacySyncTypes = map[string]attr.Type{"cluster": types.StringType, "namespace": types.StringType, "secret_name": types.StringType}
 
 type legacySecretModel struct {
@@ -136,6 +138,9 @@ type legacySecretModel struct {
 func (r *legacySecretResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	r.SecretResource.Schema(ctx, req, resp)
 	delete(resp.Schema.Attributes, "sync_status")
+	delete(resp.Schema.Attributes, "values_wo")
+	delete(resp.Schema.Attributes, "values_wo_version")
+	delete(resp.Schema.Attributes, "source_version")
 	sync := resp.Schema.Attributes["sync"].(schema.ListNestedAttribute)
 	delete(sync.NestedObject.Attributes, "keys")
 	resp.Schema.Attributes["sync"] = sync
