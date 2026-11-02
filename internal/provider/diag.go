@@ -235,7 +235,7 @@ func isTerminalAPIError(err error) bool {
 		return true
 	case http.StatusNotFound:
 		// A disabled feature does not come back by waiting.
-		return apiErr.Code == client.CodeDatabasesUnavailable || apiErr.Code == client.CodeRegistriesUnavailable
+		return apiErr.Code == client.CodeDatabasesUnavailable || apiErr.Code == client.CodeRegistriesUnavailable || apiErr.Code == client.CodeAppsUnavailable
 	default:
 		return false
 	}
@@ -317,6 +317,9 @@ func apiErrorDetail(err error) string {
 	case http.StatusNotFound:
 		if apiErr.Code == client.CodeDatabasesUnavailable {
 			return base + "\n\nDatabases are not enabled for this Kupe Cloud environment. Existing databases can still be read, have deletion protection turned off, and be deleted, and their bindings deleted or have namespaces removed; other changes are refused. Terraform state is kept unchanged. Contact Kupe Cloud support if you expected databases to be available."
+		}
+		if apiErr.Code == client.CodeAppsUnavailable {
+			return base + "\n\nApps are not enabled for this Kupe Cloud environment. Existing apps and environments can still be read and deleted, and deletion protection can be turned off; other changes are refused. Terraform state is kept unchanged."
 		}
 		if apiErr.Code == client.CodeRegistriesUnavailable {
 			return base + "\n\n" + registriesUnavailableHint

@@ -28,6 +28,7 @@ the rest of your infrastructure code.
 
 ## What the provider manages
 
+* apps with `kupe_app`, deployed per environment with `kupe_app_environment`
 * clusters with `kupe_cluster`
 * PostgreSQL databases with `kupe_database`, bound into cluster
   namespaces with `kupe_database_binding`

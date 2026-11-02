@@ -49,7 +49,7 @@ func (p *KupeProvider) Metadata(_ context.Context, _ provider.MetadataRequest, r
 
 func (p *KupeProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manage Kupe Cloud tenant resources including clusters, databases, the container registry, secrets, members, and API keys.",
+		Description: "Manage Kupe Cloud tenant resources including apps and their environments, clusters, databases, the container registry, secrets, members, and API keys.",
 		Attributes: map[string]schema.Attribute{
 			"host": schema.StringAttribute{
 				Description: "Kupe API base URL, for example https://api.kupe.cloud. Use HTTPS for normal environments. HTTP is only allowed for local development hosts such as localhost. Can also be set with KUPE_HOST.",
@@ -140,6 +140,8 @@ func configureClient(providerData any, diags *diag.Diagnostics) *client.Client {
 func (p *KupeProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		NewClusterResource,
+		NewAppResource,
+		NewAppEnvironmentResource,
 		NewSecretResource,
 		NewTenantMemberResource,
 		NewAPIKeyResource,

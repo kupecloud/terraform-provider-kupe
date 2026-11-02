@@ -6,7 +6,7 @@ description: |-
 
 # Kupe Provider
 
-The Kupe provider manages tenant-scoped Kupe Cloud resources including clusters, databases, the container registry, secrets, members, API keys, and per-tenant Alertmanager configuration.
+The Kupe provider manages tenant-scoped Kupe Cloud resources including apps and their environments, clusters, databases, the container registry, secrets, members, API keys, and per-tenant Alertmanager configuration.
 
 Use it when you want:
 
@@ -42,6 +42,8 @@ For normal environments, use an `https://` API host. Plain HTTP is only supporte
 
 ## Available Resources
 
+- `kupe_app`
+- `kupe_app_environment`
 - `kupe_cluster`
 - `kupe_database`
 - `kupe_database_binding`
