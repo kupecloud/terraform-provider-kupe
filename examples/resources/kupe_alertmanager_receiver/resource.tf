@@ -1,5 +1,5 @@
 # A Slack notification receiver. The body_json field accepts the standard
-# Alertmanager receiver schema — see
+# Alertmanager receiver schema. See
 # https://prometheus.io/docs/alerting/latest/configuration/#receiver
 # for the full set of supported sub-blocks (slack_configs, email_configs,
 # webhook_configs, pagerduty_configs, msteams_configs, etc.).
@@ -30,7 +30,7 @@ resource "kupe_alertmanager_receiver" "pagerduty" {
 }
 
 # Sensitive inputs come from variables so the state file does not contain
-# secrets. The Mimir gateway never sees the variable contents in plaintext —
+# secrets. The Mimir gateway never sees the variable contents in plaintext:
 # kupe-api validates the receiver, then forwards it to Mimir's storage layer.
 variable "slack_webhook_url" {
   type      = string

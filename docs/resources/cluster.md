@@ -38,12 +38,12 @@ resource "kupe_cluster" "prod" {
 }
 
 # HA cluster: 3 replicas, chart-managed external etcd StatefulSet, hard
-# anti-affinity, encrypted etcd at rest. Adds an hourly charge — see
+# anti-affinity, encrypted etcd at rest. Adds an hourly charge; see
 # your plan's HA rate.
 #
 # `high_availability` is create-time-only. Changing this attribute on an
 # existing resource forces Terraform to replace (destroy + create) the
-# cluster — there is no in-place migration. Plan a blue-green swap via
+# cluster. There is no in-place migration. Plan a blue-green swap via
 # GitOps if you need HA on an existing cluster.
 resource "kupe_cluster" "prod_eu1" {
   name              = "prod-eu1"
@@ -79,13 +79,13 @@ output "prod_eu1_ha_ready" {
 
 ### Optional
 
-- `display_name` (String, Deprecated) **Deprecated.** Kupe clusters have no separate display name — `name` is the user-facing identifier everywhere (console, CLI, kubeconfig contexts). The value is accepted and ignored by the API and is kept in state exactly as configured; remove it from your configuration. Until provider v1.6.1 this attribute was required and compared against an empty API echo, which tainted every freshly created cluster with "inconsistent result after apply" and replaced it on the next apply.
-- `high_availability` (Boolean) Enable a 3-replica HA control plane with HA etcd (chart-managed external etcd StatefulSet), hard anti-affinity, and encrypted-at-rest etcd via a per-cluster AES-CBC key. Adds an hourly charge — see `data.kupe_plan` for the rate. When unset, a new cluster is created without HA and an existing or imported cluster keeps its current setting, so removing the attribute from configuration does not turn HA off.
+- `display_name` (String, Deprecated) **Deprecated.** Kupe clusters have no separate display name: `name` is the user-facing identifier everywhere (console, CLI, kubeconfig contexts). The value is accepted and ignored by the API and is kept in state exactly as configured; remove it from your configuration. Until provider v1.6.1 this attribute was required and compared against an empty API echo, which tainted every freshly created cluster with "inconsistent result after apply" and replaced it on the next apply.
+- `high_availability` (Boolean) Enable a 3-replica HA control plane with HA etcd (chart-managed external etcd StatefulSet), hard anti-affinity, and encrypted-at-rest etcd via a per-cluster AES-CBC key. Adds an hourly charge (see `data.kupe_plan` for the rate). When unset, a new cluster is created without HA and an existing or imported cluster keeps its current setting, so removing the attribute from configuration does not turn HA off.
 
-**Create-time-only.** This attribute is effectively immutable: changing it on an existing resource forces Terraform to **replace** the cluster (destroy + create). The operator rejects both directions of the toggle with canonical error codes (`HA_ENABLE_ON_EXISTING_UNSUPPORTED`, `HA_DISABLE_UNSUPPORTED`) — `RequiresReplace` here makes Terraform's plan reflect that reality up front. Use a blue-green swap workflow if you need HA on an existing cluster: create a new HA cluster, redeploy via GitOps, swap traffic, then destroy the old.
-- `resources` (Attributes) Resource limits for the cluster. Updates send a partial PATCH that includes only the fields present in this block — fields you omit are **left unchanged** on the server. To change an individual field, write it explicitly. Removing the entire `resources` block sends an empty `resources` object to the server to request clearing the limits. (see [below for nested schema](#nestedatt--resources))
+**Create-time-only.** This attribute is effectively immutable: changing it on an existing resource forces Terraform to **replace** the cluster (destroy + create). The operator rejects both directions of the toggle with canonical error codes (`HA_ENABLE_ON_EXISTING_UNSUPPORTED`, `HA_DISABLE_UNSUPPORTED`), so `RequiresReplace` here makes Terraform's plan reflect that reality up front. Use a blue-green swap workflow if you need HA on an existing cluster: create a new HA cluster, redeploy via GitOps, swap traffic, then destroy the old.
+- `resources` (Attributes) Resource limits for the cluster. Updates send a partial PATCH that includes only the fields present in this block: fields you omit are **left unchanged** on the server. To change an individual field, write it explicitly. Removing the entire `resources` block sends an empty `resources` object to the server to request clearing the limits. (see [below for nested schema](#nestedatt--resources))
 - `timeouts` (Attributes) (see [below for nested schema](#nestedatt--timeouts))
-- `type` (String, Deprecated) **Deprecated.** Cluster type. Only `shared` is supported today — the operator rejects `dedicated` with the canonical `CLUSTER_DEDICATED_UNSUPPORTED` error code. Leave unset (the provider defaults to `shared`) or omit from your configuration entirely. The attribute remains in the schema so that existing state migrates cleanly; future support for dedicated nodes will likely take a different shape (per-cluster node-pool reference) rather than reviving this enum.
+- `type` (String, Deprecated) **Deprecated.** Cluster type. Only `shared` is supported today; the operator rejects `dedicated` with the canonical `CLUSTER_DEDICATED_UNSUPPORTED` error code. Leave unset (the provider defaults to `shared`) or omit from your configuration entirely. The attribute remains in the schema so that existing state migrates cleanly; future support for dedicated nodes will likely take a different shape (per-cluster node-pool reference) rather than reviving this enum.
 - `version` (String) Kubernetes version (e.g., 1.31).
 
 ### Read-Only
@@ -93,10 +93,10 @@ output "prod_eu1_ha_ready" {
 - `created_at` (String) Timestamp when the cluster was created.
 - `endpoint` (String) Cluster API server endpoint.
 - `etag` (String) Resource version used for optimistic locking during updates.
-- `ha_configured` (Boolean) True once the operator has confirmed both 3/3 apiserver replicas AND 3/3 deployed-etcd replicas are `Ready` for the first time. Etcd readiness is required because the OSS deployed-etcd path runs etcd in its own StatefulSet — quorum loss with healthy apiserver pods still blocks writes. Distinct from `high_availability` (the requested state) — read this attribute when downstream automation needs to wait for HA to be operationally available, not just toggled on.
-- `ha_enabled_at` (String) Timestamp when `ha_configured` first became true. This is the billing anchor — HA hours accrue from this moment. Stamped once, never updated, never cleared.
+- `ha_configured` (Boolean) True once the operator has confirmed both 3/3 apiserver replicas AND 3/3 deployed-etcd replicas are `Ready` for the first time. Etcd readiness is required because the OSS deployed-etcd path runs etcd in its own StatefulSet, so quorum loss with healthy apiserver pods still blocks writes. Distinct from `high_availability` (the requested state): read this attribute when downstream automation needs to wait for HA to be operationally available, not just toggled on.
+- `ha_enabled_at` (String) Timestamp when `ha_configured` first became true. This is the billing anchor: HA hours accrue from this moment. Stamped once, never updated, never cleared.
 - `ha_etcd_replicas_desired` (Number) Target HA etcd replica count (3 when `high_availability = true`, 0 otherwise).
-- `ha_etcd_replicas_ready` (Number) Count of deployed-etcd replicas currently `Ready`. Exposed separately because the OSS deployed-etcd path runs etcd in its own StatefulSet — etcd quorum loss leaves the cluster unable to serve writes even when the apiserver replicas are healthy.
+- `ha_etcd_replicas_ready` (Number) Count of deployed-etcd replicas currently `Ready`. Exposed separately because the OSS deployed-etcd path runs etcd in its own StatefulSet, so etcd quorum loss leaves the cluster unable to serve writes even when the apiserver replicas are healthy.
 - `ha_phase` (String) Consumer-friendly HA rollup. One of `pending`, `ha-healthy`, `ha-degraded`, `ha-unavailable`. Empty for non-HA clusters. Use this in downstream automation to branch on operational state without inspecting individual conditions.
 - `ha_replicas_desired` (Number) Target HA replica count (3 when `high_availability = true`, 0 otherwise).
 - `ha_replicas_ready` (Number) Count of HA control-plane (apiserver) replicas currently `Ready`. Zero for non-HA clusters.

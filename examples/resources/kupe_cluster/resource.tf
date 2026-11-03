@@ -10,12 +10,12 @@ resource "kupe_cluster" "prod" {
 }
 
 # HA cluster: 3 replicas, chart-managed external etcd StatefulSet, hard
-# anti-affinity, encrypted etcd at rest. Adds an hourly charge — see
+# anti-affinity, encrypted etcd at rest. Adds an hourly charge; see
 # your plan's HA rate.
 #
 # `high_availability` is create-time-only. Changing this attribute on an
 # existing resource forces Terraform to replace (destroy + create) the
-# cluster — there is no in-place migration. Plan a blue-green swap via
+# cluster. There is no in-place migration. Plan a blue-green swap via
 # GitOps if you need HA on an existing cluster.
 resource "kupe_cluster" "prod_eu1" {
   name              = "prod-eu1"

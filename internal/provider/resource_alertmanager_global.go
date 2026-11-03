@@ -67,7 +67,7 @@ func (r *AlertmanagerGlobalResource) Metadata(_ context.Context, req resource.Me
 func (r *AlertmanagerGlobalResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Manages the `global` section of the Alertmanager configuration for a tenant. " +
-			"Singleton — only one of these resources should exist per tenant.",
+			"Singleton: only one of these resources should exist per tenant.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Always equal to the singleton constant `alertmanager-global`. Singleton-per-tenant resource.",
@@ -81,7 +81,7 @@ func (r *AlertmanagerGlobalResource) Schema(_ context.Context, _ resource.Schema
 					"to author. See the upstream Alertmanager docs for the field list. Marked " +
 					"sensitive because global config commonly includes SMTP credentials, " +
 					"OAuth secrets, and webhook tokens; the value is still stored in plaintext " +
-					"in your Terraform state — back the state with an encrypted remote backend.",
+					"in your Terraform state, so back the state with an encrypted remote backend.",
 				Required:   true,
 				Sensitive:  true,
 				CustomType: JSONStringTypeInstance,

@@ -186,7 +186,7 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				},
 			},
 			"display_name": schema.StringAttribute{
-				Description: "**Deprecated.** Kupe clusters have no separate display name — `name` is the " +
+				Description: "**Deprecated.** Kupe clusters have no separate display name: `name` is the " +
 					"user-facing identifier everywhere (console, CLI, kubeconfig contexts). The value is accepted " +
 					"and ignored by the API and is kept in state exactly as configured; remove it from your " +
 					"configuration. Until provider v1.6.1 this attribute was required and compared against an " +
@@ -194,15 +194,15 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 					"apply\" and replaced it on the next apply.",
 				Optional: true,
 				DeprecationMessage: "`display_name` is deprecated: the cluster `name` is the display name. The " +
-					"attribute is ignored — remove it from your configuration.",
+					"attribute is ignored. Remove it from your configuration.",
 			},
 			"type": schema.StringAttribute{
-				Description: "**Deprecated.** Cluster type. Only `shared` is supported today — the operator rejects " +
+				Description: "**Deprecated.** Cluster type. Only `shared` is supported today; the operator rejects " +
 					"`dedicated` with the canonical `CLUSTER_DEDICATED_UNSUPPORTED` error code. Leave unset (the " +
 					"provider defaults to `shared`) or omit from your configuration entirely. The attribute remains " +
 					"in the schema so that existing state migrates cleanly; future support for dedicated nodes will " +
 					"likely take a different shape (per-cluster node-pool reference) rather than reviving this enum.",
-				DeprecationMessage: "`type` is deprecated. Only `shared` is supported and it's now the default — remove " +
+				DeprecationMessage: "`type` is deprecated. Only `shared` is supported and it's now the default. Remove " +
 					"this attribute from your configuration. A future provider release may drop the attribute entirely.",
 				Optional: true,
 				Computed: true,
@@ -229,7 +229,7 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 			},
 			"resources": schema.SingleNestedAttribute{
 				Description: "Resource limits for the cluster. Updates send a partial PATCH that " +
-					"includes only the fields present in this block — fields you omit are **left " +
+					"includes only the fields present in this block: fields you omit are **left " +
 					"unchanged** on the server. To change an individual field, write it explicitly. " +
 					"Removing the entire `resources` block sends an empty `resources` object to the " +
 					"server to request clearing the limits.",
@@ -264,12 +264,12 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 			"high_availability": schema.BoolAttribute{
 				Description: "Enable a 3-replica HA control plane with HA etcd (chart-managed external etcd StatefulSet), " +
 					"hard anti-affinity, and encrypted-at-rest etcd via a per-cluster AES-CBC key. " +
-					"Adds an hourly charge — see `data.kupe_plan` for the rate. When unset, a new cluster is created " +
+					"Adds an hourly charge (see `data.kupe_plan` for the rate). When unset, a new cluster is created " +
 					"without HA and an existing or imported cluster keeps its current setting, so removing the " +
 					"attribute from configuration does not turn HA off.\n\n" +
 					"**Create-time-only.** This attribute is effectively immutable: changing it on an existing resource forces " +
 					"Terraform to **replace** the cluster (destroy + create). The operator rejects both directions of the " +
-					"toggle with canonical error codes (`HA_ENABLE_ON_EXISTING_UNSUPPORTED`, `HA_DISABLE_UNSUPPORTED`) — " +
+					"toggle with canonical error codes (`HA_ENABLE_ON_EXISTING_UNSUPPORTED`, `HA_DISABLE_UNSUPPORTED`), so " +
 					"`RequiresReplace` here makes Terraform's plan reflect that reality up front. Use a blue-green swap " +
 					"workflow if you need HA on an existing cluster: create a new HA cluster, redeploy via GitOps, swap traffic, " +
 					"then destroy the old.",
@@ -296,13 +296,13 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 			"ha_configured": schema.BoolAttribute{
 				Description: "True once the operator has confirmed both 3/3 apiserver replicas AND 3/3 deployed-etcd " +
 					"replicas are `Ready` for the first time. Etcd readiness is required because the OSS deployed-etcd " +
-					"path runs etcd in its own StatefulSet — quorum loss with healthy apiserver pods still blocks " +
-					"writes. Distinct from `high_availability` (the requested state) — read this attribute when " +
+					"path runs etcd in its own StatefulSet, so quorum loss with healthy apiserver pods still blocks " +
+					"writes. Distinct from `high_availability` (the requested state): read this attribute when " +
 					"downstream automation needs to wait for HA to be operationally available, not just toggled on.",
 				Computed: true,
 			},
 			"ha_enabled_at": schema.StringAttribute{
-				Description: "Timestamp when `ha_configured` first became true. This is the billing anchor — HA hours " +
+				Description: "Timestamp when `ha_configured` first became true. This is the billing anchor: HA hours " +
 					"accrue from this moment. Stamped once, never updated, never cleared.",
 				Computed: true,
 			},
@@ -322,7 +322,7 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 			},
 			"ha_etcd_replicas_ready": schema.Int64Attribute{
 				Description: "Count of deployed-etcd replicas currently `Ready`. Exposed separately because the OSS " +
-					"deployed-etcd path runs etcd in its own StatefulSet — etcd quorum loss leaves the cluster unable " +
+					"deployed-etcd path runs etcd in its own StatefulSet, so etcd quorum loss leaves the cluster unable " +
 					"to serve writes even when the apiserver replicas are healthy.",
 				Computed: true,
 			},

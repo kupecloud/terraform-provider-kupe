@@ -85,7 +85,7 @@ func (r *AlertmanagerRoutesResource) Metadata(_ context.Context, req resource.Me
 func (r *AlertmanagerRoutesResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Manages the entire ordered list of child routes on the root Alertmanager route " +
-			"for a tenant. Singleton — only one of these resources should exist per tenant. The root " +
+			"for a tenant. Singleton: only one of these resources should exist per tenant. The root " +
 			"route itself (receiver, group_by defaults) is implicit and managed by kupe-api.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{

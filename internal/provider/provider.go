@@ -187,7 +187,7 @@ func addUnknownConfigErrors(config KupeProviderModel, diags *diag.Diagnostics) {
 			diags.AddAttributeError(
 				a.p,
 				"provider configuration value not yet known",
-				fmt.Sprintf("The %q attribute is unknown at configure time — it cannot be resolved until "+
+				fmt.Sprintf("The %q attribute is unknown at configure time. It cannot be resolved until "+
 					"apply, so the provider cannot be configured during planning. Set it to a static value, "+
 					"or leave it unset to read the corresponding KUPE_* environment variable.", a.name),
 			)

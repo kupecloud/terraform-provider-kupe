@@ -14,7 +14,7 @@ Manages a single Alertmanager receiver in the tenant's Mimir Alertmanager config
 
 ```terraform
 # A Slack notification receiver. The body_json field accepts the standard
-# Alertmanager receiver schema — see
+# Alertmanager receiver schema. See
 # https://prometheus.io/docs/alerting/latest/configuration/#receiver
 # for the full set of supported sub-blocks (slack_configs, email_configs,
 # webhook_configs, pagerduty_configs, msteams_configs, etc.).
@@ -45,7 +45,7 @@ resource "kupe_alertmanager_receiver" "pagerduty" {
 }
 
 # Sensitive inputs come from variables so the state file does not contain
-# secrets. The Mimir gateway never sees the variable contents in plaintext —
+# secrets. The Mimir gateway never sees the variable contents in plaintext:
 # kupe-api validates the receiver, then forwards it to Mimir's storage layer.
 variable "slack_webhook_url" {
   type      = string
@@ -63,7 +63,7 @@ variable "pagerduty_service_key" {
 
 ### Required
 
-- `body_json` (String, Sensitive) Alertmanager receiver body as a JSON document. Use HCL's `jsonencode()` to author the value. The `name` field is set automatically from the resource `name` attribute and any value embedded in the body is overridden. Marked sensitive because receiver bodies routinely embed credentials (Slack webhook URLs, PagerDuty service keys, SMTP passwords); the value is still stored in plaintext in your Terraform state — back the state with an encrypted remote backend.
+- `body_json` (String, Sensitive) Alertmanager receiver body as a JSON document. Use HCL's `jsonencode()` to author the value. The `name` field is set automatically from the resource `name` attribute and any value embedded in the body is overridden. Marked sensitive because receiver bodies routinely embed credentials (Slack webhook URLs, PagerDuty service keys, SMTP passwords); the value is still stored in plaintext in your Terraform state, so back the state with an encrypted remote backend.
 - `name` (String) Receiver name. Immutable after creation; rename requires destroy + create.
 
 ### Read-Only

@@ -13,7 +13,7 @@
 # from keys and apply: the same definition updates in place and sync_status
 # reaches Synced before apply returns. Remove keys to deliver the whole entry.
 # Remove the sync target and apply: wait for Withdrawing to disappear; the
-# cluster copy goes shortly after. Destroy keeps the stored OpenBao values.
+# cluster copy goes shortly after. Destroy keeps the stored Vault values.
 # Import by name and check a subsequent plan is empty with the same keys.
 
 variable "smoke_secret_values" {
@@ -40,7 +40,7 @@ resource "kupe_secret" "smoke" {
 }
 
 output "smoke_secret_source_version" {
-  description = "OpenBao version of the stored entry, read from metadata only."
+  description = "Vault version of the stored entry, read from metadata only."
   value       = kupe_secret.smoke.source_version
 }
 
