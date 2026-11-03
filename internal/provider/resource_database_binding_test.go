@@ -314,9 +314,9 @@ func testNamespaces(n int) []string {
 }
 
 // testAccRoleNotOneOf matches the framework's standard OneOf diagnostic for
-// a role that is not one of the three.
+// a role that is not one of the four.
 func testAccRoleNotOneOf(role string) string {
-	return wrappedText(fmt.Sprintf(`Attribute role value must be one of: ["owner" "readwrite" "readonly"], got: %q`, role))
+	return wrappedText(fmt.Sprintf(`Attribute role value must be one of: ["owner" "readwrite" "readonly" "custom"], got: %q`, role))
 }
 
 // TestAccDatabaseBindingResource_DatabaseNameValidated: a literal database

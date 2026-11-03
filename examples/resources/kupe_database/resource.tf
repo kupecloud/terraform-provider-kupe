@@ -1,4 +1,8 @@
 resource "kupe_database" "orders" {
+  postgres = {
+    roles      = [{ name = "sales_reports" }]
+    extensions = [{ name = "pgcrypto" }]
+  }
   name    = "orders-db"
   version = "18"
 
