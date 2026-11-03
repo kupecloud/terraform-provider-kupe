@@ -107,7 +107,7 @@ func (r *AlertmanagerReceiverResource) Schema(_ context.Context, _ resource.Sche
 					"`name` attribute and any value embedded in the body is overridden. Marked " +
 					"sensitive because receiver bodies routinely embed credentials (Slack webhook " +
 					"URLs, PagerDuty service keys, SMTP passwords); the value is still stored in " +
-					"plaintext in your Terraform state — back the state with an encrypted remote " +
+					"plaintext in your Terraform state, so back the state with an encrypted remote " +
 					"backend.",
 				Required:   true,
 				Sensitive:  true,

@@ -211,12 +211,12 @@ func (r *SecretResource) Schema(ctx context.Context, _ resource.SchemaRequest, r
 				Optional:    true, Validators: []validator.Int64{int64validator.AtLeast(1)}, // codespell:ignore atleast
 			},
 			"source_version": schema.Int64Attribute{
-				Description: "Current OpenBao entry version from metadata, or null when absent. A value write checks the version shown by the plan and refuses to overwrite a concurrent change.",
+				Description: "Current version of the Vault entry, read from its metadata, or null when there is no entry. A value write checks the version shown by the plan and refuses to overwrite a concurrent change.",
 				Computed:    true, PlanModifiers: []planmodifier.Int64{secretSourceVersionModifier{}},
 			},
 			"name": schema.StringAttribute{Description: "Secret name (immutable after creation).", Required: true,
 				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()}},
-			"secret_path": schema.StringAttribute{Description: "OpenBao KV v2 key path for the stored value. Immutable after creation.", Required: true,
+			"secret_path": schema.StringAttribute{Description: "Vault path of the stored values. Immutable after creation.", Required: true,
 				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()}},
 			"sync": schema.ListNestedAttribute{
 				Description: "Cluster/namespace targets to sync this secret to. At most 1,024 selected keys across all targets. Changes in place.",

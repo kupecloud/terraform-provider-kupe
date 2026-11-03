@@ -83,7 +83,7 @@ Delete waits for the definition to disappear. If withdrawal exceeds the delete t
 ### Required
 
 - `name` (String) Secret name (immutable after creation).
-- `secret_path` (String) OpenBao KV v2 key path for the stored value. Immutable after creation.
+- `secret_path` (String) Vault path of the stored values. Immutable after creation.
 
 ### Optional
 
@@ -99,7 +99,7 @@ Delete waits for the definition to disappear. If withdrawal exceeds the delete t
 - `created_at` (String) Timestamp when the managed secret definition was created.
 - `etag` (String) Resource version used for optimistic locking during updates.
 - `phase` (String) Current phase: Pending, Active, Degraded or Deleting. Active alone does not confirm current delivery.
-- `source_version` (Number) Current OpenBao entry version from metadata, or null when absent. A value write checks the version shown by the plan and refuses to overwrite a concurrent change.
+- `source_version` (Number) Current version of the Vault entry, read from its metadata, or null when there is no entry. A value write checks the version shown by the plan and refuses to overwrite a concurrent change.
 - `sync_status` (Attributes List) Per-target delivery status, sorted by cluster then namespace. Removed targets remain Withdrawing until the platform has withdrawn them. (see [below for nested schema](#nestedatt--sync_status))
 
 <a id="nestedatt--sync"></a>

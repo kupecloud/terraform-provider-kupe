@@ -48,8 +48,8 @@ func (d *ClusterDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 				DeprecationMessage: "`display_name` is deprecated and mirrors `name`; use `name` instead.",
 			},
 			"type": schema.StringAttribute{
-				Description: "Cluster type. Today the operator only supports `shared` — `dedicated` was reserved in " +
-					"the CRD enum but is currently rejected with `CLUSTER_DEDICATED_UNSUPPORTED`.",
+				Description: "Cluster type. Only `shared` is supported today; `dedicated` is rejected with " +
+					"`CLUSTER_DEDICATED_UNSUPPORTED`.",
 				Computed: true,
 			},
 			"version": schema.StringAttribute{
@@ -57,7 +57,7 @@ func (d *ClusterDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 				Computed:    true,
 			},
 			"high_availability": schema.BoolAttribute{
-				Description: "Whether the cluster is configured with HA (3-replica control plane). Reflects spec, not operational state — see `ha_configured`.",
+				Description: "Whether the cluster is configured with HA (3-replica control plane). Reflects the requested setting, not operational state; see `ha_configured`.",
 				Computed:    true,
 			},
 			"phase": schema.StringAttribute{
@@ -71,7 +71,7 @@ func (d *ClusterDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 			"ha_configured": schema.BoolAttribute{
 				Description: "True once the operator has confirmed both 3/3 apiserver replicas AND 3/3 deployed-etcd " +
 					"replicas are `Ready` for the first time. Etcd readiness is required because the OSS deployed-etcd " +
-					"path runs etcd in its own StatefulSet — quorum loss with healthy apiserver pods still blocks writes.",
+					"path runs etcd in its own StatefulSet, so quorum loss blocks writes even with healthy apiserver pods.",
 				Computed: true,
 			},
 			"ha_enabled_at": schema.StringAttribute{
@@ -92,7 +92,7 @@ func (d *ClusterDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 			},
 			"ha_etcd_replicas_ready": schema.Int64Attribute{
 				Description: "Count of deployed-etcd replicas currently `Ready`. Exposed separately because the OSS " +
-					"deployed-etcd path runs etcd in its own StatefulSet — quorum loss blocks writes even when the " +
+					"deployed-etcd path runs etcd in its own StatefulSet, so quorum loss blocks writes even when the " +
 					"apiserver replicas are healthy.",
 				Computed: true,
 			},

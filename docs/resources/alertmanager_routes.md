@@ -3,12 +3,12 @@
 page_title: "kupe_alertmanager_routes Resource - kupe"
 subcategory: ""
 description: |-
-  Manages the entire ordered list of child routes on the root Alertmanager route for a tenant. Singleton — only one of these resources should exist per tenant. The root route itself (receiver, group_by defaults) is implicit and managed by kupe-api.
+  Manages the entire ordered list of child routes on the root Alertmanager route for a tenant. Singleton: only one of these resources should exist per tenant. The root route itself (receiver, group_by defaults) is implicit and managed by kupe-api.
 ---
 
 # kupe_alertmanager_routes (Resource)
 
-Manages the entire ordered list of child routes on the root Alertmanager route for a tenant. Singleton — only one of these resources should exist per tenant. The root route itself (receiver, group_by defaults) is implicit and managed by kupe-api.
+Manages the entire ordered list of child routes on the root Alertmanager route for a tenant. Singleton: only one of these resources should exist per tenant. The root route itself (receiver, group_by defaults) is implicit and managed by kupe-api.
 
 ## Example Usage
 
@@ -17,12 +17,12 @@ Manages the entire ordered list of child routes on the root Alertmanager route f
 # default group_by) is implicit and managed by kupe-api; this resource owns
 # the ordered list of child routes that branch off the root.
 #
-# Routes are evaluated top-to-bottom — the first match wins (unless `continue`
+# Routes are evaluated top-to-bottom, and the first match wins (unless `continue`
 # is set on the matched route). Reordering, inserting, and removing routes are
 # all atomic single-PUT operations because the resource owns the entire list.
 
 # Two receivers the routes below dispatch to. Included inline so the example
-# stands alone — the kupe-api validator rejects route configs that reference
+# stands alone. The kupe-api validator rejects route configs that reference
 # undeclared receivers, so any real config will need at least one receiver
 # resource alongside the routes resource.
 resource "kupe_alertmanager_receiver" "slack" {
@@ -69,7 +69,7 @@ resource "kupe_alertmanager_routes" "main" {
       matchers = ["team=\"infra\""]
       receiver = "slack"
     },
-    # Catch-all for everything else — fall through to the default receiver
+    # Catch-all for everything else: fall through to the default receiver
     # by leaving `receiver` empty (inherits from the root).
     {
       matchers = ["severity=\"warning\""]

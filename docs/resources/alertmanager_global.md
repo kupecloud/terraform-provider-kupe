@@ -3,12 +3,12 @@
 page_title: "kupe_alertmanager_global Resource - kupe"
 subcategory: ""
 description: |-
-  Manages the global section of the Alertmanager configuration for a tenant. Singleton — only one of these resources should exist per tenant.
+  Manages the global section of the Alertmanager configuration for a tenant. Singleton: only one of these resources should exist per tenant.
 ---
 
 # kupe_alertmanager_global (Resource)
 
-Manages the `global` section of the Alertmanager configuration for a tenant. Singleton — only one of these resources should exist per tenant.
+Manages the `global` section of the Alertmanager configuration for a tenant. Singleton: only one of these resources should exist per tenant.
 
 ## Example Usage
 
@@ -40,7 +40,7 @@ variable "smtp_password" {
 
 ### Required
 
-- `body_json` (String, Sensitive) Alertmanager global section as a JSON document. Use HCL's `jsonencode()` to author. See the upstream Alertmanager docs for the field list. Marked sensitive because global config commonly includes SMTP credentials, OAuth secrets, and webhook tokens; the value is still stored in plaintext in your Terraform state — back the state with an encrypted remote backend.
+- `body_json` (String, Sensitive) Alertmanager global section as a JSON document. Use HCL's `jsonencode()` to author. See the upstream Alertmanager docs for the field list. Marked sensitive because global config commonly includes SMTP credentials, OAuth secrets, and webhook tokens; the value is still stored in plaintext in your Terraform state, so back the state with an encrypted remote backend.
 
 ### Read-Only
 

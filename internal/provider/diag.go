@@ -299,7 +299,7 @@ func apiErrorDetail(err error) string {
 		//     hitting case (b). Surface the message as-is.
 		return base
 	case http.StatusUnauthorized:
-		return base + "\n\nThe kupe API rejected your credentials. Verify that KUPE_API_KEY (or KUPE_TOKEN) is set and that the value is current for this tenant — API keys can be revoked from the console."
+		return base + "\n\nThe kupe API rejected your credentials. Verify that KUPE_API_KEY (or KUPE_TOKEN) is set and that the value is current for this tenant. API keys can be revoked from the console."
 	case http.StatusForbidden:
 		// Only show the role hint for true RBAC denials. The kupe-api
 		// returns "access denied" as the verbatim message for those;
@@ -355,7 +355,7 @@ func apiErrorDetail(err error) string {
 		}
 		return base
 	case http.StatusPreconditionFailed:
-		return base + "\n\nThe server-side state changed while this apply was running (ETag/If-Match mismatch). Another client modified the same resource concurrently — refresh and re-apply."
+		return base + "\n\nThe server-side state changed while this apply was running (ETag/If-Match mismatch). Another client modified the same resource concurrently. Refresh and re-apply."
 	case http.StatusTooManyRequests:
 		return base + "\n\nRate limit exceeded. Retry the operation after a short delay; large batch applies may need `-parallelism=1` against the kupe API."
 	case http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
