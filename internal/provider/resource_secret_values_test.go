@@ -713,8 +713,13 @@ func TestSecretConfirmedCreateTimeoutWarningAndTerminalError(t *testing.T) {
 			if resp.Diagnostics.HasError() != terminal {
 				t.Fatalf("wrong confirmed-create severity: %v", resp.Diagnostics)
 			}
-			if !terminal && (len(warnings(resp.Diagnostics)) != 1 || !strings.Contains(secretDiagnosticsText(resp.Diagnostics), "values saved as version 1; delivery is still in progress") || strings.Contains(secretDiagnosticsText(resp.Diagnostics), "taint")) {
+			if !terminal && (len(warnings(resp.Diagnostics)) != 1 || !strings.Contains(secretDiagnosticsText(resp.Diagnostics), "Values saved as version 1.") || strings.Contains(secretDiagnosticsText(resp.Diagnostics), "taint")) {
 				t.Error("confirmed-create timeout lost warning or gave replacement advice")
+			}
+			// The detail does not repeat the summary.
+			const want = "secret delivery still in progress: Values saved as version 1. The confirmed values_wo_version and source_version are recorded in state. Running apply again does not send the values again. Check delivery in the Kupe Console. Set a longer timeout to wait longer for future changes."
+			if w := warnings(resp.Diagnostics); !terminal && (len(w) != 1 || w[0] != want) {
+				t.Errorf("warning = %q", w)
 			}
 			var state SecretResourceModel
 			if d := resp.State.Get(context.Background(), &state); d.HasError() {

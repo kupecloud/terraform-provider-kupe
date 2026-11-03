@@ -77,9 +77,10 @@ type readiness[M, A any] struct {
 	// waitOnRead also waits when an update changed only an external source
 	// (secret values) and no definition PATCH was needed.
 	waitOnRead bool
-	// createTimeoutWarning preserves an accepted definition after a confirmed
-	// external value write. Only timeout is downgraded; failures stay errors.
-	createTimeoutWarning bool
+	// createTimeoutWarning, when set, preserves an accepted definition after
+	// a confirmed external value write: a create timeout is a warning with
+	// this detail. Only timeout is downgraded; failures stay errors.
+	createTimeoutWarning func(m *M, obj *A) string
 	// target is the phase waited for, as diagnostics name it: "Running".
 	target string
 	// phase is obj's phase, "" when unknown.
@@ -318,8 +319,8 @@ func (r *managedResource[M, A]) waitForReady(
 		// change, and the next plan would show nothing to do.
 		diags.AddError(r.kind.noun+" update not applied", r.notAppliedDetail(m, last))
 	default:
-		if op == "create" && ready.createTimeoutWarning && errors.Is(err, context.DeadlineExceeded) {
-			diags.AddWarning(r.kind.noun+" delivery still in progress", ready.timedOutDetail(m, last))
+		if op == "create" && ready.createTimeoutWarning != nil && errors.Is(err, context.DeadlineExceeded) {
+			diags.AddWarning(r.kind.noun+" delivery still in progress", ready.createTimeoutWarning(m, last))
 			return
 		}
 		diags.AddError(fmt.Sprintf("%s %s timed out while %s", r.kind.noun, op, phase),
