@@ -40,6 +40,7 @@ output "orders_db_running_version" {
 - `high_availability` (Boolean) Whether the database runs two instances with a synchronous standby.
 - `last_backup_at` (String) When the newest full backup finished (RFC 3339). Empty until the first backup completes.
 - `phase` (String) Current phase: Pending, Provisioning, Running, Degraded or Terminating.
+- `postgres` (Attributes) Declared PostgreSQL roles and extensions returned by the database. (see [below for nested schema](#nestedatt--postgres))
 - `recovery_window` (Attributes) The restore window: the oldest and newest points you can restore the database to. Null until the backups report them. (see [below for nested schema](#nestedatt--recovery_window))
 - `resources` (Attributes) Per-instance resources. (see [below for nested schema](#nestedatt--resources))
 - `source` (Attributes) What the database was restored from. Null for a database that was not restored. (see [below for nested schema](#nestedatt--source))
@@ -52,6 +53,31 @@ Read-Only:
 
 - `retention` (Number) How far back the backups reach, in days. Null when never set: the default, 7, applies.
 - `schedule` (String) How many full backups are kept within the retention period: `Daily` keeps one for every day, `DailyThenWeekly` one for each of the last 7 days and one a week before that.
+
+
+<a id="nestedatt--postgres"></a>
+### Nested Schema for `postgres`
+
+Read-Only:
+
+- `extensions` (Attributes Set) (see [below for nested schema](#nestedatt--postgres--extensions))
+- `roles` (Attributes Set) (see [below for nested schema](#nestedatt--postgres--roles))
+
+<a id="nestedatt--postgres--extensions"></a>
+### Nested Schema for `postgres.extensions`
+
+Read-Only:
+
+- `name` (String)
+
+
+<a id="nestedatt--postgres--roles"></a>
+### Nested Schema for `postgres.roles`
+
+Read-Only:
+
+- `name` (String)
+
 
 
 <a id="nestedatt--recovery_window"></a>

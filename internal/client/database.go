@@ -3,12 +3,14 @@ package client
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 )
 
 // Database is a managed database in the API response. The API never returns
 // credentials: they reach applications only through bindings.
 type Database struct {
+	Postgres           *DatabasePostgres   `json:"postgres,omitempty"`
 	Name               string              `json:"name"`
 	Engine             string              `json:"engine"`
 	Version            string              `json:"version"`
@@ -73,6 +75,7 @@ func (s *DatabaseStatus) Ready() bool {
 
 // CreateDatabaseRequest is the body for creating a database.
 type CreateDatabaseRequest struct {
+	Postgres         *DatabasePostgres   `json:"postgres,omitempty"`
 	Name             string              `json:"name"`
 	Engine           string              `json:"engine,omitempty"`
 	Version          string              `json:"version,omitempty"`
@@ -92,6 +95,7 @@ type CreateDatabaseRequest struct {
 // PatchDatabaseRequest is the JSON merge patch for a database. Nil fields
 // are left unchanged; these five are the only fields the API can change.
 type PatchDatabaseRequest struct {
+	Postgres           *DatabasePostgres   `json:"postgres,omitempty"`
 	Version            *string             `json:"version,omitempty"`
 	Resources          *ResourceQuantities `json:"resources,omitempty"`
 	HighAvailability   *bool               `json:"highAvailability,omitempty"`
@@ -104,9 +108,12 @@ type PatchDatabaseRequest struct {
 // DatabaseBinding grants one role of a database to namespaces of one
 // cluster.
 type DatabaseBinding struct {
-	Name     string `json:"name"`
-	Database string `json:"database"`
-	Cluster  string `json:"cluster"`
+	RoleName    string             `json:"roleName"`
+	Credentials BindingCredentials `json:"credentials"`
+	Generation  int64              `json:"generation"`
+	Name        string             `json:"name"`
+	Database    string             `json:"database"`
+	Cluster     string             `json:"cluster"`
 	// Namespaces are the namespaces the binding delivers into.
 	Namespaces []string `json:"namespaces"`
 	Role       string   `json:"role"`
@@ -119,6 +126,9 @@ type DatabaseBinding struct {
 
 // DatabaseBindingStatus contains binding status fields.
 type DatabaseBindingStatus struct {
+	ObservedGeneration int64            `json:"observedGeneration"`
+	ObservedRotation   string           `json:"observedRotation"`
+	Rotation           *BindingRotation `json:"rotation,omitempty"`
 	// Phase is Ready only when every listed namespace is Ready.
 	Phase string `json:"phase"`
 	// SecretName is the effective credentials Secret name in every listed
@@ -136,7 +146,8 @@ type DatabaseBindingStatus struct {
 // DatabaseBindingNamespaceStatus is what a binding delivered into one
 // namespace.
 type DatabaseBindingNamespaceStatus struct {
-	Name string `json:"name"`
+	DeliveredRotation string `json:"deliveredRotation"`
+	Name              string `json:"name"`
 	// Host is the in-cluster DNS name applications in the namespace connect
 	// to; empty while nothing is delivered.
 	Host    string `json:"host"`
@@ -192,17 +203,19 @@ func findCondition(conditions []Condition, t string) Condition {
 // CreateDatabaseBindingRequest is the body for creating a binding. The
 // database comes from the request path.
 type CreateDatabaseBindingRequest struct {
-	Name       string   `json:"name"`
-	Cluster    string   `json:"cluster"`
-	Namespaces []string `json:"namespaces"`
-	Role       string   `json:"role"`
-	SecretName string   `json:"secretName,omitempty"`
+	RoleName    string              `json:"roleName,omitempty"`
+	Credentials *BindingCredentials `json:"credentials,omitempty"`
+	Name        string              `json:"name"`
+	Cluster     string              `json:"cluster"`
+	Namespaces  []string            `json:"namespaces"`
+	Role        string              `json:"role"`
+	SecretName  string              `json:"secretName,omitempty"`
 }
 
-// PatchDatabaseBindingRequest changes a binding's namespaces, the only
-// field the API can change. Namespaces is the complete new list.
+// PatchDatabaseBindingRequest replaces namespaces and/or enables dedicated credentials.
 type PatchDatabaseBindingRequest struct {
-	Namespaces []string `json:"namespaces"`
+	Credentials *BindingCredentials `json:"credentials,omitempty"`
+	Namespaces  []string            `json:"namespaces,omitempty"`
 }
 
 // IsDeletionProtected reports whether err is the API refusing a database or
@@ -292,4 +305,42 @@ func (c *Client) UpdateDatabaseBinding(ctx context.Context, database, name, etag
 func (c *Client) DeleteDatabaseBinding(ctx context.Context, database, name string) error {
 	_, err := c.request(ctx, http.MethodDelete, c.tenantPath("databases", database, "bindings", name), nil, nil)
 	return err
+}
+
+// DatabasePostgres distinguishes an absent list from an explicit empty list.
+type DatabasePostgres struct {
+	Roles      *[]DeclaredRole `json:"roles,omitempty"`
+	Extensions *[]Extension    `json:"extensions,omitempty"`
+}
+
+type DeclaredRole struct {
+	Name string `json:"name"`
+}
+type Extension struct {
+	Name string `json:"name"`
+}
+
+// BindingCredentials carries a credential mode, never a password.
+type BindingCredentials struct {
+	Dedicated bool `json:"dedicated"`
+}
+type BindingRotation struct {
+	RequestedAt string `json:"requestedAt"`
+	AppliedAt   string `json:"appliedAt"`
+	Pending     bool   `json:"pending"`
+}
+type BindingRotationResponse struct {
+	Database    string `json:"database"`
+	Binding     string `json:"binding"`
+	RequestedAt string `json:"requestedAt"`
+}
+
+// RotateDatabaseBindingCredentials requests one rotation; request tokens are opaque.
+func (c *Client) RotateDatabaseBindingCredentials(ctx context.Context, database, binding string) (*BindingRotationResponse, error) {
+	var result BindingRotationResponse
+	_, err := c.request(ctx, http.MethodPost, c.tenantPath("databases", database, "bindings", binding, "rotate-credentials"), nil, &result)
+	if err != nil {
+		return nil, fmt.Errorf("rotate database binding credentials: %w", err)
+	}
+	return &result, nil
 }

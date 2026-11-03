@@ -13,6 +13,12 @@ description: |-
 
 {{ tffile "examples/resources/kupe_database/resource.tf" }}
 
+### Declared roles and extensions
+
+Set `postgres = { roles = [{ name = "reporting" }], extensions = [{ name = "pgcrypto" }] }` to declare group roles and install extensions from the platform's published allowlist. Declared roles have no privileges until you grant them in PostgreSQL. Grant a declared role to applications with a custom binding and dedicated credentials.
+
+Omitting `postgres`, or either list inside it, keeps its current value. Set a list to `[]` to clear it. A role still used by a binding cannot be removed. Declared role names ending in _owner, _readwrite or _readonly are reserved for database logins.
+
 ### Protecting a database from destroy
 
 `deletion_protection` makes the Kupe platform refuse the delete. `prevent_destroy` stops Terraform from planning it in the first place, so use both for databases you cannot lose.
