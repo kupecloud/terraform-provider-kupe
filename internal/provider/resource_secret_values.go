@@ -158,8 +158,18 @@ func (r *SecretResource) deliveryToken(ctx context.Context, name string, written
 	return r.client.RefreshSecret(ctx, name)
 }
 
+// savedValuesNext is what a delivery timeout after a confirmed write leaves
+// in state and what to do next.
+const savedValuesNext = "The confirmed values_wo_version and source_version are recorded in state. Running apply again does not send the values again. Check delivery in the Kupe Console. Set a longer timeout to wait longer for future changes."
+
 func savedValuesDetail(version int64) string {
-	return fmt.Sprintf("values saved as version %d; delivery is still in progress. The confirmed values_wo_version and source_version are recorded in state. Running apply again does not send the values again. Check delivery in the Kupe Console. Set a longer timeout to wait longer for future changes.", version)
+	return fmt.Sprintf("values saved as version %d; delivery is still in progress. ", version) + savedValuesNext
+}
+
+// savedValuesWarning is the detail under the "secret delivery still in
+// progress" summary, so it does not say that again.
+func savedValuesWarning(version int64) string {
+	return fmt.Sprintf("Values saved as version %d. ", version) + savedValuesNext
 }
 
 // Copy only the lifecycle descriptor for this operation: the token is local
@@ -171,7 +181,9 @@ func (r *SecretResource) valuesLifecycle(version types.Int64, token string) mana
 	}
 	kind := *r.kind
 	kind.ready.waitOnRead = true
-	kind.ready.createTimeoutWarning = true
+	kind.ready.createTimeoutWarning = func(*SecretResourceModel, *client.Secret) string {
+		return savedValuesWarning(version.ValueInt64())
+	}
 	kind.ready.converged = func(s *client.Secret) bool {
 		if !secretDelivered(s) {
 			return false
