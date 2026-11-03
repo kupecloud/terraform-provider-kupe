@@ -46,8 +46,10 @@ type mockKupeAPI struct {
 	clusterDeleteConflicts int
 	clusterGets            int
 	// Managed databases keyed by name; bindings keyed by "{database}/{name}".
-	databases        map[string]map[string]any
-	databaseBindings map[string]map[string]any
+	databases                       map[string]map[string]any
+	databaseBindings                map[string]map[string]any
+	databaseBindingRotationStatuses []map[string]any
+	databaseBindingRotateRefusal    *mockRefusal
 	// databasesDisabled makes the database routes answer like a platform
 	// with managed databases turned off: reads, deletes, a database PATCH
 	// that only changes deletionProtection and a binding PATCH that only
@@ -674,7 +676,7 @@ const mockDatabasesPath = "/api/v1/tenants/acme/databases"
 
 // mockDatabasePatchFields are the only fields kupe-api's PATCH accepts.
 var mockDatabasePatchFields = map[string]bool{
-	"version": true, "resources": true, "highAvailability": true, "deletionProtection": true, "backup": true,
+	"version": true, "resources": true, "highAvailability": true, "deletionProtection": true, "backup": true, "postgres": true,
 }
 
 func mockError(w http.ResponseWriter, status int, code, msg string) {
@@ -785,6 +787,8 @@ func (m *mockKupeAPI) serveDatabases(w http.ResponseWriter, r *http.Request) {
 		m.createBackup(w, r, segs[0])
 	case len(segs) == 2 && segs[1] == "bindings" && r.Method == http.MethodPost:
 		m.createDatabaseBinding(w, r, segs[0])
+	case len(segs) == 4 && segs[1] == "bindings" && segs[3] == "rotate-credentials" && r.Method == http.MethodPost:
+		m.rotateDatabaseBinding(w, r, segs[0], segs[2])
 	case len(segs) == 3 && segs[1] == "bindings" && r.Method == http.MethodGet:
 		m.getDatabaseBinding(w, segs[0], segs[2])
 	case len(segs) == 3 && segs[1] == "bindings" && r.Method == http.MethodPatch:
@@ -831,6 +835,12 @@ func (m *mockKupeAPI) onlyRemovesNamespaces(key string, body map[string]any) boo
 	binding, ok := m.databaseBindings[key]
 	if !ok {
 		return true // answered 404 not found by the route
+	}
+	if requested, ok := body["credentials"].(map[string]any); ok && requested["dedicated"] == true {
+		stored, _ := binding["credentials"].(map[string]any)
+		if stored["dedicated"] != true {
+			return false
+		}
 	}
 	requested, ok := mockNamespaces(body["namespaces"])
 	if !ok {
@@ -906,6 +916,9 @@ func (m *mockKupeAPI) createDatabase(w http.ResponseWriter, r *http.Request) {
 	}
 	if source != nil {
 		db["source"] = source
+	}
+	if v, ok := body["postgres"]; ok {
+		db["postgres"] = v
 	}
 	m.databases[name] = db
 	w.Header().Set("ETag", `"`+rv+`"`)
@@ -1010,6 +1023,16 @@ func (m *mockKupeAPI) patchDatabase(w http.ResponseWriter, r *http.Request, name
 	if backup != nil {
 		db["backup"] = backup
 	}
+	if incoming, ok := body["postgres"].(map[string]any); ok {
+		stored, _ := db["postgres"].(map[string]any)
+		if stored == nil {
+			stored = map[string]any{}
+		}
+		for k, v := range incoming {
+			stored[k] = v
+		}
+		db["postgres"] = stored
+	}
 	db["generation"] = db["generation"].(int) + 1
 	rv := m.nextRV()
 	db["resourceVersion"] = rv
@@ -1048,7 +1071,7 @@ func (m *mockKupeAPI) deleteDatabase(w http.ResponseWriter, name string) {
 
 // mockBindingCreateFields are the fields kupe-api accepts when a binding is
 // created; it refuses any other field, the old `namespace` included.
-var mockBindingCreateFields = map[string]bool{"name": true, "cluster": true, "namespaces": true, "role": true, "secretName": true}
+var mockBindingCreateFields = map[string]bool{"name": true, "cluster": true, "namespaces": true, "role": true, "secretName": true, "roleName": true, "credentials": true}
 
 func (m *mockKupeAPI) createDatabaseBinding(w http.ResponseWriter, r *http.Request, database string) {
 	if _, ok := m.databases[database]; !ok {
@@ -1083,6 +1106,7 @@ func (m *mockKupeAPI) createDatabaseBinding(w http.ResponseWriter, r *http.Reque
 	binding := map[string]any{
 		"name": name, "database": database,
 		"cluster": body["cluster"], "namespaces": namespaces, "role": body["role"],
+		"roleName": body["roleName"], "credentials": body["credentials"], "generation": 1,
 		"secretName": strOrEmpty(body["secretName"]),
 		"status": map[string]any{
 			"phase": "Pending", "secretName": "", "message": "", "namespaces": []any{}, "conditions": []any{},
@@ -1117,7 +1141,7 @@ func mockNamespaces(v any) ([]string, bool) {
 func mockBindingView(binding map[string]any) map[string]any {
 	view := make(map[string]any, len(binding))
 	for k, v := range binding {
-		if k != "delivered" && k != "lag" {
+		if k != "delivered" && k != "lag" && k != "rotationToken" {
 			view[k] = v
 		}
 	}
@@ -1133,7 +1157,11 @@ func (m *mockKupeAPI) getDatabaseBinding(w http.ResponseWriter, database, name s
 	m.databaseBindingGets++
 	secretName := binding["secretName"].(string)
 	if secretName == "" {
-		secretName = database + "-" + binding["role"].(string)
+		role := binding["role"].(string)
+		if role == "custom" {
+			role = strings.ReplaceAll(strOrEmpty(binding["roleName"]), "_", "-")
+		}
+		secretName = database + "-" + role
 	}
 	reported := binding["namespaces"].([]string)
 	if lag, _ := binding["lag"].(int); lag > 0 {
@@ -1144,8 +1172,33 @@ func (m *mockKupeAPI) getDatabaseBinding(w http.ResponseWriter, database, name s
 	}
 	status := m.mockBindingStatus(database, reported)
 	status["secretName"] = secretName
+	status["observedGeneration"] = binding["generation"]
+	if lag, _ := binding["lag"].(int); lag > 0 {
+		status["observedGeneration"] = 0
+	}
+	if token, ok := binding["rotationToken"].(string); ok {
+		status["rotation"] = map[string]any{"requestedAt": token, "appliedAt": token, "pending": false}
+		status["observedRotation"] = token
+		for _, e := range status["namespaces"].([]any) {
+			e.(map[string]any)["deliveredRotation"] = token
+		}
+	}
+	if _, rotating := binding["rotationToken"]; rotating && len(m.databaseBindingRotationStatuses) > 0 {
+		next := m.databaseBindingRotationStatuses[0]
+		if len(m.databaseBindingRotationStatuses) > 1 {
+			m.databaseBindingRotationStatuses = m.databaseBindingRotationStatuses[1:]
+		}
+		for k, v := range next {
+			status[k] = v
+		}
+		if rotation, ok := status["rotation"].(map[string]any); ok {
+			if token, ok := rotation["requestedAt"].(string); ok {
+				binding["rotationToken"] = token
+			}
+		}
+	}
 	if m.databaseBindingStatus != nil {
-		status = map[string]any{"secretName": secretName, "namespaces": []any{}}
+		status = map[string]any{"secretName": secretName, "namespaces": []any{}, "observedGeneration": binding["generation"]}
 		for k, v := range m.databaseBindingStatus {
 			status[k] = v
 		}
@@ -1215,17 +1268,24 @@ func (m *mockKupeAPI) patchDatabaseBinding(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	for key := range body {
-		if key != "namespaces" {
+		if key != "namespaces" && key != "credentials" {
 			mockError(w, http.StatusBadRequest, "", fmt.Sprintf("invalid request body: json: unknown field %q", key))
 			return
 		}
 	}
-	namespaces, ok := mockNamespaces(body["namespaces"])
-	if !ok {
-		mockError(w, http.StatusBadRequest, "", "namespaces is required: list at least one namespace")
-		return
+	if value, present := body["namespaces"]; present {
+		namespaces, ok := mockNamespaces(value)
+		if !ok {
+			mockError(w, http.StatusBadRequest, "", "namespaces is required: list at least one namespace")
+			return
+		}
+		binding["namespaces"] = namespaces
 	}
-	binding["namespaces"] = namespaces
+	if value, present := body["credentials"]; present {
+		binding["credentials"] = value
+	}
+	generation, _ := binding["generation"].(int)
+	binding["generation"] = generation + 1
 	binding["lag"] = m.databaseBindingLagOnPatch
 	rv := m.nextRV()
 	binding["resourceVersion"] = rv
@@ -1280,4 +1340,27 @@ func (m *mockKupeAPI) setState(f func(m *mockKupeAPI)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	f(m)
+}
+
+func (m *mockKupeAPI) rotateDatabaseBinding(w http.ResponseWriter, r *http.Request, database, name string) {
+	b, ok := m.databaseBindings[database+"/"+name]
+	if !ok {
+		mockError(w, http.StatusNotFound, "", "not found")
+		return
+	}
+	m.databaseBindingRequests = append(m.databaseBindingRequests, mockRequest{method: r.Method, body: map[string]any{"rotate": true}})
+	if refusal := m.databaseBindingRotateRefusal; refusal != nil {
+		m.databaseBindingRotateRefusal = nil
+		mockError(w, refusal.status, refusal.code, refusal.message)
+		return
+	}
+	credentials, _ := b["credentials"].(map[string]any)
+	if credentials["dedicated"] != true {
+		mockError(w, http.StatusConflict, client.CodeCredentialsNotDedicated, "credentials are shared")
+		return
+	}
+	token := "opaque-rotation-" + m.nextRV()
+	b["rotationToken"] = token
+	w.WriteHeader(http.StatusAccepted)
+	mustEncodeJSON(w, map[string]any{"database": database, "binding": name, "requestedAt": token})
 }

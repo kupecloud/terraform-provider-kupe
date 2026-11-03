@@ -41,7 +41,7 @@ const databaseBindingConditionConflict = "Conflict"
 // block. Delivering a Service and Secret into a cluster takes seconds.
 const (
 	defaultDatabaseBindingCreateTimeout = 5 * time.Minute
-	defaultDatabaseBindingUpdateTimeout = 5 * time.Minute
+	defaultDatabaseBindingUpdateTimeout = 10 * time.Minute
 	defaultDatabaseBindingDeleteTimeout = 5 * time.Minute
 )
 
@@ -64,24 +64,28 @@ type DatabaseBindingResource struct {
 }
 
 type DatabaseBindingResourceModel struct {
-	Name            types.String   `tfsdk:"name"`
-	Database        types.String   `tfsdk:"database"`
-	Cluster         types.String   `tfsdk:"cluster"`
-	Namespaces      types.Set      `tfsdk:"namespaces"`
-	Role            types.String   `tfsdk:"role"`
-	SecretName      types.String   `tfsdk:"secret_name"`
-	Phase           types.String   `tfsdk:"phase"`
-	NamespaceStatus types.List     `tfsdk:"namespace_status"`
-	ETag            types.String   `tfsdk:"etag"`
-	Timeouts        timeouts.Value `tfsdk:"timeouts"`
+	RoleName         types.String   `tfsdk:"role_name"`
+	Credentials      types.Object   `tfsdk:"credentials"`
+	ObservedRotation types.String   `tfsdk:"observed_rotation"`
+	Name             types.String   `tfsdk:"name"`
+	Database         types.String   `tfsdk:"database"`
+	Cluster          types.String   `tfsdk:"cluster"`
+	Namespaces       types.Set      `tfsdk:"namespaces"`
+	Role             types.String   `tfsdk:"role"`
+	SecretName       types.String   `tfsdk:"secret_name"`
+	Phase            types.String   `tfsdk:"phase"`
+	NamespaceStatus  types.List     `tfsdk:"namespace_status"`
+	ETag             types.String   `tfsdk:"etag"`
+	Timeouts         timeouts.Value `tfsdk:"timeouts"`
 }
 
 // databaseBindingNamespaceStatusType is one element of namespace_status.
 var databaseBindingNamespaceStatusType = types.ObjectType{AttrTypes: map[string]attr.Type{
-	"name":    types.StringType,
-	"host":    types.StringType,
-	"phase":   types.StringType,
-	"message": types.StringType,
+	"delivered_rotation": types.StringType,
+	"name":               types.StringType,
+	"host":               types.StringType,
+	"phase":              types.StringType,
+	"message":            types.StringType,
 }}
 
 func NewDatabaseBindingResource() resource.Resource {
@@ -91,7 +95,8 @@ func NewDatabaseBindingResource() resource.Resource {
 }
 
 // databaseBindingKind is the binding's lifecycle for managedResource. Only
-// `namespaces` can be updated; a 412 is retried once when it is unchanged.
+// namespaces and dedicated credentials can be updated; a 412 is retried
+// once only when all mutable settings are unchanged.
 var databaseBindingKind = serviceKind[DatabaseBindingResourceModel, client.DatabaseBinding]{
 	noun: "database binding",
 	name: func(m *DatabaseBindingResourceModel) string { return m.Name.ValueString() },
@@ -114,7 +119,7 @@ var databaseBindingKind = serviceKind[DatabaseBindingResourceModel, client.Datab
 		converged: databaseBindingDelivered,
 		// Waiting does not clear Failed: the tenant has to act.
 		failed: func(b *client.DatabaseBinding) (time.Duration, bool) {
-			return 0, len(databaseBindingFailedNamespaces(b)) > 0
+			return 0, databaseBindingFailed(b)
 		},
 		// On create, Terraform taints a resource whose Create returns an
 		// error along with a state, so the failed binding stays tracked:
@@ -130,10 +135,14 @@ var databaseBindingKind = serviceKind[DatabaseBindingResourceModel, client.Datab
 		},
 	},
 	settingsChanged: func(prior *DatabaseBindingResourceModel, current *client.DatabaseBinding) []string {
-		if slices.Equal(setStrings(prior.Namespaces), sortedCopy(current.Namespaces)) {
-			return nil
+		var changed []string
+		if !slices.Equal(setStrings(prior.Namespaces), sortedCopy(current.Namespaces)) {
+			changed = append(changed, "namespaces")
 		}
-		return []string{"namespaces"}
+		if bindingDedicated(prior.Credentials) != current.Credentials.Dedicated {
+			changed = append(changed, "credentials.dedicated")
+		}
+		return changed
 	},
 	stillDeleting: func(m *DatabaseBindingResourceModel) string {
 		return fmt.Sprintf("DELETE was accepted but binding %q is still being removed after the configured delete "+
@@ -153,10 +162,10 @@ func databaseBindingPhase(b *client.DatabaseBinding) string {
 // databaseBindingDelivered reports whether the platform has delivered the
 // binding's current namespace list: the binding is Ready, every listed
 // namespace is Ready, and no namespace taken out of the list is still being
-// withdrawn. The phase alone is not enough: the binding has no generation,
-// and right after a PATCH its status still describes the previous list.
+// withdrawn. The delivered generation must also catch up: right after a
+// PATCH the status can still describe the previous credentials.
 func databaseBindingDelivered(b *client.DatabaseBinding) bool {
-	if databaseBindingPhase(b) != databaseBindingPhaseReady || len(b.Status.Namespaces) != len(b.Namespaces) {
+	if databaseBindingPhase(b) != databaseBindingPhaseReady || b.Status.ObservedGeneration < b.Generation || databaseBindingConflicted(b.Status) || len(b.Status.Namespaces) != len(b.Namespaces) {
 		return false
 	}
 	for _, ns := range b.Status.Namespaces {
@@ -196,21 +205,24 @@ func (r *DatabaseBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 		Description: "Binds a Kupe database into namespaces of one cluster for one role. The Kupe platform " +
 			"delivers a Service named after the database and a credentials Secret into each listed namespace and " +
 			"opens the network path; other namespaces see neither. A binding lists 1 to 10 namespaces, and the " +
-			"bindings of one database list at most 20 between them. Create and Update wait until every listed " +
-			"namespace is Ready, and fail at once if one is Failed: it already has a Service or Endpoints object " +
+			"bindings of one database list at most 20 between them. Create and Update wait for the current generation and every listed " +
+			"namespace to be Ready, and fail at once if one is Failed: it already has a Service or Endpoints object " +
 			"named after the database, or a Secret named `secret_name`, that the platform did not create. A " +
 			"binding that fails or times out on create stays in state, marked tainted. Delete waits until the " +
 			"binding is gone. " +
 			"Set timeouts with the `timeouts` attribute, for example `timeouts = { create = \"10m\" }` (defaults: " +
-			"create/update/delete 5m).\n\n" +
+			"create/delete 5m, update 10m).\n\n" +
 			"`namespaces` changes in place: a namespace added gets the Service and the Secret, and the namespaces " +
-			"kept work throughout. Changing any other argument except `timeouts` replaces the binding. Removing a " +
+			"kept work throughout. Enabling dedicated credentials changes in place; turning them off replaces the binding. Changing `credentials.rotation_trigger` requests a dedicated rotation. Other arguments except `timeouts` replace the binding. Removing a " +
 			"namespace, or the binding, removes the Secret there, and the Service and the network path too unless " +
-			"another binding of the same database still lists that namespace. The password does not change: " +
+			"another binding of the same database still lists that namespace. With shared credentials, the password does not change: " +
 			"rotate the role's credentials if the namespace should lose knowledge of it.",
 		Attributes: map[string]schema.Attribute{
+			"role_name":         schema.StringAttribute{Optional: true, Description: "Declared role granted by a custom binding. Required for custom and refused for built-in roles. Changing it replaces the binding.", Validators: []validator.String{stringvalidator.LengthBetween(1, 63), stringvalidator.RegexMatches(bindingRoleNamePattern, "must start with a lowercase letter and contain only lowercase letters, numbers or _")}, PlanModifiers: replace},
+			"credentials":       bindingCredentialsSchema(),
+			"observed_rotation": schema.StringAttribute{Computed: true, Description: "Dedicated rotation token applied and delivered to every listed namespace; empty for shared credentials."},
 			"name": schema.StringAttribute{
-				Description: "Binding name. Defaults to `{database}-{cluster}-{role}`. Set it explicitly if that is " +
+				Description: "Binding name. Defaults to `{database}-{cluster}-{role}`, using `role_name` for custom and replacing underscores with hyphens. Set it explicitly if that is " +
 					"longer than 63 characters, or to bind the same role of a database into the same cluster with a " +
 					"second binding.",
 				Optional: true,
@@ -244,16 +256,16 @@ func (r *DatabaseBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 				},
 			},
 			"role": schema.StringAttribute{
-				Description:   "Role granted: `owner` (can change the schema), `readwrite` (reads and writes data) or `readonly` (reads data).",
+				Description:   "Role granted: `owner` (can change the schema), `readwrite` (reads and writes data), `readonly` (reads data), or `custom` (a declared role).",
 				Required:      true,
 				PlanModifiers: replace,
 				Validators: []validator.String{
-					stringvalidator.OneOf("owner", "readwrite", "readonly"),
+					stringvalidator.OneOf("owner", "readwrite", "readonly", "custom"),
 				},
 			},
 			"secret_name": schema.StringAttribute{
 				Description: "Name of the credentials Secret in every listed namespace. When unset, a new binding uses " +
-					"`{database}-{role}` and an existing or imported binding keeps its current name, so removing the " +
+					"`{database}-{role}` (or `{database}-{role_name}` for custom, with underscores replaced by hyphens) and an existing or imported binding keeps its current name, so removing the " +
 					"attribute from configuration does not change the name back: set it to `{database}-{role}` " +
 					"instead. A different name replaces the binding. The Secret holds `type`, `provider`, `host`, `port`, `database`, `username`, `password`, `sslmode`, " +
 					"`ca.crt` and `uri`; mount it at `/bindings/<secret_name>`, where `uri` expects `ca.crt`.",
@@ -276,6 +288,7 @@ func (r *DatabaseBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 				Computed: true,
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
+						"delivered_rotation": schema.StringAttribute{Computed: true, Description: "Rotation token carried by the credentials Secret delivered for this namespace."},
 						"name": schema.StringAttribute{
 							Description: "Namespace inside the cluster.",
 							Computed:    true,
@@ -315,10 +328,12 @@ func (r *DatabaseBindingResource) Create(ctx context.Context, req resource.Creat
 	}
 
 	createReq := client.CreateDatabaseBindingRequest{
-		Name:       plan.Name.ValueString(),
-		Cluster:    plan.Cluster.ValueString(),
-		Namespaces: setStrings(plan.Namespaces),
-		Role:       plan.Role.ValueString(),
+		Name:        plan.Name.ValueString(),
+		Cluster:     plan.Cluster.ValueString(),
+		Namespaces:  setStrings(plan.Namespaces),
+		Role:        plan.Role.ValueString(),
+		RoleName:    plan.RoleName.ValueString(),
+		Credentials: &client.BindingCredentials{Dedicated: bindingDedicated(plan.Credentials)},
 	}
 	if !plan.SecretName.IsUnknown() {
 		createReq.SecretName = plan.SecretName.ValueString()
@@ -331,10 +346,8 @@ func (r *DatabaseBindingResource) Create(ctx context.Context, req resource.Creat
 	r.created(ctx, binding, etag, &plan, &resp.State, &resp.Diagnostics)
 }
 
-// Update sends a changed `namespaces` as the complete new list, then waits
-// until the platform has delivered it. Every other argument requires
-// replacement, so when `namespaces` is unchanged only `timeouts` changed: the
-// binding is refreshed and the new timeouts recorded.
+// Update composes namespace and credential changes in one PATCH, waits for
+// delivery, then requests a rotation when its trigger changes.
 func (r *DatabaseBindingResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan, state DatabaseBindingResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -343,15 +356,39 @@ func (r *DatabaseBindingResource) Update(ctx context.Context, req resource.Updat
 		return
 	}
 
-	var send patchFunc[client.DatabaseBinding]
+	timeout, d := plan.Timeouts.Update(ctx, defaultDatabaseBindingUpdateTimeout)
+	resp.Diagnostics.Append(d...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	var patch client.PatchDatabaseBindingRequest
 	if namespaces := setStrings(plan.Namespaces); !slices.Equal(namespaces, setStrings(state.Namespaces)) {
+		patch.Namespaces = namespaces
+	}
+	if bindingDedicated(plan.Credentials) != bindingDedicated(state.Credentials) {
+		patch.Credentials = &client.BindingCredentials{Dedicated: bindingDedicated(plan.Credentials)}
+	}
+	var send patchFunc[client.DatabaseBinding]
+	if patch.Namespaces != nil || patch.Credentials != nil {
 		database, name := plan.Database.ValueString(), plan.Name.ValueString()
 		send = func(ctx context.Context, etag string) (*client.DatabaseBinding, string, error) {
-			return r.client.UpdateDatabaseBinding(ctx, database, name, etag,
-				client.PatchDatabaseBindingRequest{Namespaces: namespaces})
+			return r.client.UpdateDatabaseBinding(ctx, database, name, etag, patch)
 		}
 	}
+	trigger, priorTrigger := bindingTrigger(plan.Credentials), bindingTrigger(state.Credentials)
+	rotate := isSet(trigger) && !trigger.Equal(priorTrigger)
+	if rotate {
+		plan.Credentials = bindingCredentialsValue(bindingDedicated(plan.Credentials), priorTrigger)
+	}
 	r.update(ctx, &plan, &state, state.ETag.ValueString(), send, true, &resp.State, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if rotate {
+		r.rotateCredentials(ctx, &plan, trigger, resp)
+	}
 }
 
 // databaseBindingConflicted reports whether the binding's Conflict condition
@@ -441,6 +478,12 @@ func mapDatabaseBindingToState(b *client.DatabaseBinding, etag string, state *Da
 	state.Cluster = types.StringValue(b.Cluster)
 	state.Namespaces = stringSet(b.Namespaces)
 	state.Role = types.StringValue(b.Role)
+	state.RoleName = stringOrNull(b.RoleName)
+	state.Credentials = bindingCredentialsValue(b.Credentials.Dedicated, bindingTrigger(state.Credentials))
+	state.ObservedRotation = types.StringValue("")
+	if b.Status != nil {
+		state.ObservedRotation = types.StringValue(b.Status.ObservedRotation)
+	}
 	state.ETag = types.StringValue(etag)
 
 	phase, secretName := "", b.SecretName
@@ -458,7 +501,11 @@ func mapDatabaseBindingToState(b *client.DatabaseBinding, etag string, state *Da
 		// the effective name is the platform's default. Leaving it null
 		// would let a later plan see it unknown and, through
 		// RequiresReplace, replace the binding.
-		secretName = b.Database + "-" + b.Role
+		role := b.Role
+		if role == "custom" {
+			role = strings.ReplaceAll(b.RoleName, "_", "-")
+		}
+		secretName = b.Database + "-" + role
 	}
 	state.Phase = types.StringValue(phase)
 	state.SecretName = types.StringValue(secretName)
@@ -473,10 +520,11 @@ func databaseBindingNamespaceStatusList(namespaces []client.DatabaseBindingNames
 	elems := make([]attr.Value, 0, len(sorted))
 	for _, ns := range sorted {
 		elems = append(elems, types.ObjectValueMust(databaseBindingNamespaceStatusType.AttrTypes, map[string]attr.Value{
-			"name":    types.StringValue(ns.Name),
-			"host":    types.StringValue(ns.Host),
-			"phase":   types.StringValue(ns.Phase),
-			"message": types.StringValue(ns.Message),
+			"delivered_rotation": types.StringValue(ns.DeliveredRotation),
+			"name":               types.StringValue(ns.Name),
+			"host":               types.StringValue(ns.Host),
+			"phase":              types.StringValue(ns.Phase),
+			"message":            types.StringValue(ns.Message),
 		}))
 	}
 	return types.ListValueMust(databaseBindingNamespaceStatusType, elems)
@@ -512,4 +560,24 @@ func sortedCopy(values []string) []string {
 	sorted := slices.Clone(values)
 	slices.Sort(sorted)
 	return sorted
+}
+
+func databaseBindingFailed(b *client.DatabaseBinding) bool {
+	if b == nil || b.Status == nil {
+		return false
+	}
+	if len(databaseBindingFailedNamespaces(b)) > 0 {
+		return true
+	}
+	if b.Status.Phase != databaseBindingPhaseFailed && !databaseBindingConflicted(b.Status) {
+		return false
+	}
+	// Generation advances only on successful delivery, so it cannot gate errors.
+	// Ignore aggregate errors that still describe namespaces being withdrawn.
+	for _, ns := range b.Status.Namespaces {
+		if !slices.Contains(b.Namespaces, ns.Name) {
+			return false
+		}
+	}
+	return true
 }

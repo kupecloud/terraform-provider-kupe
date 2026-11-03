@@ -128,3 +128,13 @@ func ErrorCode(err error) string {
 	}
 	return ""
 }
+
+const (
+	CodeRoleReserved                     = "role_reserved"
+	CodeExtensionNotAllowed              = "extension_not_allowed"
+	CodeRoleInUse                        = "role_in_use"
+	CodeRoleNotDeclared                  = "role_not_declared"
+	CodeCredentialsNotDedicated          = "credentials_not_dedicated"
+	CodeDedicatedCredentialsIrreversible = "dedicated_credentials_irreversible"
+	CodeInvalidBindingCredentials        = "invalid_binding_credentials"
+)

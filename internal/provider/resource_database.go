@@ -135,6 +135,7 @@ type DatabaseResource struct {
 // databaseModel holds the attributes the kupe_database resource and data
 // source share.
 type databaseModel struct {
+	Postgres           types.Object    `tfsdk:"postgres"`
 	Name               types.String    `tfsdk:"name"`
 	Engine             types.String    `tfsdk:"engine"`
 	Version            types.String    `tfsdk:"version"`
@@ -217,11 +218,12 @@ var databaseKind = serviceKind[DatabaseResourceModel, client.Database]{
 			}
 			return 0, false
 		},
-		message: func(db *client.Database) string {
-			if db == nil || db.Status == nil {
-				return ""
+		message: databaseReadyMessage,
+		timedOutDetail: func(_ *DatabaseResourceModel, db *client.Database) string {
+			if message := databaseReadyMessage(db); message != "" {
+				return "\n\nStatus message: " + message
 			}
-			return client.ConditionMessage(db.Status.Conditions, client.ConditionReady)
+			return ""
 		},
 		notApplied: func(db *client.Database) bool {
 			return db != nil && db.Status != nil &&
@@ -277,6 +279,7 @@ func (r *DatabaseResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 			"refuse the delete: set it to `false` and apply before destroying. Add `lifecycle { prevent_destroy = true }` " +
 			"to stop Terraform from planning the destroy at all.",
 		Attributes: map[string]schema.Attribute{
+			"postgres": databasePostgresSchema(),
 			"name": schema.StringAttribute{
 				Description: "Database name (immutable after creation). A lowercase DNS label starting with a letter, " +
 					"without `--`, at most 44 characters. It is also the Service name applications connect to. The Kupe " +
@@ -470,6 +473,7 @@ func (r *DatabaseResource) Create(ctx context.Context, req resource.CreateReques
 
 	deletionProtection := plan.DeletionProtection.ValueBool()
 	db, etag, err := r.client.CreateDatabase(ctx, client.CreateDatabaseRequest{
+		Postgres:           postgresChanges(plan.Postgres, types.ObjectNull(databasePostgresAttrTypes)),
 		Name:               plan.Name.ValueString(),
 		Engine:             plan.Engine.ValueString(),
 		Version:            plan.Version.ValueString(),
@@ -512,7 +516,7 @@ func (r *DatabaseResource) Update(ctx context.Context, req resource.UpdateReques
 // field must be checked here (TestProtectionOnlyCoversEveryPatchField).
 func protectionOnly(patch client.PatchDatabaseRequest) bool {
 	return patch.DeletionProtection != nil &&
-		patch.Version == nil && patch.Resources == nil && patch.HighAvailability == nil && patch.Backup == nil
+		patch.Version == nil && patch.Resources == nil && patch.HighAvailability == nil && patch.Backup == nil && patch.Postgres == nil
 }
 
 // databasePatch builds the merge patch for the fields that differ between
@@ -546,6 +550,10 @@ func databasePatch(plan, state *DatabaseResourceModel) (client.PatchDatabaseRequ
 	}
 	if backup := backupChanges(plan.Backup, state.Backup); backup != nil {
 		patch.Backup = backup
+		hasChanges = true
+	}
+	if p := postgresChanges(plan.Postgres, state.Postgres); p != nil {
+		patch.Postgres = p
 		hasChanges = true
 	}
 	return patch, hasChanges
@@ -649,6 +657,11 @@ func settingsChanged(prior *databaseModel, current databaseModel) []string {
 	if !current.Backup.Equal(prior.Backup) {
 		changed = append(changed, "backup")
 	}
+	for _, key := range []string{"roles", "extensions"} {
+		if !postgresList(current.Postgres, key).Equal(postgresList(prior.Postgres, key)) {
+			changed = append(changed, "postgres."+key)
+		}
+	}
 	return changed
 }
 
@@ -691,6 +704,7 @@ func databaseModelFromAPI(db *client.Database) databaseModel {
 		status = &client.DatabaseStatus{}
 	}
 	return databaseModel{
+		Postgres:           postgresFromAPI(db.Postgres),
 		Name:               types.StringValue(db.Name),
 		Engine:             types.StringValue(db.Engine),
 		Version:            types.StringValue(db.Version),
@@ -751,4 +765,11 @@ func recoveryWindowFromAPI(window *client.RecoveryWindow) types.Object {
 		"earliest": types.StringValue(window.Earliest),
 		"latest":   types.StringValue(window.Latest),
 	})
+}
+
+func databaseReadyMessage(db *client.Database) string {
+	if db == nil || db.Status == nil {
+		return ""
+	}
+	return client.ConditionMessage(db.Status.Conditions, client.ConditionReady)
 }

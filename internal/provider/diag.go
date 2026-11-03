@@ -285,6 +285,22 @@ func apiErrorDetail(err error) string {
 	if client.IsRegistriesNotServed(err) {
 		return base + "\n\n" + registriesNotServedHint
 	}
+	switch apiErr.Code {
+	case client.CodeRoleReserved:
+		return base + "\n\nChoose a role name that is not reserved by the platform."
+	case client.CodeExtensionNotAllowed:
+		return base + "\n\nChoose an extension from the platform's published allowlist."
+	case client.CodeRoleInUse:
+		return base + "\n\nRemove bindings that grant this role before removing the role declaration."
+	case client.CodeRoleNotDeclared:
+		return base + "\n\nDeclare the role in postgres.roles before creating its custom binding."
+	case client.CodeCredentialsNotDedicated:
+		return base + "\n\nEnable dedicated credentials to rotate this binding, or rotate the database role's shared credentials instead."
+	case client.CodeDedicatedCredentialsIrreversible:
+		return base + "\n\nDedicated credentials cannot be turned off once enabled. Replace the binding to use shared credentials."
+	case client.CodeInvalidBindingCredentials:
+		return base + "\n\nOwner bindings use shared credentials. Custom bindings require role_name and dedicated credentials."
+	}
 	switch apiErr.StatusCode {
 	case http.StatusBadRequest:
 		// Codes with a known remedy get one. creation_paused is shared by

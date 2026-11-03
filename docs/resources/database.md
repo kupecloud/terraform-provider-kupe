@@ -22,6 +22,10 @@ Deleting a database removes it and its automatic backups immediately, and they c
 
 ```terraform
 resource "kupe_database" "orders" {
+  postgres = {
+    roles      = [{ name = "sales_reports" }]
+    extensions = [{ name = "pgcrypto" }]
+  }
   name    = "orders-db"
   version = "18"
 
@@ -43,6 +47,12 @@ resource "kupe_database" "orders" {
   # database until it is set to false and applied.
 }
 ```
+
+### Declared roles and extensions
+
+Set `postgres = { roles = [{ name = "reporting" }], extensions = [{ name = "pgcrypto" }] }` to declare group roles and install extensions from the platform's published allowlist. Declared roles have no privileges until you grant them in PostgreSQL. Grant a declared role to applications with a custom binding and dedicated credentials.
+
+Omitting `postgres`, or either list inside it, keeps its current value. Set a list to `[]` to clear it. A role still used by a binding cannot be removed. Declared role names ending in _owner, _readwrite or _readonly are reserved for database logins.
 
 ### Protecting a database from destroy
 
@@ -154,6 +164,7 @@ Grant access with [`kupe_database_binding`](database_binding.md). Each binding p
 - `deletion_protection` (Boolean) While `true`, the Kupe platform refuses to delete the database. Set it to `false` and apply before destroying. Default `true`, also for an existing database: importing an unprotected database without this attribute in configuration plans turning protection on.
 - `engine` (String) Database engine. Only `postgres` is supported, and it is the default. The engine of an existing database cannot change: a different value fails the plan instead of replacing the database.
 - `high_availability` (Boolean) Run two instances with a synchronous standby. Can be turned on or off in place. When unset, a new database is created without it and an existing or imported database keeps its current setting, so removing the attribute from configuration does not turn HA off: set it to `false` to do that.
+- `postgres` (Attributes) Declared PostgreSQL group roles and extensions. Omitted settings keep their current values. Set a list to [] to clear it. The platform grants declared roles no privileges. (see [below for nested schema](#nestedatt--postgres))
 - `source` (Attributes) Restore the new database from a manual backup or from another database, instead of starting it empty. Set exactly one of `backup` and `database`. The new database runs the source's major version: leave `version` unset, or set that one. Its storage must be at least the source's. The source is unchanged, and the new database counts against the plan's database limit like any other. `source` is read only when the database is created, and any change to it replaces the database: Terraform deletes it and restores a new one. That includes a value Terraform knows only at apply time, such as the name of a `kupe_database_backup` without `name` that is taken again. Once the database exists, remove `source` from the configuration (the database keeps it), or keep it constant: name the backup with a literal or a backup resource that sets `name`, and write `point_in_time` literally. Null on a database that was not restored. While the Kupe platform does not offer backups, setting `source` fails with error code `backups_unavailable`. (see [below for nested schema](#nestedatt--source))
 - `timeouts` (Attributes) (see [below for nested schema](#nestedatt--timeouts))
 - `version` (String) Engine major version, e.g. `18`. When unset, the platform default is used and recorded here; a database restored with `source` runs the source's major version. Major version upgrades are not available yet, so changing the version of an existing database fails the plan.
@@ -185,6 +196,31 @@ Optional:
 
 - `retention` (Number) How far back the backups reach, in days: 7 to 35, default 7. The Kupe platform sets the range and refuses a value outside it (error code `DATABASE_BACKUP_RETENTION_OUT_OF_RANGE`). Shortening retention deletes the backups that fall outside the new window.
 - `schedule` (String) How many full backups are kept within the retention period: `Daily` keeps one for every day; `DailyThenWeekly` keeps one for each of the last 7 days and one a week before that. The points you can restore to are the same either way; restoring to an older point takes longer. Default `Daily`.
+
+
+<a id="nestedatt--postgres"></a>
+### Nested Schema for `postgres`
+
+Optional:
+
+- `extensions` (Attributes Set) (see [below for nested schema](#nestedatt--postgres--extensions))
+- `roles` (Attributes Set) (see [below for nested schema](#nestedatt--postgres--roles))
+
+<a id="nestedatt--postgres--extensions"></a>
+### Nested Schema for `postgres.extensions`
+
+Required:
+
+- `name` (String) Name declared in PostgreSQL.
+
+
+<a id="nestedatt--postgres--roles"></a>
+### Nested Schema for `postgres.roles`
+
+Required:
+
+- `name` (String) Name declared in PostgreSQL.
+
 
 
 <a id="nestedatt--source"></a>

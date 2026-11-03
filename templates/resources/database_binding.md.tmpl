@@ -31,9 +31,19 @@ Have workloads read the Secret themselves. Reading it with a `kubernetes_secret_
 
 A binding lists at most 10 namespaces, which the plan checks. The bindings of one database list at most 20 namespaces between them, and a namespace can be in only one binding per cluster and role of a database. The Kupe API refuses a change that breaks either rule when it is applied; a change that only takes namespaces out never breaks them.
 
+### Dedicated credentials and rotation
+
+Set `credentials = { dedicated = true }` to give every listed namespace its own login and password. Enabling dedicated credentials updates the binding in place, including when `namespaces` changes in the same apply. Turning dedicated credentials off replaces the binding. Owner bindings use shared credentials. Custom bindings require `role_name` and dedicated credentials.
+
+For a custom role such as `sales_reports`, the default binding name is `{database}-{cluster}-sales-reports` and the default Secret name is `{database}-sales-reports`.
+
+Set or change `credentials.rotation_trigger` to request one dedicated rotation on update. Removing the trigger does not rotate. The trigger is your own marker, such as a rotation ticket number; Terraform stores it in state. Passwords never reach the provider.
+
+Update follows the rotation request token until the platform has applied it and prepared every listed namespace's credentials Secret. `observed_rotation` records the completed token and `namespace_status[].delivered_rotation` shows progress. If another rotation supersedes the request, Update follows the newer token. The copy into the cluster follows asynchronously and is not observed. Restart applications after delivery.
+
 ### When a binding waits or fails
 
-A binding is `Pending` while its database or cluster does not exist yet, is not running yet or is being deleted, and while a namespace it lists is not delivered yet. Create and Update keep waiting until their timeout, then warn. The Kupe platform keeps trying, and the binding becomes `Ready` once every listed namespace is.
+A binding is `Pending` while its database or cluster does not exist yet, is not running yet or is being deleted, and while a namespace it lists is not delivered yet. Create and Update keep waiting until their timeout, then fail. The Kupe platform keeps trying, and the binding becomes `Ready` once every listed namespace is.
 
 A namespace is `Failed` when it already has a Service or Endpoints object named after the database, or a Secret named `secret_name`, that the Kupe platform did not create. The binding does not replace that object, and the other namespaces keep working. Create and Update stop at once with an error that names the namespace, the database and the Secret name, and `namespace_status` carries the platform's message for it.
 

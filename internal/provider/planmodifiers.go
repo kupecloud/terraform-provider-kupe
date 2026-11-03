@@ -94,7 +94,7 @@ type databaseBindingNameDefaultModifier struct{}
 var databaseBindingNameParts = []string{"database", "cluster", "role"}
 
 func (m databaseBindingNameDefaultModifier) Description(_ context.Context) string {
-	return `Defaults to "{database}-{cluster}-{role}".`
+	return `Defaults to "{database}-{cluster}-{role}", using role_name with underscores replaced by hyphens for custom bindings.`
 }
 
 func (m databaseBindingNameDefaultModifier) MarkdownDescription(ctx context.Context) string {
@@ -115,6 +115,13 @@ func (m databaseBindingNameDefaultModifier) PlanModifyString(ctx context.Context
 		resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root(attr), &v)...)
 		if resp.Diagnostics.HasError() || v.IsUnknown() || v.IsNull() {
 			return
+		}
+		if attr == "role" && v.ValueString() == "custom" {
+			resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("role_name"), &v)...)
+			if resp.Diagnostics.HasError() || !isSet(v) {
+				return
+			}
+			v = types.StringValue(strings.ReplaceAll(v.ValueString(), "_", "-"))
 		}
 		parts = append(parts, v.ValueString())
 	}
