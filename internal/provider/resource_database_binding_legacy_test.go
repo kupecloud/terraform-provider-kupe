@@ -34,7 +34,7 @@ func (*legacyDatabaseBindingResource) ValidateConfig(context.Context, resource.V
 }
 func (r *legacyDatabaseBindingResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	r.DatabaseBindingResource.Schema(ctx, req, resp)
-	for _, key := range []string{"role_name", "credentials", "observed_rotation"} {
+	for _, key := range []string{"role_name", "credentials", "observed_rotation", "logical_database"} {
 		delete(resp.Schema.Attributes, key)
 	}
 	status := resp.Schema.Attributes["namespace_status"].(schema.ListNestedAttribute)

@@ -33,8 +33,9 @@ type Database struct {
 
 // DatabaseStatus contains database status fields.
 type DatabaseStatus struct {
-	ObservedGeneration int64  `json:"observedGeneration"`
-	Phase              string `json:"phase"`
+	Databases          []LogicalDatabaseStatus `json:"databases,omitempty"`
+	ObservedGeneration int64                   `json:"observedGeneration"`
+	Phase              string                  `json:"phase"`
 	// CurrentVersion is the full engine version running, e.g. "18.0".
 	CurrentVersion string `json:"currentVersion"`
 	// Conditions carry the reason behind the phase. Ready is False while
@@ -108,12 +109,14 @@ type PatchDatabaseRequest struct {
 // DatabaseBinding grants one role of a database to namespaces of one
 // cluster.
 type DatabaseBinding struct {
-	RoleName    string             `json:"roleName"`
-	Credentials BindingCredentials `json:"credentials"`
-	Generation  int64              `json:"generation"`
-	Name        string             `json:"name"`
-	Database    string             `json:"database"`
-	Cluster     string             `json:"cluster"`
+	LogicalDatabase      string             `json:"logicalDatabase"`
+	FirstLogicalDatabase string             `json:"-"`
+	RoleName             string             `json:"roleName"`
+	Credentials          BindingCredentials `json:"credentials"`
+	Generation           int64              `json:"generation"`
+	Name                 string             `json:"name"`
+	Database             string             `json:"database"`
+	Cluster              string             `json:"cluster"`
 	// Namespaces are the namespaces the binding delivers into.
 	Namespaces []string `json:"namespaces"`
 	Role       string   `json:"role"`
@@ -203,13 +206,14 @@ func findCondition(conditions []Condition, t string) Condition {
 // CreateDatabaseBindingRequest is the body for creating a binding. The
 // database comes from the request path.
 type CreateDatabaseBindingRequest struct {
-	RoleName    string              `json:"roleName,omitempty"`
-	Credentials *BindingCredentials `json:"credentials,omitempty"`
-	Name        string              `json:"name"`
-	Cluster     string              `json:"cluster"`
-	Namespaces  []string            `json:"namespaces"`
-	Role        string              `json:"role"`
-	SecretName  string              `json:"secretName,omitempty"`
+	LogicalDatabase string              `json:"logicalDatabase,omitempty"`
+	RoleName        string              `json:"roleName,omitempty"`
+	Credentials     *BindingCredentials `json:"credentials,omitempty"`
+	Name            string              `json:"name"`
+	Cluster         string              `json:"cluster"`
+	Namespaces      []string            `json:"namespaces"`
+	Role            string              `json:"role"`
+	SecretName      string              `json:"secretName,omitempty"`
 }
 
 // PatchDatabaseBindingRequest replaces namespaces and/or enables dedicated credentials.
@@ -277,15 +281,26 @@ func (c *Client) GetDatabaseBinding(ctx context.Context, database, name string) 
 	if err != nil {
 		return nil, "", err
 	}
+	if err := c.resolveBindingFirstDatabase(ctx, &binding); err != nil {
+		return nil, "", err
+	}
 	return &binding, etag, nil
 }
 
 // CreateDatabaseBinding binds a database into namespaces of a cluster.
 func (c *Client) CreateDatabaseBinding(ctx context.Context, database string, req CreateDatabaseBindingRequest) (*DatabaseBinding, string, error) {
+	identity := DatabaseBinding{Database: database, LogicalDatabase: req.LogicalDatabase, SecretName: req.SecretName}
+	if err := c.resolveBindingFirstDatabase(ctx, &identity); err != nil {
+		return nil, "", err
+	}
 	var binding DatabaseBinding
 	etag, err := c.request(ctx, http.MethodPost, c.tenantPath("databases", database, "bindings"), req, &binding)
 	if err != nil {
 		return nil, "", err
+	}
+	binding.FirstLogicalDatabase = identity.FirstLogicalDatabase
+	if req.LogicalDatabase == "" {
+		binding.FirstLogicalDatabase = binding.LogicalDatabase
 	}
 	return &binding, etag, nil
 }
@@ -309,8 +324,9 @@ func (c *Client) DeleteDatabaseBinding(ctx context.Context, database, name strin
 
 // DatabasePostgres distinguishes an absent list from an explicit empty list.
 type DatabasePostgres struct {
-	Roles      *[]DeclaredRole `json:"roles,omitempty"`
-	Extensions *[]Extension    `json:"extensions,omitempty"`
+	Databases  *[]LogicalDatabase `json:"databases,omitempty"`
+	Roles      *[]DeclaredRole    `json:"roles,omitempty"`
+	Extensions *[]Extension       `json:"extensions,omitempty"`
 }
 
 type DeclaredRole struct {
@@ -343,4 +359,35 @@ func (c *Client) RotateDatabaseBindingCredentials(ctx context.Context, database,
 		return nil, fmt.Errorf("rotate database binding credentials: %w", err)
 	}
 	return &result, nil
+}
+
+// LogicalDatabase is a PostgreSQL database and its declared schemas.
+type LogicalDatabase struct {
+	Name    string           `json:"name"`
+	Schemas []DatabaseSchema `json:"schemas"`
+}
+type DatabaseSchema struct {
+	Name string `json:"name"`
+}
+type LogicalDatabaseStatus struct {
+	Name    string `json:"name"`
+	Phase   string `json:"phase"`
+	Message string `json:"message"`
+}
+
+// resolveBindingFirstDatabase only reads the current instance when a default
+// Secret cannot yet be read from spec/status. Restore source metadata is not an identity.
+func (c *Client) resolveBindingFirstDatabase(ctx context.Context, b *DatabaseBinding) error {
+	if b.LogicalDatabase == "" || b.SecretName != "" || (b.Status != nil && b.Status.SecretName != "") {
+		return nil
+	}
+	db, _, err := c.GetDatabase(ctx, b.Database)
+	if err != nil {
+		return fmt.Errorf("confirm binding PostgreSQL identity: %w", err)
+	}
+	if db.Postgres == nil || db.Postgres.Databases == nil || len(*db.Postgres.Databases) == 0 || (*db.Postgres.Databases)[0].Name == "" {
+		return fmt.Errorf("first PostgreSQL database name is unavailable; refresh the database before binding it")
+	}
+	b.FirstLogicalDatabase = (*db.Postgres.Databases)[0].Name
+	return nil
 }

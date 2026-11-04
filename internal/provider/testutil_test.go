@@ -120,7 +120,7 @@ type mockRequest struct {
 	body            map[string]any
 }
 
-func newMockKupeAPI() *mockKupeAPI {
+func newMockKupeAPI(decorators ...func(http.Handler) http.Handler) *mockKupeAPI {
 	m := &mockKupeAPI{
 		clusters:    make(map[string]map[string]any),
 		secrets:     make(map[string]map[string]any),
@@ -151,7 +151,11 @@ func newMockKupeAPI() *mockKupeAPI {
 		"platformFee": "29.00", "maxClusters": float64(3),
 	}
 
-	m.server = httptest.NewServer(http.HandlerFunc(m.handler))
+	var handler http.Handler = http.HandlerFunc(m.handler)
+	for _, decorate := range decorators {
+		handler = decorate(handler)
+	}
+	m.server = httptest.NewServer(handler)
 	return m
 }
 
@@ -922,6 +926,7 @@ func (m *mockKupeAPI) createDatabase(w http.ResponseWriter, r *http.Request) {
 	if v, ok := body["postgres"]; ok {
 		db["postgres"] = v
 	}
+	mockEffectivePostgres(db)
 	m.databases[name] = db
 	w.Header().Set("ETag", `"`+rv+`"`)
 	w.WriteHeader(http.StatusCreated)
@@ -934,6 +939,7 @@ func (m *mockKupeAPI) getDatabase(w http.ResponseWriter, name string) {
 		mockError(w, http.StatusNotFound, "", "not found")
 		return
 	}
+	mockEffectivePostgres(db)
 	m.databaseGets++
 	status := map[string]any{
 		"phase":              "Running",
@@ -1030,6 +1036,12 @@ func (m *mockKupeAPI) patchDatabase(w http.ResponseWriter, r *http.Request, name
 		if stored == nil {
 			stored = map[string]any{}
 		}
+		if requested, exists := incoming["databases"]; exists {
+			if err := mockLogicalPatch(db, requested); err != nil {
+				mockError(w, http.StatusBadRequest, "", err.Error())
+				return
+			}
+		}
 		for k, v := range incoming {
 			stored[k] = v
 		}
@@ -1073,7 +1085,7 @@ func (m *mockKupeAPI) deleteDatabase(w http.ResponseWriter, name string) {
 
 // mockBindingCreateFields are the fields kupe-api accepts when a binding is
 // created; it refuses any other field, the old `namespace` included.
-var mockBindingCreateFields = map[string]bool{"name": true, "cluster": true, "namespaces": true, "role": true, "secretName": true, "roleName": true, "credentials": true}
+var mockBindingCreateFields = map[string]bool{"name": true, "cluster": true, "namespaces": true, "role": true, "secretName": true, "logicalDatabase": true, "roleName": true, "credentials": true}
 
 func (m *mockKupeAPI) createDatabaseBinding(w http.ResponseWriter, r *http.Request, database string) {
 	if _, ok := m.databases[database]; !ok {
@@ -1100,13 +1112,43 @@ func (m *mockKupeAPI) createDatabaseBinding(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	key := database + "/" + name
+	for _, existing := range m.databaseBindings {
+		if existing["name"] == name {
+			mockError(w, http.StatusConflict, "", "binding already exists")
+			return
+		}
+	}
 	if _, exists := m.databaseBindings[key]; exists {
-		mockError(w, http.StatusConflict, "", "binding already exists")
+		mockError(w, http.StatusConflict, "", "binding already exists; set name to another name")
 		return
+	}
+	logical := mockRequestedLogical(m.databases[database], body)
+	secret := mockLogicalSecret(database, logical, mockFirstLogical(m.databases[database]), strOrEmpty(body["role"]), strOrEmpty(body["roleName"]))
+	if configured := strOrEmpty(body["secretName"]); configured != "" {
+		secret = configured
+	}
+	for _, existing := range m.databaseBindings {
+		if existing["cluster"] != body["cluster"] {
+			continue
+		}
+		existingSecret := strOrEmpty(existing["secretName"])
+		if existingSecret == "" {
+			existingSecret = mockLogicalSecret(strOrEmpty(existing["database"]), strOrEmpty(existing["logicalDatabase"]), mockFirstLogical(m.databases[strOrEmpty(existing["database"])]), strOrEmpty(existing["role"]), strOrEmpty(existing["roleName"]))
+		}
+		if secret != existingSecret {
+			continue
+		}
+		oldNamespaces, _ := existing["namespaces"].([]string)
+		for _, ns := range namespaces {
+			if slices.Contains(oldNamespaces, ns) {
+				mockError(w, http.StatusBadRequest, "", fmt.Sprintf("secret name %q is already used in namespace %q; set spec.secretName to another name", secret, ns))
+				return
+			}
+		}
 	}
 	rv := m.nextRV()
 	binding := map[string]any{
-		"name": name, "database": database,
+		"name": name, "database": database, "logicalDatabase": mockRequestedLogical(m.databases[database], body),
 		"cluster": body["cluster"], "namespaces": namespaces, "role": body["role"],
 		"roleName": body["roleName"], "credentials": body["credentials"], "generation": 1,
 		"secretName": strOrEmpty(body["secretName"]),
@@ -1163,7 +1205,7 @@ func (m *mockKupeAPI) getDatabaseBinding(w http.ResponseWriter, database, name s
 		if role == "custom" {
 			role = strings.ReplaceAll(strOrEmpty(binding["roleName"]), "_", "-")
 		}
-		secretName = database + "-" + role
+		secretName = mockLogicalSecret(database, strOrEmpty(binding["logicalDatabase"]), mockFirstLogical(m.databases[database]), role, "")
 	}
 	reported := binding["namespaces"].([]string)
 	if lag, _ := binding["lag"].(int); lag > 0 {

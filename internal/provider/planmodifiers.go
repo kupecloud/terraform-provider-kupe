@@ -78,9 +78,10 @@ func (m storageNeverShrinksModifier) PlanModifyString(_ context.Context, req pla
 
 // databaseBindingNameDefault plans the binding name when it is not
 // configured. kupe-api requires a name and has no default, so the provider
-// derives "{database}-{cluster}-{role}" from the arguments that cannot
-// change, leaving out the namespaces, which can (docs-internal
-// standards/bindings.md rule 25). A second binding of the same role of a
+// derives "{database}-{cluster}-{role}" for an omitted/null logical selection
+// or one equal to the normalised instance name. Other explicit selections include
+// the logical name, including a differently named restored first database. Mutable
+// namespaces are left out (docs-internal standards/bindings.md rule 25). A second binding of the same role of a
 // database into the same cluster needs its own name. An existing binding
 // keeps the name it has, so importing one or removing `name` from
 // configuration never forces a replacement.
@@ -91,10 +92,10 @@ func databaseBindingNameDefault() planmodifier.String {
 type databaseBindingNameDefaultModifier struct{}
 
 // databaseBindingNameParts are the attributes the default name joins, in order.
-var databaseBindingNameParts = []string{"database", "cluster", "role"}
+var databaseBindingNameParts = []string{"database", "logical_database", "cluster", "role"}
 
 func (m databaseBindingNameDefaultModifier) Description(_ context.Context) string {
-	return `Defaults to "{database}-{cluster}-{role}", using role_name with underscores replaced by hyphens for custom bindings.`
+	return "Defaults to \"{database}-{cluster}-{role}\" when `logical_database` is omitted or null, or equals the instance name with hyphens replaced by underscores. Other explicit selections, including a differently named restored first database, use \"{database}-{logical_database}-{cluster}-{role}\". An unknown `logical_database` defers the default until it is known. Uses `role_name` for custom bindings and replaces underscores with hyphens. Set `name` explicitly if the default is taken, longer than 63 characters, or you need a second binding of the same role into the same cluster."
 }
 
 func (m databaseBindingNameDefaultModifier) MarkdownDescription(ctx context.Context) string {
@@ -112,7 +113,25 @@ func (m databaseBindingNameDefaultModifier) PlanModifyString(ctx context.Context
 	parts := make([]string, 0, len(databaseBindingNameParts))
 	for _, attr := range databaseBindingNameParts {
 		var v types.String
-		resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root(attr), &v)...)
+		if attr == "logical_database" {
+			if _, exists := req.Config.Schema.GetAttributes()[attr]; !exists {
+				continue
+			}
+			resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root(attr), &v)...)
+			// Omission selects the first database. An explicit unknown may
+			// resolve to any entry, so defer its computed name until then.
+			if v.IsUnknown() {
+				return
+			}
+			var database types.String
+			resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("database"), &database)...)
+			if !isSet(v) || v.ValueString() == strings.ReplaceAll(database.ValueString(), "-", "_") {
+				continue
+			}
+			v = types.StringValue(strings.ReplaceAll(v.ValueString(), "_", "-"))
+		} else {
+			resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root(attr), &v)...)
+		}
 		if resp.Diagnostics.HasError() || v.IsUnknown() || v.IsNull() {
 			return
 		}

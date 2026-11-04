@@ -13,6 +13,16 @@ description: |-
 
 {{ tffile "examples/resources/kupe_database_binding/resource.tf" }}
 
+### Selecting a PostgreSQL database
+
+Set `logical_database = "analytics"` to bind an added PostgreSQL database. Omit it for the first database, including a restored instance's preserved first name. Changing the selection replaces the binding.
+
+The default binding resource name is `{database}-{cluster}-{role}` when the selection is omitted or equals the instance name with hyphens replaced by underscores. Other explicit selections use `{database}-{logical_database}-{cluster}-{role}`. For example, an instance `orders-db` restored with first PostgreSQL name `historical_db` gets `orders-db-prod-readwrite` when selection is omitted, or `orders-db-historical-db-prod-readwrite` when `historical_db` is selected explicitly. This provider resource-name rule is tool-specific. The default Secret name uses the effective first database: `{database}-{role}` for that database, or `{database}-{logical_database}-{role}` for an added database. Both restored examples therefore use Secret `orders-db-readwrite`. Custom bindings use `role_name` in place of `role`; underscores become hyphens. Namespaces never appear in the default name. Existing bindings keep their name when `logical_database` is omitted. If the logical selection is explicitly unknown during planning, the default name becomes known when the selection is known. Omitting the selection, or setting it to `null`, uses the first-database default during planning. Set `name` explicitly if you need a different name.
+
+A taken binding or Secret name is refused. Set `name` or `secret_name` explicitly to choose another name. The provider does not retry with a generated name. The instance's cap of 20 bound namespaces covers all its PostgreSQL databases.
+
+Use an owner binding to run grants inside an added database before using its readwrite, readonly or custom bindings. Ready confirms provisioning and Secret preparation; it does not verify tenant SQL grants. See [Logical databases](database.md#logical-databases).
+
 ### Using the credentials Secret
 
 Inside the cluster, each bound namespace sees a Service named after the database and the Secret named by `secret_name`, with the keys `type`, `provider`, `host`, `port`, `database`, `username`, `password`, `sslmode`, `ca.crt` and `uri`. `type` is `postgresql` and `provider` is `kupe`.
@@ -35,7 +45,7 @@ A binding lists at most 10 namespaces, which the plan checks. The bindings of on
 
 Set `credentials = { dedicated = true }` to give every listed namespace its own login and password. Enabling dedicated credentials updates the binding in place, including when `namespaces` changes in the same apply. Turning dedicated credentials off replaces the binding. Owner bindings use shared credentials. Custom bindings require `role_name` and dedicated credentials.
 
-For a custom role such as `sales_reports`, the default binding name is `{database}-{cluster}-sales-reports` and the default Secret name is `{database}-sales-reports`.
+For an omitted selection or an explicit selection equal to the normalised instance name, a custom role such as `sales_reports` gives default binding name `{database}-{cluster}-sales-reports`. An explicit restored first name that differs includes the logical-name component as described above. The default Secret name for the effective first database is `{database}-sales-reports`.
 
 Set or change `credentials.rotation_trigger` to request one dedicated rotation on update. Removing the trigger does not rotate. The trigger is your own marker, such as a rotation ticket number; Terraform stores it in state. Passwords never reach the provider.
 
