@@ -23,6 +23,10 @@ Deleting a database removes it and its automatic backups immediately, and they c
 ```terraform
 resource "kupe_database" "orders" {
   postgres = {
+    databases = [
+      { name = "orders_db" },
+      { name = "analytics", schemas = [{ name = "reporting" }] }
+    ]
     roles      = [{ name = "sales_reports" }]
     extensions = [{ name = "pgcrypto" }]
   }
@@ -46,13 +50,42 @@ resource "kupe_database" "orders" {
   # deletion_protection defaults to true: the platform refuses to delete the
   # database until it is set to false and applied.
 }
+
+resource "kupe_database_binding" "analytics" {
+  database         = kupe_database.orders.name
+  logical_database = "analytics"
+  cluster          = "prod"
+  namespaces       = ["reports"]
+  role             = "readwrite"
+}
 ```
 
 ### Declared roles and extensions
 
 Set `postgres = { roles = [{ name = "reporting" }], extensions = [{ name = "pgcrypto" }] }` to declare group roles and install extensions from the platform's published allowlist. Declared roles have no privileges until you grant them in PostgreSQL. Grant a declared role to applications with a custom binding and dedicated credentials.
 
-Omitting `postgres`, or either list inside it, keeps its current value. Set a list to `[]` to clear it. A role still used by a binding cannot be removed. Declared role names ending in _owner, _readwrite or _readonly are reserved for database logins.
+Omitting `postgres`, `roles` or `extensions` keeps its current value. Set `roles` or `extensions` to `[]` to clear it. A role still used by a binding cannot be removed. Declared role names ending in _owner, _readwrite or _readonly are reserved for database logins.
+
+### Logical databases
+
+Set `postgres.databases` to declare up to 10 PostgreSQL databases on one instance, including its first database. Each entry can declare up to 20 schemas. Database names use lowercase letters, numbers and underscores, start with a letter and are at most 53 characters. Schema names follow the same pattern with a 63 character limit; `public`, `information_schema` and names starting with `pg_` are reserved.
+
+For a new empty instance named `orders-db`, the first entry is `orders_db`. A restored instance keeps its source's first PostgreSQL name: restore without `postgres.databases`, read the effective list, then add entries or schemas in a separate update. The provider reads the current instance's identity and does not infer it from the restore source's later settings.
+
+Databases and schemas can only be added. Keep the first entry first. Added entries may be reordered. Removing or renaming a database or schema, moving the first entry, or setting `databases = []` fails during planning. These changes never replace the instance. Omit `databases` or set it to `null` to retain the effective list: Terraform treats both as an unset Optional+Computed value. The data source returns the effective list under `postgres.databases`.
+
+Database and schema entries must each have a non-null, non-empty name when known. The public schema marks these child names optional so an entire entry object can come from an output that is unknown during planning; validation still requires each known entry to have a valid name. Whole-list, whole-object and individual-name outputs can resolve at apply time. The provider checks the resolved values before sending a database create or update. Null list values and omitted lists retain the effective list; null entries and null names are refused.
+
+Adding a database or schema updates the instance in place and waits for provisioning. Ready does not verify your SQL grants. Connect through an owner binding to the added database and grant access inside it. For example, as `analytics_owner`, grant existing tables and future tables created by that owner:
+
+```sql
+GRANT USAGE ON SCHEMA reporting TO analytics_readwrite;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA reporting TO analytics_readwrite;
+ALTER DEFAULT PRIVILEGES FOR ROLE analytics_owner IN SCHEMA reporting
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO analytics_readwrite;
+```
+
+Default privileges apply to future objects created by the named owner. Repeat the grants for other owners and object types your application uses. Provisioning does not give added databases automatic readwrite or readonly table grants.
 
 ### Protecting a database from destroy
 
@@ -164,7 +197,7 @@ Grant access with [`kupe_database_binding`](database_binding.md). Each binding p
 - `deletion_protection` (Boolean) While `true`, the Kupe platform refuses to delete the database. Set it to `false` and apply before destroying. Default `true`, also for an existing database: importing an unprotected database without this attribute in configuration plans turning protection on.
 - `engine` (String) Database engine. Only `postgres` is supported, and it is the default. The engine of an existing database cannot change: a different value fails the plan instead of replacing the database.
 - `high_availability` (Boolean) Run two instances with a synchronous standby. Can be turned on or off in place. When unset, a new database is created without it and an existing or imported database keeps its current setting, so removing the attribute from configuration does not turn HA off: set it to `false` to do that.
-- `postgres` (Attributes) Declared PostgreSQL group roles and extensions. Omitted settings keep their current values. Set a list to [] to clear it. The platform grants declared roles no privileges. (see [below for nested schema](#nestedatt--postgres))
+- `postgres` (Attributes) PostgreSQL databases, group roles and extensions. Omitted settings keep their current values. Roles and extensions can be cleared with []; databases and schemas can only grow. The platform grants declared roles no privileges. (see [below for nested schema](#nestedatt--postgres))
 - `source` (Attributes) Restore the new database from a manual backup or from another database, instead of starting it empty. Set exactly one of `backup` and `database`. The new database runs the source's major version: leave `version` unset, or set that one. Its storage must be at least the source's. The source is unchanged, and the new database counts against the plan's database limit like any other. `source` is read only when the database is created, and any change to it replaces the database: Terraform deletes it and restores a new one. That includes a value Terraform knows only at apply time, such as the name of a `kupe_database_backup` without `name` that is taken again. Once the database exists, remove `source` from the configuration (the database keeps it), or keep it constant: name the backup with a literal or a backup resource that sets `name`, and write `point_in_time` literally. Null on a database that was not restored. While the Kupe platform does not offer backups, setting `source` fails with error code `backups_unavailable`. (see [below for nested schema](#nestedatt--source))
 - `timeouts` (Attributes) (see [below for nested schema](#nestedatt--timeouts))
 - `version` (String) Engine major version, e.g. `18`. When unset, the platform default is used and recorded here; a database restored with `source` runs the source's major version. Major version upgrades are not available yet, so changing the version of an existing database fails the plan.
@@ -203,8 +236,26 @@ Optional:
 
 Optional:
 
+- `databases` (Attributes List) PostgreSQL databases on this instance, including its first database: 1 to 10 entries. For a new empty instance, the first name is the instance name with hyphens replaced by underscores (orders-db becomes orders_db). A restored instance keeps its source's first PostgreSQL name. Database names are at most 53 characters. Databases and schemas can only be added; the first entry cannot move. Use an owner binding to run grants inside added databases. Ready confirms provisioning, not tenant SQL grants. Restore first without this list, then update it using the effective first name. (see [below for nested schema](#nestedatt--postgres--databases))
 - `extensions` (Attributes Set) (see [below for nested schema](#nestedatt--postgres--extensions))
 - `roles` (Attributes Set) (see [below for nested schema](#nestedatt--postgres--roles))
+
+<a id="nestedatt--postgres--databases"></a>
+### Nested Schema for `postgres.databases`
+
+Optional:
+
+- `name` (String) PostgreSQL database name. A name is required when the entry is known. Added databases cannot use names reserved by PostgreSQL or the platform.
+- `schemas` (Attributes List) Schemas to create in this database: at most 20. Schemas can only be added. Names are at most 63 characters; public, information_schema and names starting with pg_ are reserved. (see [below for nested schema](#nestedatt--postgres--databases--schemas))
+
+<a id="nestedatt--postgres--databases--schemas"></a>
+### Nested Schema for `postgres.databases.schemas`
+
+Optional:
+
+- `name` (String) PostgreSQL schema name. A name is required when the entry is known.
+
+
 
 <a id="nestedatt--postgres--extensions"></a>
 ### Nested Schema for `postgres.extensions`

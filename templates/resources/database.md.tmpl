@@ -17,7 +17,28 @@ description: |-
 
 Set `postgres = { roles = [{ name = "reporting" }], extensions = [{ name = "pgcrypto" }] }` to declare group roles and install extensions from the platform's published allowlist. Declared roles have no privileges until you grant them in PostgreSQL. Grant a declared role to applications with a custom binding and dedicated credentials.
 
-Omitting `postgres`, or either list inside it, keeps its current value. Set a list to `[]` to clear it. A role still used by a binding cannot be removed. Declared role names ending in _owner, _readwrite or _readonly are reserved for database logins.
+Omitting `postgres`, `roles` or `extensions` keeps its current value. Set `roles` or `extensions` to `[]` to clear it. A role still used by a binding cannot be removed. Declared role names ending in _owner, _readwrite or _readonly are reserved for database logins.
+
+### Logical databases
+
+Set `postgres.databases` to declare up to 10 PostgreSQL databases on one instance, including its first database. Each entry can declare up to 20 schemas. Database names use lowercase letters, numbers and underscores, start with a letter and are at most 53 characters. Schema names follow the same pattern with a 63 character limit; `public`, `information_schema` and names starting with `pg_` are reserved.
+
+For a new empty instance named `orders-db`, the first entry is `orders_db`. A restored instance keeps its source's first PostgreSQL name: restore without `postgres.databases`, read the effective list, then add entries or schemas in a separate update. The provider reads the current instance's identity and does not infer it from the restore source's later settings.
+
+Databases and schemas can only be added. Keep the first entry first. Added entries may be reordered. Removing or renaming a database or schema, moving the first entry, or setting `databases = []` fails during planning. These changes never replace the instance. Omit `databases` or set it to `null` to retain the effective list: Terraform treats both as an unset Optional+Computed value. The data source returns the effective list under `postgres.databases`.
+
+Database and schema entries must each have a non-null, non-empty name when known. The public schema marks these child names optional so an entire entry object can come from an output that is unknown during planning; validation still requires each known entry to have a valid name. Whole-list, whole-object and individual-name outputs can resolve at apply time. The provider checks the resolved values before sending a database create or update. Null list values and omitted lists retain the effective list; null entries and null names are refused.
+
+Adding a database or schema updates the instance in place and waits for provisioning. Ready does not verify your SQL grants. Connect through an owner binding to the added database and grant access inside it. For example, as `analytics_owner`, grant existing tables and future tables created by that owner:
+
+```sql
+GRANT USAGE ON SCHEMA reporting TO analytics_readwrite;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA reporting TO analytics_readwrite;
+ALTER DEFAULT PRIVILEGES FOR ROLE analytics_owner IN SCHEMA reporting
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO analytics_readwrite;
+```
+
+Default privileges apply to future objects created by the named owner. Repeat the grants for other owners and object types your application uses. Provisioning does not give added databases automatic readwrite or readonly table grants.
 
 ### Protecting a database from destroy
 

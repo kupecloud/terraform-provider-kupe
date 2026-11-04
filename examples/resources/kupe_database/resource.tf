@@ -1,5 +1,9 @@
 resource "kupe_database" "orders" {
   postgres = {
+    databases = [
+      { name = "orders_db" },
+      { name = "analytics", schemas = [{ name = "reporting" }] }
+    ]
     roles      = [{ name = "sales_reports" }]
     extensions = [{ name = "pgcrypto" }]
   }
@@ -22,4 +26,12 @@ resource "kupe_database" "orders" {
 
   # deletion_protection defaults to true: the platform refuses to delete the
   # database until it is set to false and applied.
+}
+
+resource "kupe_database_binding" "analytics" {
+  database         = kupe_database.orders.name
+  logical_database = "analytics"
+  cluster          = "prod"
+  namespaces       = ["reports"]
+  role             = "readwrite"
 }

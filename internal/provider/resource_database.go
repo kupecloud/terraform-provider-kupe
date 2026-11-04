@@ -471,6 +471,10 @@ func (r *DatabaseResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
+	resp.Diagnostics.Append(validateLogicalWrite(ctx, req.Config, plan, DatabaseResourceModel{}, true)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	deletionProtection := plan.DeletionProtection.ValueBool()
 	db, etag, err := r.client.CreateDatabase(ctx, client.CreateDatabaseRequest{
 		Postgres:           postgresChanges(plan.Postgres, types.ObjectNull(databasePostgresAttrTypes)),
@@ -498,6 +502,10 @@ func (r *DatabaseResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
+	resp.Diagnostics.Append(validateLogicalWrite(ctx, req.Config, plan, state, false)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	var send patchFunc[client.Database]
 	patch, hasChanges := databasePatch(&plan, &state)
 	if hasChanges {
@@ -656,6 +664,9 @@ func settingsChanged(prior *databaseModel, current databaseModel) []string {
 	}
 	if !current.Backup.Equal(prior.Backup) {
 		changed = append(changed, "backup")
+	}
+	if !postgresDatabases(current.Postgres).Equal(postgresDatabases(prior.Postgres)) {
+		changed = append(changed, "postgres.databases")
 	}
 	for _, key := range []string{"roles", "extensions"} {
 		if !postgresList(current.Postgres, key).Equal(postgresList(prior.Postgres, key)) {

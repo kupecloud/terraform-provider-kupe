@@ -61,6 +61,16 @@ resource "kupe_database_binding" "custom_reports" {
 }
 ```
 
+### Selecting a PostgreSQL database
+
+Set `logical_database = "analytics"` to bind an added PostgreSQL database. Omit it for the first database, including a restored instance's preserved first name. Changing the selection replaces the binding.
+
+The default binding resource name is `{database}-{cluster}-{role}` when the selection is omitted or equals the instance name with hyphens replaced by underscores. Other explicit selections use `{database}-{logical_database}-{cluster}-{role}`. For example, an instance `orders-db` restored with first PostgreSQL name `historical_db` gets `orders-db-prod-readwrite` when selection is omitted, or `orders-db-historical-db-prod-readwrite` when `historical_db` is selected explicitly. This provider resource-name rule is tool-specific. The default Secret name uses the effective first database: `{database}-{role}` for that database, or `{database}-{logical_database}-{role}` for an added database. Both restored examples therefore use Secret `orders-db-readwrite`. Custom bindings use `role_name` in place of `role`; underscores become hyphens. Namespaces never appear in the default name. Existing bindings keep their name when `logical_database` is omitted. If the logical selection is explicitly unknown during planning, the default name becomes known when the selection is known. Omitting the selection, or setting it to `null`, uses the first-database default during planning. Set `name` explicitly if you need a different name.
+
+A taken binding or Secret name is refused. Set `name` or `secret_name` explicitly to choose another name. The provider does not retry with a generated name. The instance's cap of 20 bound namespaces covers all its PostgreSQL databases.
+
+Use an owner binding to run grants inside an added database before using its readwrite, readonly or custom bindings. Ready confirms provisioning and Secret preparation; it does not verify tenant SQL grants. See [Logical databases](database.md#logical-databases).
+
 ### Using the credentials Secret
 
 Inside the cluster, each bound namespace sees a Service named after the database and the Secret named by `secret_name`, with the keys `type`, `provider`, `host`, `port`, `database`, `username`, `password`, `sslmode`, `ca.crt` and `uri`. `type` is `postgresql` and `provider` is `kupe`.
@@ -136,7 +146,7 @@ A binding lists at most 10 namespaces, which the plan checks. The bindings of on
 
 Set `credentials = { dedicated = true }` to give every listed namespace its own login and password. Enabling dedicated credentials updates the binding in place, including when `namespaces` changes in the same apply. Turning dedicated credentials off replaces the binding. Owner bindings use shared credentials. Custom bindings require `role_name` and dedicated credentials.
 
-For a custom role such as `sales_reports`, the default binding name is `{database}-{cluster}-sales-reports` and the default Secret name is `{database}-sales-reports`.
+For an omitted selection or an explicit selection equal to the normalised instance name, a custom role such as `sales_reports` gives default binding name `{database}-{cluster}-sales-reports`. An explicit restored first name that differs includes the logical-name component as described above. The default Secret name for the effective first database is `{database}-sales-reports`.
 
 Set or change `credentials.rotation_trigger` to request one dedicated rotation on update. Removing the trigger does not rotate. The trigger is your own marker, such as a rotation ticket number; Terraform stores it in state. Passwords never reach the provider.
 
@@ -164,9 +174,10 @@ A namespace is `Failed` when it already has a Service or Endpoints object named 
 ### Optional
 
 - `credentials` (Attributes) Dedicated credentials give every namespace its own login and password. Passwords are never returned to Terraform. (see [below for nested schema](#nestedatt--credentials))
-- `name` (String) Binding name. Defaults to `{database}-{cluster}-{role}`, using `role_name` for custom and replacing underscores with hyphens. Set it explicitly if that is longer than 63 characters, or to bind the same role of a database into the same cluster with a second binding.
+- `logical_database` (String) PostgreSQL database to bind. Omit it to use the first database, including a restored instance's preserved first name. Changing it replaces the binding. Added databases include their logical name in default Secret names. See `name` for the binding resource name. If a default name is taken, set `name` or `secret_name` explicitly.
+- `name` (String) Binding name. Defaults to `{database}-{cluster}-{role}` when `logical_database` is omitted or equals the instance name with hyphens replaced by underscores. Other explicit selections use `{database}-{logical_database}-{cluster}-{role}`, including a restored first database whose name differs from the normalised instance name. Uses `role_name` for custom and replaces underscores with hyphens. If `logical_database` is explicitly unknown during planning, the default name becomes known when the selection is known. Set `name` explicitly if the default is taken, longer than 63 characters, or you need a second binding of the same role into the same cluster.
 - `role_name` (String) Declared role granted by a custom binding. Required for custom and refused for built-in roles. Changing it replaces the binding.
-- `secret_name` (String) Name of the credentials Secret in every listed namespace. When unset, a new binding uses `{database}-{role}` (or `{database}-{role_name}` for custom, with underscores replaced by hyphens) and an existing or imported binding keeps its current name, so removing the attribute from configuration does not change the name back: set it to `{database}-{role}` instead. A different name replaces the binding. The Secret holds `type`, `provider`, `host`, `port`, `database`, `username`, `password`, `sslmode`, `ca.crt` and `uri`; mount it at `/bindings/<secret_name>`, where `uri` expects `ca.crt`.
+- `secret_name` (String) Name of the credentials Secret in every listed namespace. When unset, a new binding uses `{database}-{role}` for the first PostgreSQL database or `{database}-{logical_database}-{role}` for an added database (using `role_name` for custom, with underscores replaced by hyphens). A taken default is refused; set `secret_name` explicitly. An existing or imported binding keeps its current name, so removing the attribute from configuration does not change the name back: set it to `{database}-{role}` instead. A different name replaces the binding. The Secret holds `type`, `provider`, `host`, `port`, `database`, `username`, `password`, `sslmode`, `ca.crt` and `uri`; mount it at `/bindings/<secret_name>`, where `uri` expects `ca.crt`.
 - `timeouts` (Attributes) (see [below for nested schema](#nestedatt--timeouts))
 
 ### Read-Only

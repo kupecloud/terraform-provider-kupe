@@ -2,7 +2,9 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 	"strconv"
 	"strings"
@@ -64,6 +66,7 @@ type DatabaseBindingResource struct {
 }
 
 type DatabaseBindingResourceModel struct {
+	LogicalDatabase  types.String   `tfsdk:"logical_database"`
 	RoleName         types.String   `tfsdk:"role_name"`
 	Credentials      types.Object   `tfsdk:"credentials"`
 	ObservedRotation types.String   `tfsdk:"observed_rotation"`
@@ -218,13 +221,14 @@ func (r *DatabaseBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 			"another binding of the same database still lists that namespace. With shared credentials, the password does not change: " +
 			"rotate the role's credentials if the namespace should lose knowledge of it.",
 		Attributes: map[string]schema.Attribute{
+			"logical_database":  schema.StringAttribute{Optional: true, Computed: true, Description: "PostgreSQL database to bind. Omit it to use the first database, including a restored instance's preserved first name. Changing it replaces the binding. Added databases include their logical name in default Secret names. See `name` for the binding resource name. If a default name is taken, set `name` or `secret_name` explicitly.", Validators: logicalNameValidators(53), PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown(), stringplanmodifier.RequiresReplace()}},
 			"role_name":         schema.StringAttribute{Optional: true, Description: "Declared role granted by a custom binding. Required for custom and refused for built-in roles. Changing it replaces the binding.", Validators: []validator.String{stringvalidator.LengthBetween(1, 63), stringvalidator.RegexMatches(bindingRoleNamePattern, "must start with a lowercase letter and contain only lowercase letters, numbers or _")}, PlanModifiers: replace},
 			"credentials":       bindingCredentialsSchema(),
 			"observed_rotation": schema.StringAttribute{Computed: true, Description: "Dedicated rotation token applied and delivered to every listed namespace; empty for shared credentials."},
 			"name": schema.StringAttribute{
-				Description: "Binding name. Defaults to `{database}-{cluster}-{role}`, using `role_name` for custom and replacing underscores with hyphens. Set it explicitly if that is " +
-					"longer than 63 characters, or to bind the same role of a database into the same cluster with a " +
-					"second binding.",
+				Description: "Binding name. Defaults to `{database}-{cluster}-{role}` when `logical_database` is omitted or equals the instance name with hyphens replaced by underscores. Other explicit selections use `{database}-{logical_database}-{cluster}-{role}`, including a restored first database whose name differs from the normalised instance name. Uses `role_name` for custom and replaces underscores with hyphens. If `logical_database` is explicitly unknown during planning, the default name becomes known when the selection is known. Set `name` explicitly if the default is taken, " +
+					"longer than 63 characters, or you need a second binding of the same role " +
+					"into the same cluster.",
 				Optional: true,
 				Computed: true,
 				PlanModifiers: []planmodifier.String{
@@ -265,7 +269,7 @@ func (r *DatabaseBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 			},
 			"secret_name": schema.StringAttribute{
 				Description: "Name of the credentials Secret in every listed namespace. When unset, a new binding uses " +
-					"`{database}-{role}` (or `{database}-{role_name}` for custom, with underscores replaced by hyphens) and an existing or imported binding keeps its current name, so removing the " +
+					"`{database}-{role}` for the first PostgreSQL database or `{database}-{logical_database}-{role}` for an added database (using `role_name` for custom, with underscores replaced by hyphens). A taken default is refused; set `secret_name` explicitly. An existing or imported binding keeps its current name, so removing the " +
 					"attribute from configuration does not change the name back: set it to `{database}-{role}` " +
 					"instead. A different name replaces the binding. The Secret holds `type`, `provider`, `host`, `port`, `database`, `username`, `password`, `sslmode`, " +
 					"`ca.crt` and `uri`; mount it at `/bindings/<secret_name>`, where `uri` expects `ca.crt`.",
@@ -328,19 +332,20 @@ func (r *DatabaseBindingResource) Create(ctx context.Context, req resource.Creat
 	}
 
 	createReq := client.CreateDatabaseBindingRequest{
-		Name:        plan.Name.ValueString(),
-		Cluster:     plan.Cluster.ValueString(),
-		Namespaces:  setStrings(plan.Namespaces),
-		Role:        plan.Role.ValueString(),
-		RoleName:    plan.RoleName.ValueString(),
-		Credentials: &client.BindingCredentials{Dedicated: bindingDedicated(plan.Credentials)},
+		LogicalDatabase: plan.LogicalDatabase.ValueString(),
+		Name:            plan.Name.ValueString(),
+		Cluster:         plan.Cluster.ValueString(),
+		Namespaces:      setStrings(plan.Namespaces),
+		Role:            plan.Role.ValueString(),
+		RoleName:        plan.RoleName.ValueString(),
+		Credentials:     &client.BindingCredentials{Dedicated: bindingDedicated(plan.Credentials)},
 	}
 	if !plan.SecretName.IsUnknown() {
 		createReq.SecretName = plan.SecretName.ValueString()
 	}
 	binding, etag, err := r.client.CreateDatabaseBinding(ctx, plan.Database.ValueString(), createReq)
 	if err != nil {
-		resp.Diagnostics.AddError("failed to create database binding", apiErrorDetail(err))
+		resp.Diagnostics.AddError("failed to create database binding", databaseBindingCreateErrorDetail(err))
 		return
 	}
 	r.created(ctx, binding, etag, &plan, &resp.State, &resp.Diagnostics)
@@ -478,6 +483,7 @@ func mapDatabaseBindingToState(b *client.DatabaseBinding, etag string, state *Da
 	state.Cluster = types.StringValue(b.Cluster)
 	state.Namespaces = stringSet(b.Namespaces)
 	state.Role = types.StringValue(b.Role)
+	state.LogicalDatabase = stringOrNull(b.LogicalDatabase)
 	state.RoleName = stringOrNull(b.RoleName)
 	state.Credentials = bindingCredentialsValue(b.Credentials.Dedicated, bindingTrigger(state.Credentials))
 	state.ObservedRotation = types.StringValue("")
@@ -505,7 +511,12 @@ func mapDatabaseBindingToState(b *client.DatabaseBinding, etag string, state *Da
 		if role == "custom" {
 			role = strings.ReplaceAll(b.RoleName, "_", "-")
 		}
-		secretName = b.Database + "-" + role
+		parts := []string{b.Database}
+		if b.LogicalDatabase != "" && b.LogicalDatabase != b.FirstLogicalDatabase {
+			parts = append(parts, strings.ReplaceAll(b.LogicalDatabase, "_", "-"))
+		}
+		parts = append(parts, role)
+		secretName = strings.Join(parts, "-")
 	}
 	state.Phase = types.StringValue(phase)
 	state.SecretName = types.StringValue(secretName)
@@ -580,4 +591,18 @@ func databaseBindingFailed(b *client.DatabaseBinding) bool {
 		}
 	}
 	return true
+}
+
+func databaseBindingCreateErrorDetail(err error) string {
+	detail := apiErrorDetail(err)
+	var apiErr *client.APIError
+	if errors.As(err, &apiErr) {
+		if apiErr.StatusCode == http.StatusConflict && strings.Contains(apiErr.Message, "already exists") {
+			return detail + "\n\nSet `name` explicitly to another binding name."
+		}
+		if apiErr.StatusCode == http.StatusBadRequest && strings.Contains(apiErr.Message, "secret name") && strings.Contains(apiErr.Message, "already used") {
+			return detail + "\n\nSet `secret_name` explicitly to another Secret name."
+		}
+	}
+	return detail
 }

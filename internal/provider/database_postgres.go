@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework-validators/setvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
@@ -22,11 +23,12 @@ import (
 
 var postgresNameType = types.ObjectType{AttrTypes: map[string]attr.Type{"name": types.StringType}}
 var databasePostgresAttrTypes = map[string]attr.Type{
+	"databases":  types.ListType{ElemType: logicalDatabaseType},
 	"roles":      types.SetType{ElemType: postgresNameType},
 	"extensions": types.SetType{ElemType: postgresNameType},
 }
 
-const postgresDescription = "Declared PostgreSQL group roles and extensions. Omitted settings keep their current values. Set a list to [] to clear it. The platform grants declared roles no privileges."
+const postgresDescription = "PostgreSQL databases, group roles and extensions. Omitted settings keep their current values. Roles and extensions can be cleared with []; databases and schemas can only grow. The platform grants declared roles no privileges."
 
 func databasePostgresSchema() schema.SingleNestedAttribute {
 	list := func(role bool) schema.SetNestedAttribute {
@@ -41,7 +43,7 @@ func databasePostgresSchema() schema.SingleNestedAttribute {
 			"name": schema.StringAttribute{Required: true, Validators: validators, Description: "Name declared in PostgreSQL."},
 		}}}
 	}
-	return schema.SingleNestedAttribute{Optional: true, Computed: true, Description: postgresDescription, PlanModifiers: []planmodifier.Object{objectplanmodifier.UseStateForUnknown()}, Attributes: map[string]schema.Attribute{"roles": list(true), "extensions": list(false)}}
+	return schema.SingleNestedAttribute{Optional: true, Computed: true, Description: postgresDescription, PlanModifiers: []planmodifier.Object{objectplanmodifier.UseStateForUnknown()}, Attributes: map[string]schema.Attribute{"roles": list(true), "extensions": list(false), "databases": logicalDatabasesSchema()}}
 }
 
 type reservedDatabaseRole struct{}
@@ -115,7 +117,12 @@ func postgresChanges(plan, prior types.Object) *client.DatabasePostgres {
 		}
 		p.Extensions = &v
 	}
-	if p.Roles == nil && p.Extensions == nil {
+	databases, oldDatabases := postgresDatabases(plan), postgresDatabases(prior)
+	if isSet(databases) && !databases.Equal(oldDatabases) {
+		v := logicalDatabasesFromValue(databases)
+		p.Databases = &v
+	}
+	if p.Roles == nil && p.Extensions == nil && p.Databases == nil {
 		return nil
 	}
 	return &p
@@ -142,7 +149,7 @@ func postgresFromAPI(p *client.DatabasePostgres) types.Object {
 			extensions = append(extensions, e.Name)
 		}
 	}
-	return types.ObjectValueMust(databasePostgresAttrTypes, map[string]attr.Value{"roles": list(roles), "extensions": list(extensions)})
+	return types.ObjectValueMust(databasePostgresAttrTypes, map[string]attr.Value{"roles": list(roles), "extensions": list(extensions), "databases": logicalDatabasesValue(p.Databases)})
 }
 
 // ModifyPlan keeps read-only values known when filling an omitted postgres
@@ -157,6 +164,22 @@ func (r *DatabaseResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
+	}
+	// A computed PostgreSQL object makes the framework revisit other computed
+	// fields. Keep an omitted backup key null when the API has never set it.
+	if req.Config.Schema != nil && isSet(plan.Backup) && isSet(state.Backup) {
+		var configured types.Object
+		resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("backup"), &configured)...)
+		if isSet(configured) {
+			values := plan.Backup.Attributes()
+			for _, key := range []string{"retention", "schedule"} {
+				if configured.Attributes()[key].IsNull() && values[key].IsUnknown() {
+					values[key] = state.Backup.Attributes()[key]
+				}
+			}
+			plan.Backup = types.ObjectValueMust(databaseBackupAttrTypes, values)
+			resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("backup"), plan.Backup)...)
+		}
 	}
 	if len(settingsChanged(&state.databaseModel, plan.databaseModel)) != 0 || !plan.Name.Equal(state.Name) || !plan.Engine.Equal(state.Engine) || !plan.Source.Equal(state.Source) {
 		return

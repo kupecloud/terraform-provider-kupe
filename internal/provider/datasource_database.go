@@ -27,7 +27,11 @@ func (d *DatabaseDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 	resp.Schema = schema.Schema{
 		Description: "Reads an existing Kupe database by name. Credentials are never returned.",
 		Attributes: map[string]schema.Attribute{
-			"postgres": schema.SingleNestedAttribute{Computed: true, Description: "Declared PostgreSQL roles and extensions returned by the database.", Attributes: map[string]schema.Attribute{
+			"postgres": schema.SingleNestedAttribute{Computed: true, Description: "PostgreSQL databases, declared roles and extensions returned by the database.", Attributes: map[string]schema.Attribute{
+				"databases": schema.ListNestedAttribute{Computed: true, Description: logicalDatabasesDescription, NestedObject: schema.NestedAttributeObject{Attributes: map[string]schema.Attribute{
+					"name":    schema.StringAttribute{Computed: true},
+					"schemas": schema.ListNestedAttribute{Computed: true, NestedObject: schema.NestedAttributeObject{Attributes: map[string]schema.Attribute{"name": schema.StringAttribute{Computed: true}}}},
+				}}},
 				"roles":      schema.SetNestedAttribute{Computed: true, NestedObject: schema.NestedAttributeObject{Attributes: map[string]schema.Attribute{"name": schema.StringAttribute{Computed: true}}}},
 				"extensions": schema.SetNestedAttribute{Computed: true, NestedObject: schema.NestedAttributeObject{Attributes: map[string]schema.Attribute{"name": schema.StringAttribute{Computed: true}}}},
 			}},
