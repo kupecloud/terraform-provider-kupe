@@ -1,5 +1,8 @@
 package provider
 
+// These acceptance tests must inspect the real CLI's rendered warnings and exit
+// status. Observing its output catches diagnostics that provider-only tests miss.
+
 import (
 	"context"
 	"errors"

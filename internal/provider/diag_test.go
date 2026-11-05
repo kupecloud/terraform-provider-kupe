@@ -638,3 +638,18 @@ func TestRegistryChildCreateErrorDetail(t *testing.T) {
 		})
 	}
 }
+
+func TestAPIErrorDetailRateLimitRetryAfter(t *testing.T) {
+	for _, retry := range []string{"17", "", "0", "-2", "4294967296", "https://private.example/secret"} {
+		t.Run(retry, func(t *testing.T) {
+			got := apiErrorDetail(&client.APIError{StatusCode: http.StatusTooManyRequests, Message: "too many requests", RetryAfter: retry})
+			if retry == "17" {
+				if strings.Count(got, "Retry after 17 seconds") != 1 || strings.Contains(got, "after a short delay") {
+					t.Fatalf("rate-limit retry delay is missing or duplicated: %s", got)
+				}
+			} else if !strings.Contains(got, "after a short delay") || strings.Contains(got, "Retry after ") || strings.Contains(got, "private.example") {
+				t.Fatalf("invalid Retry-After did not use the safe fallback: %s", got)
+			}
+		})
+	}
+}

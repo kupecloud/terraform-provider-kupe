@@ -1,5 +1,5 @@
 # Engineer-run smoke only, after the App runtime is released and available.
-# The version tag comes from hello-kupe/chart/Chart.yaml at source preparation.
+# This fixture pins the hello-kupe 1.5.1 image release.
 # Confirm the resolved digest in the plan before applying.
 # Exercise create, image/settings update, retry, import, protection and destroy.
 # Verify first-deploy failures keep untainted state and unchanged plans are empty.

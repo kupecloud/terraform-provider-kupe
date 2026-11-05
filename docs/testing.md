@@ -2,7 +2,7 @@
 title: "Testing"
 description: "Two-layer test strategy for the kupe terraform provider — mock-backed acceptance tests for fast CI coverage, plus manual smoke against the live dev API for release validation."
 owner: platform-team
-lastReviewed: "2026-10-10"
+lastReviewed: "2026-11-05"
 ---
 
 ## Overview

@@ -165,6 +165,8 @@ type APIError struct {
 	Field string
 	// RetryAfter is the API's Retry-After response header, when present.
 	RetryAfter string
+	// NonJSON is true when the response body is not a JSON error envelope.
+	NonJSON bool
 }
 
 func (e *APIError) Error() string {
@@ -285,13 +287,14 @@ func (c *Client) requestWithPrecondition(ctx context.Context, method, path, etag
 	// server never processed the mutation, dropping the resource from state
 	// or writing a zero-valued object (orphaned billable clusters).
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		apiErr := &APIError{StatusCode: resp.StatusCode, Message: string(respBody), RetryAfter: resp.Header.Get("Retry-After")}
+		apiErr := &APIError{StatusCode: resp.StatusCode, Message: string(respBody), RetryAfter: resp.Header.Get("Retry-After"), NonJSON: true}
 		// Single decode handles both shapes: structured envelopes carry
 		// Code (canonical) while legacy responses only carry Error. If the
 		// body isn't valid JSON we keep the raw string as Message so the
 		// user still sees something useful (e.g. proxy/HTML error pages).
 		var env errorEnvelope
 		if json.Unmarshal(respBody, &env) == nil {
+			apiErr.NonJSON = false
 			switch {
 			case env.Code != "":
 				apiErr.Code = env.Code

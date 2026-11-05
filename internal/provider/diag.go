@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -258,6 +259,12 @@ func apiErrorDetail(err error) string {
 	}
 
 	base := apiErrorSummary(apiErr)
+	if apiErr.Code == client.CodeImageUnavailable {
+		if seconds, parseErr := strconv.ParseUint(apiErr.RetryAfter, 10, 32); parseErr == nil && seconds > 0 {
+			return base + fmt.Sprintf("\n\nRetry after %d seconds, then run `terraform plan` again.", seconds)
+		}
+		return base + "\n\nRetry the plan after a short delay."
+	}
 	if client.IsRegistriesNotServed(err) {
 		return base + "\n\n" + registriesNotServedHint
 	}
@@ -357,6 +364,9 @@ func apiErrorDetail(err error) string {
 	case http.StatusPreconditionFailed:
 		return base + "\n\nThe server-side state changed while this apply was running (ETag/If-Match mismatch). Another client modified the same resource concurrently. Refresh and re-apply."
 	case http.StatusTooManyRequests:
+		if seconds, parseErr := strconv.ParseUint(apiErr.RetryAfter, 10, 32); parseErr == nil && seconds > 0 {
+			return base + fmt.Sprintf("\n\nRate limit exceeded. Retry after %d seconds. Large batch applies may need `-parallelism=1` against the kupe API.", seconds)
+		}
 		return base + "\n\nRate limit exceeded. Retry the operation after a short delay; large batch applies may need `-parallelism=1` against the kupe API."
 	case http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
 		return base + "\n\nThe Kupe Cloud API encountered an internal error or is temporarily unavailable. Retry the operation after a short delay; if the failure persists, check the status page or contact Kupe Cloud support."
