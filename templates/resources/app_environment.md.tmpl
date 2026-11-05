@@ -17,6 +17,12 @@ description: |-
 
 {{ tffile "examples/resources/kupe_app_environment/for_each.tf" }}
 
+## Image tags and digests
+
+Use `data.kupe_app_image` to resolve a tag or digest, then set `web.image` to its `reference`. The environment accepts only a sha256 digest reference. The data source calls the Kupe API on each read and the provider keeps no image cache.
+
+Pin a version tag in production. If a moving tag such as `latest` points to a new digest, the next plan shows a `web.image` change and applying that plan deploys it. A version tag can also be reassigned by its publisher; use a digest input when the image identity must stay fixed.
+
 ## Deploying and retrying
 
 An apply that changes `web`, a referenced secret path or `deployment_revision` requests a deployment and waits for its requested release. Domain and protection changes wait for the observed settings without starting a release. The default timeouts are create 30 minutes, update 20 minutes and delete 20 minutes.

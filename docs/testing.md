@@ -36,6 +36,16 @@ go test ./internal/provider/...     # only provider tests
 go test -run TestAccCluster ./internal/provider/...   # narrow to one
 ```
 
+### Terraform and OpenTofu runtime matrix
+
+The existing gate workflow runs the complete unit and mock-backed acceptance suite on OpenTofu 1.11.0 and 1.13.2, and Terraform 1.11.1 and 1.17.1. Each entry invokes `.github/hooks/go-unit-tests.sh` with its exact CLI and provider registry host. The App tests check image resolution, moving tags, unchanged applies, state retention and rendered deployment warnings on each runtime.
+
+For the same local matrix, set `TF_ACC_TERRAFORM_PATH` to the exact installed binary and `TF_ACC_PROVIDER_HOST` to `registry.opentofu.org` for OpenTofu or `registry.terraform.io` for Terraform, then run `.github/hooks/go-unit-tests.sh`. Record the actual binary version and result for each entry before claiming compatibility.
+
+To bump a latest entry, verify the stable release and its published checksums, update the exact version in `.github/workflows/gates.yaml`, and update the default OpenTofu setup version there when applicable. Keep setup actions pinned by full commit SHA with their release tag in a comment. Update the version list on this page and run all four entries again. Changing a floor entry changes the supported minimum and needs an explicit compatibility decision.
+
+The write-only secret tests inspect real saved-plan and state JSON, enforce the planned source version, and count PUTs across refused, uncertain and confirmed writes.
+
 ### Coverage today
 
 | Resource | Test file | Lifecycle | Import | Notes |
@@ -59,6 +69,7 @@ go test -run TestAccCluster ./internal/provider/...   # narrow to one
 | `kupe_plan` (data) | same file | read | n/a | `max_databases` set, `0` and null; the registry allowance set, `0` (unlimited) and null |
 | `kupe_registry` (data) | [datasource_registry_test.go](../internal/provider/datasource_registry_test.go) | read with the name implicit and explicit | n/a | another name refused at plan; a tenant with no registry is an error |
 | `kupe_cluster` (data) | [datasource_cluster_test.go](../internal/provider/datasource_cluster_test.go) | read | n/a | — |
+| `kupe_app_image` (data) | [datasource_app_image_test.go](../internal/provider/datasource_app_image_test.go), [resource_app_environment_acceptance_test.go](../internal/provider/resource_app_environment_acceptance_test.go) | resolve tag or digest; use the resolved digest to create an environment; moving tag updates in place | n/a | index identity, platform names and variants, bounded summary without amd64, user and TCP ports; four image refusals and apps unavailable on `image`; Retry-After hint; a moved tag changes only configured `web.image` and sends one PATCH; unchanged apply plans empty and sends only reads, including the read-only resolve POST |
 
 > **JSON ImportStateVerify caveat.** The alertmanager resources expose a JSON document via `body_json` / `routes_json`. The provider's [`JSONStringType`](../internal/provider/json_normalizer.go) handles semantic equality at *plan* time, so `{"a":1,"b":2}` and `{"b":2,"a":1}` don't show drift. But `terraform-plugin-testing`'s `ImportStateVerify` byte-compares state attributes, not semantic JSON equality, so a roundtrip-with-alphabetised-keys would fail. The tests pass `ImportStateVerifyIgnore: []string{"body_json"}` (or `routes_json`) to skip that field; the import handler itself is still exercised, just not byte-asserted on the JSON column.
 
@@ -145,6 +156,7 @@ tofu destroy -auto-approve
 
 ### What to verify visually
 
+- For the App fixture, review the digest resolved from `ghcr.io/kupecloud/hello-kupe:1.5.1` in the plan. Apply the app and environment, then run an unchanged plan and apply: no deployment should be requested. Check import, a settings change, a revision retry and deletion protection, then turn protection off and destroy. Run this against an environment with the App runtime available before releasing the provider.
 - The resource appears in `kubectl get <crd> -n tenant-kupe-test`.
 - For `kupe_cluster`: the corresponding `ManagedCluster` CR exists, the operator reconciles to `status.phase: Ready` within ~5-8 min, the kubeconfig endpoint is populated.
 - For `kupe_alertmanager_*`: the change shows up in Mimir's alertmanager config (`kubectl logs -n mimir mimir-alertmanager-0 | grep <change>`).
@@ -179,8 +191,6 @@ Remaining, in priority order:
 3. **JSON normalisation parity at import** (provider bug, not test gap) — the alertmanager resources currently rely on `ImportStateVerifyIgnore` to skip the JSON column because the read path normalises keys differently from the write path. Long-term fix is to make read+write produce identical byte forms (or implement framework-level semantic equality for `ImportStateVerify`). Until then, the ignore is documented inline in [resource_alertmanager_test.go](../internal/provider/resource_alertmanager_test.go).
 
 ## Related
-
-The write-only secret tests run in the existing gate workflow against four pinned CLIs: OpenTofu 1.11.0 and 1.13.2, and Terraform 1.11.1 and 1.17.1. Each entry runs the complete unit and mock-backed acceptance suite through `.github/hooks/go-unit-tests.sh`, with its runtime's provider registry host. The hook honours `TF_ACC_TERRAFORM_PATH` and `TF_ACC_PROVIDER_HOST` for the same local matrix. The secret tests inspect real saved-plan and state JSON, enforce the planned source version, and count PUTs across refused, uncertain and confirmed writes. Run the entire matrix before claiming any pinned version has passed.
 
 - [kupe-api testing guide](https://github.com/kupecloud/kupe-api/blob/main/docs/testing.md) — three-layer pattern (unit, kind-backed e2e, live).
 - [kupe-tests](https://github.com/kupecloud/kupe-tests) — shared fixtures (the kupe-test tenant lives there) and k6 load tests.

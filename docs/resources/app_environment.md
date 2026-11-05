@@ -12,6 +12,10 @@ Manages one Kupe app environment. Applying deploying settings requests a release
 ## Example usage
 
 ```terraform
+data "kupe_app_image" "web" {
+  image = "ghcr.io/kupecloud/hello-kupe:1.5.1"
+}
+
 resource "kupe_app" "this" {
   name = "shop"
 }
@@ -22,7 +26,7 @@ resource "kupe_app_environment" "this" {
   cluster = "europe"
 
   web = {
-    image = "ghcr.io/kupecloud/hello-kupe@sha256:be393b04d81f3a3e63d57be12dce11e823b1af75ea3997eecbc2d19a3b434f93"
+    image = data.kupe_app_image.web.reference
     port  = 8080
     env = [{ name = "LOG_LEVEL", value = "info" }]
     health_checks = { readiness = { http = { path = "/healthz" } } }
@@ -73,6 +77,12 @@ resource "kupe_app_environment" "multi" {
   # deletion_protection = false
 }
 ```
+
+## Image tags and digests
+
+Use `data.kupe_app_image` to resolve a tag or digest, then set `web.image` to its `reference`. The environment accepts only a sha256 digest reference. The data source calls the Kupe API on each read and the provider keeps no image cache.
+
+Pin a version tag in production. If a moving tag such as `latest` points to a new digest, the next plan shows a `web.image` change and applying that plan deploys it. A version tag can also be reassigned by its publisher; use a digest input when the image identity must stay fixed.
 
 ## Deploying and retrying
 

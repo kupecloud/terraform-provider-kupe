@@ -210,6 +210,8 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 
 	// Route matching
 	switch {
+	case r.URL.Path == mockAppImagePath:
+		m.serveAppImage(w, r)
 	case strings.HasPrefix(r.URL.Path, mockAppsPath):
 		m.serveApps(w, r)
 

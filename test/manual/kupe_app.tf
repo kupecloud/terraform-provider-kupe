@@ -1,8 +1,13 @@
 # Engineer-run smoke only, after the App runtime is released and available.
-# The digest comes from hello-kupe/chart/values.yaml at source preparation.
+# The version tag comes from hello-kupe/chart/Chart.yaml at source preparation.
+# Confirm the resolved digest in the plan before applying.
 # Exercise create, image/settings update, retry, import, protection and destroy.
 # Verify first-deploy failures keep untainted state and unchanged plans are empty.
 # This fixture has not been applied by the implementation agent.
+data "kupe_app_image" "smoke" {
+  image = "ghcr.io/kupecloud/hello-kupe:1.5.1"
+}
+
 resource "kupe_app" "smoke" {
   name                = "smoke-app"
   deletion_protection = false
@@ -15,7 +20,7 @@ resource "kupe_app_environment" "smoke" {
   deletion_protection = false
 
   web = {
-    image = "ghcr.io/kupecloud/hello-kupe@sha256:be393b04d81f3a3e63d57be12dce11e823b1af75ea3997eecbc2d19a3b434f93"
+    image = data.kupe_app_image.smoke.reference
     port  = 8080
   }
 }

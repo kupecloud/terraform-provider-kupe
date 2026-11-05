@@ -1,0 +1,26 @@
+---
+page_title: "{{.Name}} {{.Type}} - {{.ProviderName}}"
+subcategory: ""
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# {{.Name}} ({{.Type}})
+
+{{ .Description | trimspace }}
+
+## Example usage
+
+{{ tffile "examples/data-sources/kupe_app_image/data-source.tf" }}
+
+## Image resolution
+
+The Kupe API resolves images from the tenant's container registry or a public registry approved by the platform. It checks linux/amd64 support and a numeric non-root user. The provider calls only the Kupe API and sends no registry credentials.
+
+`reference` preserves the image index digest for a multi-platform image, or the manifest digest for a single-platform image. `platforms` contains the API's bounded summary as `os/architecture` or `os/architecture/variant`; the summary may omit supported platforms. `user` and `exposed_ports` describe linux/amd64.
+
+Each read resolves again. Pin a version tag in production: a moving tag such as `latest` can change the next plan, and applying that plan deploys the new digest. A digest input keeps the image identity fixed.
+
+The `image` diagnostic includes the API's image refusal code and message. A temporary image failure includes a retry hint; when the API supplies a numeric Retry-After, the hint gives the delay in seconds. Apps must be enabled on the platform to resolve an image.
+
+{{ .SchemaMarkdown | trimspace }}

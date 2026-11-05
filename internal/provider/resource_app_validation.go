@@ -31,6 +31,6 @@ func (v appImageDigest) ValidateString(_ context.Context, req validator.StringRe
 	}
 	value := req.ConfigValue.ValueString()
 	if len(value) > 512 || !appDigestPattern.MatchString(value) {
-		resp.Diagnostics.AddAttributeError(req.Path, "Image digest required", "web.image must include a registry host and a sha256 digest. Resolve a tag to its digest before applying; the planned `data.kupe_app_image` data source will provide this in a later provider release.")
+		resp.Diagnostics.AddAttributeError(req.Path, "Image digest required", "web.image must include a registry host and a sha256 digest. Resolve a tag with `data.kupe_app_image` and use its `reference` before applying.")
 	}
 }

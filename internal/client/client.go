@@ -163,6 +163,8 @@ type APIError struct {
 	Severity string
 	// Field is the dotted spec path the error applies to.
 	Field string
+	// RetryAfter is the API's Retry-After response header, when present.
+	RetryAfter string
 }
 
 func (e *APIError) Error() string {
@@ -283,7 +285,7 @@ func (c *Client) requestWithPrecondition(ctx context.Context, method, path, etag
 	// server never processed the mutation, dropping the resource from state
 	// or writing a zero-valued object (orphaned billable clusters).
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		apiErr := &APIError{StatusCode: resp.StatusCode, Message: string(respBody)}
+		apiErr := &APIError{StatusCode: resp.StatusCode, Message: string(respBody), RetryAfter: resp.Header.Get("Retry-After")}
 		// Single decode handles both shapes: structured envelopes carry
 		// Code (canonical) while legacy responses only carry Error. If the
 		// body isn't valid JSON we keep the raw string as Message so the
