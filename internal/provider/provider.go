@@ -163,6 +163,7 @@ func (p *KupeProvider) DataSources(_ context.Context) []func() datasource.DataSo
 		NewPlanDataSource,
 		NewDatabaseDataSource,
 		NewRegistryDataSource,
+		NewAppImageDataSource,
 	}
 }
 

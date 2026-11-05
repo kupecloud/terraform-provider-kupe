@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -97,6 +98,7 @@ func TestAccAppEnvironmentFirstFailureAndTimeoutRemainUntainted(t *testing.T) {
 	shrinkPollInterval(t)
 	for _, outcome := range []string{"Failed", "Deploying"} {
 		t.Run(outcome, func(t *testing.T) {
+			capture := captureAppCLIOutput(t)
 			mock := newMockKupeAPI()
 			defer mock.close()
 			mock.appEnvironmentOutcome = outcome
@@ -105,8 +107,31 @@ func TestAccAppEnvironmentFirstFailureAndTimeoutRemainUntainted(t *testing.T) {
 				extra = "timeouts = { create = \"1s\" }"
 			}
 			config := testAccAppEnvironmentConfig(mock.url(), "a", extra)
+			checkWarning := func(*terraform.State) error {
+				output, err := capture.read()
+				if err != nil {
+					return err
+				}
+				output = strings.Join(strings.Fields(strings.ReplaceAll(output, "│", "")), " ")
+				for _, want := range []string{
+					"Warning: app deployment did not complete",
+					"The request was accepted and is recorded in Terraform state.",
+					"increase `deployment_revision` by one and apply.",
+				} {
+					if !strings.Contains(output, want) {
+						return fmt.Errorf("CLI did not render App deployment warning text %q", want)
+					}
+				}
+				if outcome == "Failed" && !regexp.MustCompile(`Requested release .* ended Failed, reason "TestOutcome"`).MatchString(output) {
+					return fmt.Errorf("CLI did not render the failed requested release")
+				}
+				if outcome == "Deploying" && !strings.Contains(output, "The create timeout ended before the requested release completed.") {
+					return fmt.Errorf("CLI did not render the create timeout warning")
+				}
+				return nil
+			}
 			acc.UnitTest(t, acc.TestCase{ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(), Steps: []acc.TestStep{
-				{Config: config, Check: checkAppEnvironmentNotTainted},
+				{Config: config, Check: acc.ComposeTestCheckFunc(checkAppEnvironmentNotTainted, checkWarning)},
 				{Config: config, PlanOnly: true},
 			}})
 			if got := appEnvironmentRequestCount(mock, "POST", "/environments"); got != 1 {
@@ -120,6 +145,8 @@ func TestAccAppEnvironmentFailedUpdateRecordsSettingsWithoutResend(t *testing.T)
 	shrinkPollInterval(t)
 	for _, recovery := range []bool{false, true} {
 		t.Run(fmt.Sprintf("recovery=%v", recovery), func(t *testing.T) {
+			// The same observer must preserve the non-zero CLI exit below.
+			captureAppCLIOutput(t)
 			mock := newMockKupeAPI()
 			defer mock.close()
 			var before int
@@ -465,4 +492,135 @@ func TestAccAppEnvironmentTimeoutOnlyUpdatePreservesPlannedStatus(t *testing.T) 
 			}})
 		})
 	}
+}
+
+// Tag movement must change only the configured image. Computed deployment
+// observations may be unknown until apply, so compare configured settings.
+type appImageOnlyPlan struct{ before, after string }
+
+func (check appImageOnlyPlan) CheckPlan(_ context.Context, req plancheck.CheckPlanRequest, resp *plancheck.CheckPlanResponse) {
+	found := false
+	for _, change := range req.Plan.ResourceChanges {
+		if change.Mode != "managed" {
+			continue
+		}
+		if change.Address != appEnvironmentAddr {
+			if !change.Change.Actions.NoOp() {
+				resp.Error = fmt.Errorf("tag movement changed %s", change.Address)
+				return
+			}
+			continue
+		}
+		found = true
+		before, beforeOK := change.Change.Before.(map[string]any)
+		after, afterOK := change.Change.After.(map[string]any)
+		if !beforeOK || !afterOK {
+			resp.Error = fmt.Errorf("environment settings missing from plan")
+			return
+		}
+		beforeWeb, beforeOK := before["web"].(map[string]any)
+		afterWeb, afterOK := after["web"].(map[string]any)
+		if !beforeOK || !afterOK || beforeWeb["image"] != check.before || afterWeb["image"] != check.after {
+			resp.Error = fmt.Errorf("plan did not contain the resolved image transition")
+			return
+		}
+		for key, value := range beforeWeb {
+			if key != "image" && !reflect.DeepEqual(value, afterWeb[key]) {
+				resp.Error = fmt.Errorf("tag movement changed web.%s", key)
+				return
+			}
+		}
+		if len(beforeWeb) != len(afterWeb) {
+			resp.Error = fmt.Errorf("tag movement changed the web settings shape")
+			return
+		}
+		for _, key := range []string{"app", "name", "cluster", "deletion_protection", "deployment_revision", "secrets", "domains", "timeouts"} {
+			if !reflect.DeepEqual(before[key], after[key]) {
+				resp.Error = fmt.Errorf("tag movement changed %s", key)
+				return
+			}
+		}
+	}
+	if !found {
+		resp.Error = fmt.Errorf("environment missing from tag movement plan")
+	}
+}
+
+func TestAccAppEnvironmentImageTagMovesOnceAndUnchangedApplyOnlyReads(t *testing.T) {
+	shrinkPollInterval(t)
+	mock := newMockKupeAPI()
+	defer mock.close()
+	first, next := mockAppImageResolution("a"), mockAppImageResolution("b")
+	mock.appImages[mockAppImageTag] = first
+	config := testAccAppEnvironmentConfig(mock.url(), "a", "")
+	config = strings.Replace(config, fmt.Sprintf("image = %q", first.Reference), "image = data.kupe_app_image.web.reference", 1)
+	config += fmt.Sprintf(`
+data "kupe_app_image" "web" { image = %q }
+`, mockAppImageTag)
+	var writesBefore, resolutionsBefore int
+	writeCount := func() int {
+		mock.mu.Lock()
+		defer mock.mu.Unlock()
+		count := 0
+		for _, request := range mock.appRequests {
+			if request.method != "GET" {
+				count++
+			}
+		}
+		for _, request := range mock.appEnvironmentRequests {
+			if request.method != "GET" {
+				count++
+			}
+		}
+		return count
+	}
+	assertSingleImagePatch := func(*terraform.State) error {
+		if got := appEnvironmentRequestCount(mock, "PATCH", "/production"); got != 1 {
+			return fmt.Errorf("tag movement sent %d PATCH requests, want 1", got)
+		}
+		if got := appEnvironmentRequestCount(mock, "POST", "/retry"); got != 0 {
+			return fmt.Errorf("tag movement sent %d retry requests", got)
+		}
+		if got := appEnvironmentRequestCount(mock, "POST", "/environments"); got != 1 {
+			return fmt.Errorf("tag movement recreated the environment: %d creates", got)
+		}
+		mock.mu.Lock()
+		defer mock.mu.Unlock()
+		for _, request := range mock.appEnvironmentRequests {
+			if request.method != "PATCH" {
+				continue
+			}
+			web, ok := request.body["web"].(map[string]any)
+			if !ok || web["image"] != next.Reference {
+				return fmt.Errorf("tag movement PATCH did not deploy the newly resolved digest")
+			}
+		}
+		return nil
+	}
+	acc.UnitTest(t, acc.TestCase{ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(), Steps: []acc.TestStep{
+		{Config: config, Check: acc.TestCheckResourceAttr(appEnvironmentAddr, "web.image", first.Reference)},
+		{Config: config, PreConfig: func() { mock.setState(func(m *mockKupeAPI) { m.appImages[mockAppImageTag] = next }) },
+			ConfigPlanChecks: acc.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+				plancheck.ExpectResourceAction(appEnvironmentAddr, plancheck.ResourceActionUpdate),
+				appImageOnlyPlan{before: first.Reference, after: next.Reference},
+			}},
+			Check: acc.ComposeTestCheckFunc(acc.TestCheckResourceAttr(appEnvironmentAddr, "web.image", next.Reference), assertSingleImagePatch)},
+		{Config: config, PreConfig: func() {
+			writesBefore = writeCount()
+			mock.mu.Lock()
+			resolutionsBefore = len(mock.appImageRequests)
+			mock.mu.Unlock()
+		}, ConfigPlanChecks: acc.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()}}, Check: func(state *terraform.State) error {
+			if got := writeCount(); got != writesBefore {
+				return fmt.Errorf("unchanged apply wrote resources: %d -> %d", writesBefore, got)
+			}
+			mock.mu.Lock()
+			resolutions := len(mock.appImageRequests)
+			mock.mu.Unlock()
+			if resolutions <= resolutionsBefore {
+				return fmt.Errorf("unchanged apply used a cached image resolution")
+			}
+			return assertSingleImagePatch(state)
+		}},
+	}})
 }

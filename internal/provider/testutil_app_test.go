@@ -9,6 +9,7 @@ import (
 )
 
 const mockAppsPath = "/api/v1/tenants/acme/apps"
+const mockAppImagePath = "/api/v1/tenants/acme/app-images/resolve"
 
 type mockAppState struct {
 	mockAppEnvironmentState
@@ -20,10 +21,44 @@ type mockAppState struct {
 	appDeleteLag        int
 	appBeforePatch      []func(map[string]any)
 	appOnGet            []func(map[string]any)
+	appImages           map[string]client.ImageResolution
+	appImageRequests    []string
+	appImageRefusal     *mockRefusal
+	appImageRetryAfter  string
 }
 
 func newMockAppState() mockAppState {
-	return mockAppState{apps: map[string]map[string]any{}, mockAppEnvironmentState: newMockAppEnvironmentState()}
+	return mockAppState{apps: map[string]map[string]any{}, appImages: map[string]client.ImageResolution{}, mockAppEnvironmentState: newMockAppEnvironmentState()}
+}
+
+// Image resolution is a read-only POST, served under the existing mock lock.
+func (m *mockKupeAPI) serveAppImage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Image string `json:"image"`
+	}
+	mustDecodeJSON(r, &body)
+	m.appImageRequests = append(m.appImageRequests, body.Image)
+	if m.appsDisabled {
+		mockError(w, http.StatusNotFound, client.CodeAppsUnavailable, "apps are not available on this platform")
+		return
+	}
+	if refusal := m.appImageRefusal; refusal != nil {
+		if m.appImageRetryAfter != "" {
+			w.Header().Set("Retry-After", m.appImageRetryAfter)
+		}
+		mockError(w, refusal.status, refusal.code, refusal.message)
+		return
+	}
+	image, ok := m.appImages[body.Image]
+	if !ok {
+		mockError(w, http.StatusNotFound, client.CodeImageNotFound, "image not found or not public")
+		return
+	}
+	mustEncodeJSON(w, image)
 }
 
 // serveApps runs under the existing mock's lock, with UID.generation ETags.

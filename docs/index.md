@@ -59,6 +59,7 @@ For normal environments, use an `https://` API host. Plain HTTP is only supporte
 
 ## Available Data Sources
 
+- `kupe_app_image`
 - `kupe_tenant`
 - `kupe_cluster`
 - `kupe_database`

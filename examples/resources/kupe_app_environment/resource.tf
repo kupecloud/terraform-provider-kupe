@@ -1,3 +1,7 @@
+data "kupe_app_image" "web" {
+  image = "ghcr.io/kupecloud/hello-kupe:1.5.1"
+}
+
 resource "kupe_app" "this" {
   name = "shop"
 }
@@ -8,7 +12,7 @@ resource "kupe_app_environment" "this" {
   cluster = "europe"
 
   web = {
-    image = "ghcr.io/kupecloud/hello-kupe@sha256:be393b04d81f3a3e63d57be12dce11e823b1af75ea3997eecbc2d19a3b434f93"
+    image = data.kupe_app_image.web.reference
     port  = 8080
     env = [{ name = "LOG_LEVEL", value = "info" }]
     health_checks = { readiness = { http = { path = "/healthz" } } }

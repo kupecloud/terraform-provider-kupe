@@ -88,6 +88,14 @@ const (
 // CodeAppsUnavailable is a disabled App service, never a missing instance.
 const CodeAppsUnavailable = "apps_unavailable"
 
+// Image resolver refusals are stable API codes, independent of HTTP status.
+const (
+	CodeImageNotFound            = "image_not_found"
+	CodeImageUnavailable         = "image_unavailable"
+	CodeImagePlatformUnsupported = "image_platform_unsupported"
+	CodeImagePolicyDenied        = "image_policy_denied"
+)
+
 // ErrorCode is the code of the API error err carries, "" when it carries
 // none or is not an API error.
 func ErrorCode(err error) string {

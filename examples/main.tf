@@ -20,6 +20,11 @@ data "kupe_plan" "pro" {
   name = "pro"
 }
 
+# Resolve a version tag before using it as an app environment's image.
+data "kupe_app_image" "web" {
+  image = "ghcr.io/kupecloud/hello-kupe:1.5.1"
+}
+
 # Create a production cluster
 resource "kupe_cluster" "prod" {
   name    = "prod"
