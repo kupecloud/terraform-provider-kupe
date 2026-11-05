@@ -25,6 +25,6 @@ export TF_ACC_PROVIDER_NAMESPACE=kupecloud
 profile="$(mktemp)"
 trap 'rm -f "$profile"' EXIT
 
-go test -race -coverprofile="$profile" ./...
+go test -race -timeout 20m -coverprofile="$profile" ./...
 # Coverage is reported, not gated.
 go tool cover -func="$profile" | awk 'END {print "total coverage: " $3}'

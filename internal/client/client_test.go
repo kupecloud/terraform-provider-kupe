@@ -370,3 +370,28 @@ func TestNoRetryOn4xx(t *testing.T) {
 		t.Errorf("expected exactly 1 attempt (no retry on 4xx), got %d", got)
 	}
 }
+
+func TestAPIErrorDistinguishesJSONFromRawBodies(t *testing.T) {
+	for _, tc := range []struct {
+		name, body  string
+		wantNonJSON bool
+	}{
+		{name: "uncoded JSON", body: `{"error":"invalid image reference"}`},
+		{name: "coded JSON", body: `{"code":"image_not_found","message":"image not found"}`},
+		{name: "HTML", body: `<html>proxy failure</html>`, wantNonJSON: true},
+		{name: "plain text", body: "proxy failure", wantNonJSON: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			_, err := New(server.URL, "acme", "test-token").ResolveAppImage(context.Background(), "invalid")
+			var apiErr *APIError
+			if !errors.As(err, &apiErr) || apiErr.NonJSON != tc.wantNonJSON {
+				t.Fatalf("response format marker: error=%v, want NonJSON=%t", err, tc.wantNonJSON)
+			}
+		})
+	}
+}

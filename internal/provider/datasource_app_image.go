@@ -3,8 +3,6 @@ package provider
 import (
 	"context"
 	"errors"
-	"fmt"
-	"strconv"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -132,13 +130,14 @@ func (d *AppImageDataSource) Read(ctx context.Context, req datasource.ReadReques
 	}
 }
 
-// The resolver API supplies value-free messages for its coded refusals. Other
-// errors can contain request URLs or proxy bodies, so keep those out of output.
+// JSON API refusals carry the API's actionable message. Network failures and
+// non-JSON proxy bodies can include private URLs, so keep those out of output.
 func appImageErrorDiagnostic(err error) (string, string) {
 	var apiErr *client.APIError
-	if !errors.As(err, &apiErr) {
-		return "failed to resolve app image", "The Kupe API could not resolve the image. Retry the plan; if this persists, contact Kupe Cloud support."
+	if !errors.As(err, &apiErr) || apiErr.NonJSON {
+		return "failed to resolve app image", "The Kupe API could not resolve the image. Retry the plan. If this persists, contact Kupe Cloud support."
 	}
+
 	summary := "failed to resolve app image"
 	switch apiErr.Code {
 	case client.CodeImageNotFound:
@@ -150,17 +149,8 @@ func appImageErrorDiagnostic(err error) (string, string) {
 	case client.CodeImagePolicyDenied:
 		summary = "app image policy denied"
 	case client.CodeAppsUnavailable:
-		return "apps unavailable", apiErrorDetail(err)
-	default:
-		return summary, fmt.Sprintf("The Kupe API could not resolve the image (HTTP %d). Check your API credentials and retry the plan; if this persists, contact Kupe Cloud support.", apiErr.StatusCode)
+		return "apps unavailable", apiErrorSummary(apiErr) + "\n\nApps are not enabled for this Kupe Cloud environment. " +
+			"To plan or destroy, replace `data.kupe_app_image` in your configuration with the image digest reference from Terraform state."
 	}
-	detail := apiErrorSummary(apiErr)
-	if apiErr.Code == client.CodeImageUnavailable {
-		if seconds, parseErr := strconv.ParseUint(apiErr.RetryAfter, 10, 32); parseErr == nil && seconds > 0 {
-			detail += fmt.Sprintf("\n\nRetry after %d seconds, then run `terraform plan` again.", seconds)
-		} else {
-			detail += "\n\nRetry the plan after a short delay."
-		}
-	}
-	return summary, detail
+	return summary, apiErrorDetail(err)
 }

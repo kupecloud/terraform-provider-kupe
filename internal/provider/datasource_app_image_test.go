@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
@@ -145,8 +146,13 @@ func TestAppImageReadErrorsAreOnImage(t *testing.T) {
 
 func readAppImageForTest(t *testing.T, mock *mockKupeAPI, image types.String, deferralAllowed bool) datasource.ReadResponse {
 	t.Helper()
+	return readAppImageWithClientForTest(t, client.New(mock.url(), "acme", "test-token"), image, deferralAllowed)
+}
+
+func readAppImageWithClientForTest(t *testing.T, apiClient *client.Client, image types.String, deferralAllowed bool) datasource.ReadResponse {
+	t.Helper()
 	ctx := context.Background()
-	d := &AppImageDataSource{client: client.New(mock.url(), "acme", "test-token")}
+	d := &AppImageDataSource{client: apiClient}
 	var sch datasource.SchemaResponse
 	d.Schema(ctx, datasource.SchemaRequest{}, &sch)
 	config := tfsdk.State{Schema: sch.Schema}
@@ -296,7 +302,7 @@ func TestAppImageDiagnosticsKeepURLsValuesAndTokensPrivate(t *testing.T) {
 	const private = "https://private.example/secret-image?token=secret-value"
 	for _, err := range []error{
 		fmt.Errorf("request failed: %w", errors.New(private)),
-		&client.APIError{StatusCode: 503, Message: private},
+		&client.APIError{StatusCode: 503, Message: private, NonJSON: true},
 	} {
 		summary, detail := appImageErrorDiagnostic(err)
 		for _, value := range []string{"private.example", "secret-image", "secret-value"} {
@@ -323,4 +329,106 @@ func TestAccAppImageDataSourceRejectsMutableResolution(t *testing.T) {
 		Config:      testAccProviderConfig(mock.url()) + fmt.Sprintf(`data "kupe_app_image" "test" { image = %q }`, mockAppImageTag),
 		ExpectError: regexp.MustCompile("did not return an immutable sha256 image reference"),
 	}}})
+}
+
+func TestAppImageReadAPIRefusalsKeepActionableDetails(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, retryAfter string
+		status                 int
+		want, absent           []string
+	}{
+		{
+			name: "uncoded bad image reference", status: http.StatusBadRequest,
+			body:   `{"error":"invalid image reference","field":"image"}`,
+			want:   []string{"kupe API returned 400: invalid image reference"},
+			absent: []string{"Check your API credentials"},
+		},
+		{
+			name: "uncoded rate limit", status: http.StatusTooManyRequests,
+			body: `{"error":"too many requests"}`, retryAfter: "17",
+			want:   []string{"kupe API returned 429: too many requests", "Rate limit exceeded", "Retry after 17 seconds"},
+			absent: []string{"Check your API credentials", "after a short delay"},
+		},
+		{
+			name: "registry switched off", status: http.StatusNotFound,
+			body:   `{"code":"registries_unavailable","message":"registries are not available on this platform","severity":"error"}`,
+			want:   []string{"registries are not available", "Error code: registries_unavailable", "Registries are not enabled"},
+			absent: []string{"Check your API credentials"},
+		},
+		{
+			name: "non-JSON proxy body", status: http.StatusBadGateway,
+			body:   `<html>https://private.example/secret-image?token=secret-value</html>`,
+			want:   []string{"The Kupe API could not resolve the image"},
+			absent: []string{"private.example", "secret-image", "secret-value", "<html>"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Retry-After", tc.retryAfter)
+				w.WriteHeader(tc.status)
+				_, _ = fmt.Fprint(w, tc.body)
+			}))
+			defer server.Close()
+			resp := readAppImageWithClientForTest(t, client.New(server.URL, "acme", "test-token"), types.StringValue(mockAppImageTag), false)
+			if resp.Deferred != nil || len(resp.Diagnostics.Errors()) != 1 {
+				t.Fatalf("expected one non-deferred error: %v", resp.Diagnostics)
+			}
+			got, ok := resp.Diagnostics.Errors()[0].(diag.DiagnosticWithPath)
+			if !ok || !got.Path().Equal(path.Root("image")) {
+				t.Fatalf("API refusal did not point to image: %v", resp.Diagnostics)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(got.Detail(), want) {
+					t.Errorf("missing actionable detail %q in %q", want, got.Detail())
+				}
+			}
+			for _, absent := range tc.absent {
+				if strings.Contains(got.Detail(), absent) {
+					t.Errorf("unexpected diagnostic text %q in %q", absent, got.Detail())
+				}
+			}
+			if strings.Count(got.Detail(), "Retry after 17 seconds") > 1 {
+				t.Fatalf("retry delay printed twice: %s", got.Detail())
+			}
+		})
+	}
+}
+
+func TestAccAppImageDataSourceAppsOffPlanAndDestroy(t *testing.T) {
+	shrinkPollInterval(t)
+	mock := newMockKupeAPI()
+	defer mock.close()
+	resolved := mockAppImageResolution("a")
+	mock.appImages[mockAppImageTag] = resolved
+	pinned := testAccAppEnvironmentConfig(mock.url(), "a", "")
+	withData := strings.Replace(pinned, fmt.Sprintf("image = %q", resolved.Reference), "image = data.kupe_app_image.test.reference", 1) +
+		fmt.Sprintf(`
+data "kupe_app_image" "test" { image = %q }
+`, mockAppImageTag)
+	wantHint := regexp.MustCompile(`(?s)Apps are not enabled.*To\s+plan\s+or\s+destroy,\s+replace.*data.kupe_app_image.*digest\s+reference\s+from\s+Terraform\s+state`)
+	var resolutions int
+	resource.UnitTest(t, resource.TestCase{ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(), Steps: []resource.TestStep{
+		{Config: withData, Check: resource.TestCheckResourceAttr(appEnvironmentAddr, "web.image", resolved.Reference)},
+		{Config: withData, PlanOnly: true, PreConfig: func() { mock.setState(func(m *mockKupeAPI) { m.appsDisabled = true }) }, ExpectError: wantHint},
+		{Config: withData, Destroy: true, ExpectError: wantHint},
+		// The literal is the same digest asserted in state above. Removing the
+		// data source must allow a plan and destroy without another resolution.
+		{Config: pinned, PreConfig: func() {
+			if got := appEnvironmentRequestCount(mock, http.MethodDelete, ""); got != 0 {
+				t.Fatalf("failed destroy sent %d environment deletes", got)
+			}
+			mock.mu.Lock()
+			resolutions = len(mock.appImageRequests)
+			mock.mu.Unlock()
+		}, Check: resource.TestCheckResourceAttr(appEnvironmentAddr, "web.image", resolved.Reference)},
+		{Config: pinned, Destroy: true},
+	}})
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if len(mock.appImageRequests) != resolutions {
+		t.Fatalf("pinned digest workaround still resolved images: before=%d after=%d", resolutions, len(mock.appImageRequests))
+	}
+	if len(mock.apps) != 0 {
+		t.Fatal("pinned digest workaround did not destroy the app")
+	}
 }
