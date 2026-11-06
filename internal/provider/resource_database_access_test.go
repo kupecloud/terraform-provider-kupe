@@ -86,6 +86,22 @@ func TestAccDatabaseBindingDedicatedRotation(t *testing.T) {
 	}})
 }
 
+// Removing the credentials block from a dedicated binding means dedicated =
+// false, which replaces the binding like setting it false does.
+func TestAccDatabaseBindingCredentialsRemovedReplaces(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+	shrinkPollInterval(t)
+	const addr = "kupe_database_binding.test"
+	config := func(extra string) string {
+		return testAccDatabaseBindingConfig(mock.url(), "prod", ns("api"), "readwrite", extra)
+	}
+	resource.UnitTest(t, resource.TestCase{ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(), CheckDestroy: testAccCheckNoDatabases(mock), Steps: []resource.TestStep{
+		{Config: config(`credentials = { dedicated = true }`), Check: resource.TestCheckResourceAttr(addr, "credentials.dedicated", "true")},
+		{Config: config(""), ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(addr, plancheck.ResourceActionDestroyBeforeCreate)}}, Check: resource.TestCheckResourceAttr(addr, "credentials.dedicated", "false")},
+	}})
+}
+
 func TestAccDatabaseBindingCredentialsOnly(t *testing.T) {
 	mock := newMockKupeAPI()
 	defer mock.close()
