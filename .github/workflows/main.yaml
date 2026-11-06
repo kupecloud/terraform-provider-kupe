@@ -27,7 +27,9 @@ jobs:
     with:
       pre-commit-args: --all-files --show-diff-on-failure --hook-stage manual
       # govulncheck runs weekly in security.yaml.
-      skip: govulncheck
+      # go-unit-tests runs on every runtime in the acceptance matrix, so the
+      # gate job skips its single-runtime copy.
+      skip: govulncheck,go-unit-tests
 
   release:
     name: Release
