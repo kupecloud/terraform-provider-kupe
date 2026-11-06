@@ -1,3 +1,6 @@
+# Restores are not yet available on Kupe: applying this fails with
+# backups_unavailable until they are.
+#
 # A new database restored from a manual backup. It runs the backup's major
 # version, so `version` is left unset. The backup resource sets `name`, so
 # this reference is known when Terraform plans; a changing `source` would

@@ -164,7 +164,11 @@ func (r *DatabaseBackupResource) Schema(ctx context.Context, _ resource.SchemaRe
 	// change, so a change takes a new one.
 	replace := []planmodifier.String{stringplanmodifier.RequiresReplace()}
 	resp.Schema = schema.Schema{
-		Description: "Takes a manual backup of a Kupe database. Create waits until the backup has completed " +
+		Description: "Backups and restores are not yet available on Kupe. Setting `backup` or `source` on a " +
+			"`kupe_database`, or creating a `kupe_database_backup`, fails with error code `backups_unavailable`. " +
+			"Keep your own backups for now.\n\n" +
+			"Once backups are available, this resource takes a manual backup of a Kupe database. Create waits " +
+			"until the backup has completed " +
 			"(phase `Completed`) and fails at once if it fails. A backup that fails or times out on create stays " +
 			"in state, marked tainted. Changing `name` or `database` takes a new backup. Set timeouts with the " +
 			"`timeouts` attribute, for example `timeouts = { create = \"90m\" }` (defaults: create 60m, delete " +
