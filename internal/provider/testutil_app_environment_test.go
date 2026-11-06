@@ -152,7 +152,7 @@ func (m *mockKupeAPI) serveAppEnvironment(w http.ResponseWriter, r *http.Request
 			mockError(w, http.StatusBadRequest, "", "deploymentRevision cannot be patched")
 			return
 		}
-		priorWeb, priorSecrets := env.Web, env.Secrets
+		priorWeb, priorSecrets := env.Web, mockReleaseSecrets(env.Web, env.Secrets)
 		data, err := json.Marshal(body)
 		if err != nil {
 			panic(err)
@@ -174,7 +174,7 @@ func (m *mockKupeAPI) serveAppEnvironment(w http.ResponseWriter, r *http.Request
 			env.DeletionProtection = *patch.DeletionProtection
 		}
 		env.Generation++
-		if !reflect.DeepEqual(priorWeb, env.Web) || !reflect.DeepEqual(priorSecrets, env.Secrets) {
+		if !reflect.DeepEqual(priorWeb, env.Web) || !reflect.DeepEqual(priorSecrets, mockReleaseSecrets(env.Web, env.Secrets)) {
 			m.appMockRelease(key, env)
 		} else {
 			env.Status.ObservedGeneration = env.Generation
@@ -225,22 +225,7 @@ func (m *mockKupeAPI) appMockRelease(key string, env *client.AppEnvironment) {
 		panic(err)
 	}
 	release := client.AppRelease{Name: name, Number: number, DeploymentRevision: env.DeploymentRevision, Trigger: "Deploy", Runtime: client.AppReleaseRuntime{AppWeb: web, Secrets: []client.AppReleaseSecret{}}, Status: client.AppReleaseStatus{Phase: phase, Reason: "TestOutcome"}}
-	for _, secret := range env.Secrets {
-		keys := map[string]bool{}
-		for _, value := range web.Env {
-			if value.ValueFrom != nil && value.ValueFrom.SecretKeyRef.Secret == secret.Name {
-				keys[value.ValueFrom.SecretKeyRef.Key] = true
-			}
-		}
-		if len(keys) > 0 {
-			names := []string{}
-			for key := range keys {
-				names = append(names, key)
-			}
-			sort.Strings(names)
-			release.Runtime.Secrets = append(release.Runtime.Secrets, client.AppReleaseSecret{Name: secret.Name, Path: secret.Path, Keys: names})
-		}
-	}
+	release.Runtime.Secrets = mockReleaseSecrets(env.Web, env.Secrets)
 	ref := &client.AppReleaseRef{Name: name}
 	env.Status.RequestedRelease = ref
 	env.Status.Deployment = &client.AppDeployment{Release: ref, Phase: phase, Reason: release.Status.Reason}
@@ -262,4 +247,30 @@ func (m *mockKupeAPI) appMockRelease(key string, env *client.AppEnvironment) {
 		env.Status.ActiveRelease = previous
 	}
 	m.appReleases[key] = append([]client.AppRelease{release}, m.appReleases[key]...)
+}
+
+// mockReleaseSecrets returns the secrets a release records: only those the
+// web env references. A change to any other secret does not make a release.
+func mockReleaseSecrets(web *client.AppWeb, secrets []client.AppSecret) []client.AppReleaseSecret {
+	out := []client.AppReleaseSecret{}
+	if web == nil {
+		return out
+	}
+	for _, secret := range secrets {
+		keys := map[string]bool{}
+		for _, value := range web.Env {
+			if value.ValueFrom != nil && value.ValueFrom.SecretKeyRef.Secret == secret.Name {
+				keys[value.ValueFrom.SecretKeyRef.Key] = true
+			}
+		}
+		if len(keys) > 0 {
+			names := []string{}
+			for key := range keys {
+				names = append(names, key)
+			}
+			sort.Strings(names)
+			out = append(out, client.AppReleaseSecret{Name: secret.Name, Path: secret.Path, Keys: names})
+		}
+	}
+	return out
 }

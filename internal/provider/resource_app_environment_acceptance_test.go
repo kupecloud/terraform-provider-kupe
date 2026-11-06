@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"reflect"
 	"regexp"
 	"strings"
@@ -207,6 +208,38 @@ func TestAccAppEnvironmentDomainOnlyDoesNotWaitForDeployment(t *testing.T) {
 	defer mock.mu.Unlock()
 	if len(mock.appReleases["shop/production"]) != 1 {
 		t.Fatal("domain-only patch created a release")
+	}
+}
+
+func TestAccAppEnvironmentUnreferencedSecretEditMakesNoRelease(t *testing.T) {
+	shrinkPollInterval(t)
+	mock := newMockKupeAPI()
+	defer mock.close()
+	secrets := func(path string) string {
+		return fmt.Sprintf("secrets = [{ name = \"unused\", path = %q }]", path)
+	}
+	acc.UnitTest(t, acc.TestCase{ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(), Steps: []acc.TestStep{
+		{Config: testAccAppEnvironmentConfig(mock.url(), "a", secrets("apps/old"))},
+		{Config: testAccAppEnvironmentConfig(mock.url(), "a", secrets("apps/new")), Check: acc.TestCheckResourceAttr(appEnvironmentAddr, "secrets.0.path", "apps/new")},
+	}})
+	if got := appEnvironmentRequestCount(mock, http.MethodPatch, ""); got == 0 {
+		t.Fatal("the secret edit never reached the API, so the test proves nothing")
+	}
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if got := len(mock.appReleases["shop/production"]); got != 1 {
+		t.Fatalf("editing a secret no container references made %d releases, want 1", got)
+	}
+}
+
+func TestMockReleaseSecretsOnlyCountsReferencedSecrets(t *testing.T) {
+	web := &client.AppWeb{Env: []client.AppEnvVar{{Name: "A", ValueFrom: &client.AppValueFrom{SecretKeyRef: client.AppSecretKeyRef{Secret: "used", Key: "k"}}}}}
+	got := mockReleaseSecrets(web, []client.AppSecret{{Name: "used", Path: "apps/u"}, {Name: "unused", Path: "apps/x"}})
+	if len(got) != 1 || got[0].Name != "used" {
+		t.Fatalf("release secrets = %+v, want only the referenced one", got)
+	}
+	if got := mockReleaseSecrets(nil, []client.AppSecret{{Name: "used"}}); len(got) != 0 {
+		t.Fatalf("nil web produced %+v", got)
 	}
 }
 
