@@ -144,7 +144,7 @@ A binding lists at most 10 namespaces, which the plan checks. The bindings of on
 
 ### Dedicated credentials and rotation
 
-Set `credentials = { dedicated = true }` to give every listed namespace its own login and password. Enabling dedicated credentials updates the binding in place, including when `namespaces` changes in the same apply. Turning dedicated credentials off replaces the binding. Owner bindings use shared credentials. Custom bindings require `role_name` and dedicated credentials.
+Set `credentials = { dedicated = true }` to give every listed namespace its own login and password. Enabling dedicated credentials updates the binding in place, including when `namespaces` changes in the same apply. Omitting `credentials` means `dedicated = false`. Changing a dedicated binding back to `false`, including by removing the `credentials` block, replaces the binding. Owner bindings use shared credentials. Custom bindings require `role_name` and dedicated credentials.
 
 For an omitted selection or an explicit selection equal to the normalised instance name, a custom role such as `sales_reports` gives default binding name `{database}-{cluster}-sales-reports`. An explicit restored first name that differs includes the logical-name component as described above. The default Secret name for the effective first database is `{database}-sales-reports`.
 
@@ -192,7 +192,7 @@ A namespace is `Failed` when it already has a Service or Endpoints object named 
 
 Optional:
 
-- `dedicated` (Boolean) Use a separate login and password for each namespace. False to true changes in place; true to false replaces the binding. Owner bindings use shared credentials; custom bindings require dedicated credentials.
+- `dedicated` (Boolean) Use a separate login and password for each namespace. Omitting it, or the whole `credentials` block, means false. False to true changes in place; true to false, including removing the block, replaces the binding. Owner bindings use shared credentials; custom bindings require dedicated credentials.
 - `rotation_trigger` (String) Set or change this value to rotate dedicated credentials on update. Removing it does not rotate. This is an arbitrary trigger value, not a password. Terraform keeps the value in state. Restart applications after delivery.
 
 
