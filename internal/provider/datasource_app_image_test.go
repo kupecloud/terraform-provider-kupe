@@ -311,6 +311,19 @@ func TestAppImageDiagnosticsKeepURLsValuesAndTokensPrivate(t *testing.T) {
 			}
 		}
 	}
+	summary, detail := appImageErrorDiagnostic(&client.APIError{StatusCode: http.StatusNotFound, Message: private, NonJSON: true})
+	if summary != "app image route not found" || !strings.Contains(detail, "older than this provider") || !strings.Contains(detail, "replace `data.kupe_app_image`") {
+		t.Fatalf("non-JSON 404 gave no route hint: %q %q", summary, detail)
+	}
+	for _, value := range []string{"private.example", "secret-image", "secret-value"} {
+		if strings.Contains(summary+detail, value) {
+			t.Fatalf("route hint leaked %s", value)
+		}
+	}
+	// A JSON 404 still carries the API's own message, not the route hint.
+	if summary, _ := appImageErrorDiagnostic(&client.APIError{StatusCode: http.StatusNotFound, Code: client.CodeImageNotFound, Message: "no such image"}); summary != "app image not found" {
+		t.Fatalf("JSON 404 summary = %q", summary)
+	}
 	for _, retry := range []string{"https://private.example/secret-value", "-2", "0", "4294967296"} {
 		_, detail := appImageErrorDiagnostic(&client.APIError{StatusCode: 503, Code: client.CodeImageUnavailable, Message: "image resolution is temporarily unavailable", RetryAfter: retry})
 		if !strings.Contains(detail, "after a short delay") || strings.Contains(detail, "Retry after ") || strings.Contains(detail, "private.example") {
@@ -428,6 +441,32 @@ data "kupe_app_image" "test" { image = %q }
 	if len(mock.appImageRequests) != resolutions {
 		t.Fatalf("pinned digest workaround still resolved images: before=%d after=%d", resolutions, len(mock.appImageRequests))
 	}
+	if len(mock.apps) != 0 {
+		t.Fatal("pinned digest workaround did not destroy the app")
+	}
+}
+
+// The plan-time control above fails at its own step before Destroy runs, so
+// this case reaches Destroy with no earlier failure after apps go off.
+func TestAccAppImageDataSourceAppsOffDestroyOnly(t *testing.T) {
+	shrinkPollInterval(t)
+	mock := newMockKupeAPI()
+	defer mock.close()
+	resolved := mockAppImageResolution("a")
+	mock.appImages[mockAppImageTag] = resolved
+	pinned := testAccAppEnvironmentConfig(mock.url(), "a", "")
+	withData := strings.Replace(pinned, fmt.Sprintf("image = %q", resolved.Reference), "image = data.kupe_app_image.test.reference", 1) +
+		fmt.Sprintf(`
+data "kupe_app_image" "test" { image = %q }
+`, mockAppImageTag)
+	wantHint := regexp.MustCompile(`(?s)Apps are not enabled.*To\s+plan\s+or\s+destroy,\s+replace.*data.kupe_app_image`)
+	resource.UnitTest(t, resource.TestCase{ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(), Steps: []resource.TestStep{
+		{Config: withData},
+		{Config: withData, Destroy: true, PreConfig: func() { mock.setState(func(m *mockKupeAPI) { m.appsDisabled = true }) }, ExpectError: wantHint},
+		{Config: pinned, Destroy: true},
+	}})
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
 	if len(mock.apps) != 0 {
 		t.Fatal("pinned digest workaround did not destroy the app")
 	}

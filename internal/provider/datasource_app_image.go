@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"errors"
+	"net/http"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -134,6 +135,10 @@ func (d *AppImageDataSource) Read(ctx context.Context, req datasource.ReadReques
 // non-JSON proxy bodies can include private URLs, so keep those out of output.
 func appImageErrorDiagnostic(err error) (string, string) {
 	var apiErr *client.APIError
+	if errors.As(err, &apiErr) && apiErr.NonJSON && apiErr.StatusCode == http.StatusNotFound {
+		return "app image route not found", "The Kupe API returned 404 for the image lookup. The API may be older than this provider and not support app images, or a proxy may be answering in its place. " +
+			"Check the API version. To plan or destroy, replace `data.kupe_app_image` in your configuration with the image digest reference from Terraform state."
+	}
 	if !errors.As(err, &apiErr) || apiErr.NonJSON {
 		return "failed to resolve app image", "The Kupe API could not resolve the image. Retry the plan. If this persists, contact Kupe Cloud support."
 	}
