@@ -69,7 +69,7 @@ const (
 	backupDescription = "Backup settings: how far back the backups reach and how many full backups are kept. " +
 		"Fields left out keep their current value, and removing `backup` from the configuration keeps the " +
 		"current settings. Null on a database that has never set them: the defaults apply, 7 days and `Daily`. " +
-		"While the Kupe platform does not offer backups, setting `backup` fails with error code " +
+		"Backups are not yet available on Kupe, so setting `backup` fails with error code " +
 		"`backups_unavailable`."
 	backupRetentionDescription = "How far back the backups reach, in days: 7 to 35, default 7. The Kupe platform " +
 		"sets the range and refuses a value outside it (error code `DATABASE_BACKUP_RETENTION_OUT_OF_RANGE`). " +
@@ -99,8 +99,8 @@ const (
 		"the name of a `kupe_database_backup` without `name` that is taken again. Once the database exists, " +
 		"remove `source` from the configuration (the database keeps it), or keep it constant: name the backup " +
 		"with a literal or a backup resource that sets `name`, and write `point_in_time` literally. Null on a " +
-		"database that was not restored. While the Kupe platform does not offer backups, setting `source` " +
-		"fails with error code `backups_unavailable`."
+		"database that was not restored. Restores are not yet available on Kupe, so setting `source` fails " +
+		"with error code `backups_unavailable`."
 	sourceBackupDescription = "Name of a manual backup to restore. The database it was taken of may have been " +
 		"deleted. The new database holds the data as it was when the backup completed."
 	sourceDatabaseDescription = "Name of a database to restore. The new database holds its data as it was at " +

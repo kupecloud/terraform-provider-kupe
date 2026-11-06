@@ -42,11 +42,6 @@ resource "kupe_database" "orders" {
   # Two instances with a synchronous standby. Can be turned on or off later.
   high_availability = true
 
-  # Keep 14 days of backups instead of the default 7.
-  backup = {
-    retention = 14
-  }
-
   # deletion_protection defaults to true: the platform refuses to delete the
   # database until it is set to false and applied.
 }
@@ -113,7 +108,9 @@ To delete a protected database, set `deletion_protection = false` (and remove `p
 
 ### Backups
 
-Kupe takes a full backup of every database each day and saves the write-ahead log (WAL) continuously in between, so the backups cover every point inside the retention period. `backup.retention` sets how far back they reach (7 to 35 days, default 7) and `backup.schedule` how many full backups are kept within that time (`Daily` or `DailyThenWeekly`). Shortening retention deletes the backups that fall outside the new window.
+Backups and restores are not yet available on Kupe. Setting `backup` or `source`, or creating a `kupe_database_backup`, fails with `backups_unavailable`. Keep your own backups for now.
+
+Once backups are available, Kupe takes a full backup of every database each day and saves the write-ahead log (WAL) continuously in between, so the backups cover every point inside the retention period. `backup.retention` sets how far back they reach (7 to 35 days, default 7) and `backup.schedule` how many full backups are kept within that time (`Daily` or `DailyThenWeekly`). Shortening retention deletes the backups that fall outside the new window.
 
 A change applies in place, and `terraform apply` waits for the database to take it, as it does for a resize. Fields you leave out keep their current value, and removing `backup` keeps the current settings: to go back to the defaults, set them.
 
@@ -121,9 +118,14 @@ A change applies in place, and `terraform apply` waits for the database to take 
 
 ### Restoring from a backup or another database
 
-`source` creates the database from a manual backup (`source.backup`) or from another database at a point inside its restore window (`source.database` and `source.point_in_time`; without a point, the latest one), instead of starting it empty. The source is unchanged.
+Backups and restores are not yet available on Kupe. Setting `backup` or `source`, or creating a `kupe_database_backup`, fails with `backups_unavailable`. Keep your own backups for now.
+
+Once restores are available, `source` creates the database from a manual backup (`source.backup`) or from another database at a point inside its restore window (`source.database` and `source.point_in_time`; without a point, the latest one), instead of starting it empty. The source is unchanged.
 
 ```terraform
+# Restores are not yet available on Kupe: applying this fails with
+# backups_unavailable until they are.
+#
 # A new database restored from a manual backup. It runs the backup's major
 # version, so `version` is left unset. The backup resource sets `name`, so
 # this reference is known when Terraform plans; a changing `source` would
@@ -193,12 +195,12 @@ Grant access with [`kupe_database_binding`](database_binding.md). Each binding p
 
 ### Optional
 
-- `backup` (Attributes) Backup settings: how far back the backups reach and how many full backups are kept. Fields left out keep their current value, and removing `backup` from the configuration keeps the current settings. Null on a database that has never set them: the defaults apply, 7 days and `Daily`. While the Kupe platform does not offer backups, setting `backup` fails with error code `backups_unavailable`. (see [below for nested schema](#nestedatt--backup))
+- `backup` (Attributes) Backup settings: how far back the backups reach and how many full backups are kept. Fields left out keep their current value, and removing `backup` from the configuration keeps the current settings. Null on a database that has never set them: the defaults apply, 7 days and `Daily`. Backups are not yet available on Kupe, so setting `backup` fails with error code `backups_unavailable`. (see [below for nested schema](#nestedatt--backup))
 - `deletion_protection` (Boolean) While `true`, the Kupe platform refuses to delete the database. Set it to `false` and apply before destroying. Default `true`, also for an existing database: importing an unprotected database without this attribute in configuration plans turning protection on.
 - `engine` (String) Database engine. Only `postgres` is supported, and it is the default. The engine of an existing database cannot change: a different value fails the plan instead of replacing the database.
 - `high_availability` (Boolean) Run two instances with a synchronous standby. Can be turned on or off in place. When unset, a new database is created without it and an existing or imported database keeps its current setting, so removing the attribute from configuration does not turn HA off: set it to `false` to do that.
 - `postgres` (Attributes) PostgreSQL databases, group roles and extensions. Omitted settings keep their current values. Roles and extensions can be cleared with []; databases and schemas can only grow. The platform grants declared roles no privileges. (see [below for nested schema](#nestedatt--postgres))
-- `source` (Attributes) Restore the new database from a manual backup or from another database, instead of starting it empty. Set exactly one of `backup` and `database`. The new database runs the source's major version: leave `version` unset, or set that one. Its storage must be at least the source's. The source is unchanged, and the new database counts against the plan's database limit like any other. `source` is read only when the database is created, and any change to it replaces the database: Terraform deletes it and restores a new one. That includes a value Terraform knows only at apply time, such as the name of a `kupe_database_backup` without `name` that is taken again. Once the database exists, remove `source` from the configuration (the database keeps it), or keep it constant: name the backup with a literal or a backup resource that sets `name`, and write `point_in_time` literally. Null on a database that was not restored. While the Kupe platform does not offer backups, setting `source` fails with error code `backups_unavailable`. (see [below for nested schema](#nestedatt--source))
+- `source` (Attributes) Restore the new database from a manual backup or from another database, instead of starting it empty. Set exactly one of `backup` and `database`. The new database runs the source's major version: leave `version` unset, or set that one. Its storage must be at least the source's. The source is unchanged, and the new database counts against the plan's database limit like any other. `source` is read only when the database is created, and any change to it replaces the database: Terraform deletes it and restores a new one. That includes a value Terraform knows only at apply time, such as the name of a `kupe_database_backup` without `name` that is taken again. Once the database exists, remove `source` from the configuration (the database keeps it), or keep it constant: name the backup with a literal or a backup resource that sets `name`, and write `point_in_time` literally. Null on a database that was not restored. Restores are not yet available on Kupe, so setting `source` fails with error code `backups_unavailable`. (see [below for nested schema](#nestedatt--source))
 - `timeouts` (Attributes) (see [below for nested schema](#nestedatt--timeouts))
 - `version` (String) Engine major version, e.g. `18`. When unset, the platform default is used and recorded here; a database restored with `source` runs the source's major version. Major version upgrades are not available yet, so changing the version of an existing database fails the plan.
 

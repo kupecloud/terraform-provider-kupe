@@ -1,3 +1,6 @@
+# Backups are not yet available on Kupe: applying this fails with
+# backups_unavailable until they are.
+#
 # Take a manual backup before a schema migration. It is kept until you delete
 # it, even after the database is deleted. Set `name` when a restored database
 # refers to the backup.

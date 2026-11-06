@@ -34,7 +34,8 @@ the rest of your infrastructure code.
 * PostgreSQL databases with `kupe_database`, bound into cluster
   namespaces with `kupe_database_binding`; manual backups with
   `kupe_database_backup`, and new databases restored from them with
-  `source` on `kupe_database`
+  `source` on `kupe_database` (backups and restores are not yet
+  available on Kupe)
 * the container registry with `kupe_registry`, clusters connected to it
   with `kupe_registry_binding`, and CI access tokens with
   `kupe_registry_token`

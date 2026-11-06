@@ -2,7 +2,8 @@
 page_title: "kupe_database_backup Resource - kupe"
 subcategory: ""
 description: |-
-  Takes a manual backup of a Kupe database. Create waits until the backup has completed (phase Completed) and fails at once if it fails. A backup that fails or times out on create stays in state, marked tainted. Changing name or database takes a new backup. Set timeouts with the timeouts attribute, for example timeouts = { create = "90m" } (defaults: create 60m, delete 15m).
+  Backups and restores are not yet available on Kupe. Setting backup or source on a kupe_database, or creating a kupe_database_backup, fails with error code backups_unavailable. Keep your own backups for now.
+  Once backups are available, this resource takes a manual backup of a Kupe database. Create waits until the backup has completed (phase Completed) and fails at once if it fails. A backup that fails or times out on create stays in state, marked tainted. Changing name or database takes a new backup. Set timeouts with the timeouts attribute, for example timeouts = { create = "90m" } (defaults: create 60m, delete 15m).
   A manual backup is kept until you delete it, even after the database is deleted, and a new database can be restored from it with source.backup on kupe_database. It is deleted with your account. A database can keep up to 20 manual backups. Reading and deleting a backup works even while the Kupe platform has databases or backups switched off.
   Destroy semantics
   Destroying this resource deletes the backup: it can no longer be restored from. Destroying the kupe_database it was taken of leaves this backup in place. From the kupe_database page: Deleting a database removes it and its automatic backups immediately, and they cannot be restored. Manual backups stay until you delete them.
@@ -10,7 +11,9 @@ description: |-
 
 # kupe_database_backup (Resource)
 
-Takes a manual backup of a Kupe database. Create waits until the backup has completed (phase `Completed`) and fails at once if it fails. A backup that fails or times out on create stays in state, marked tainted. Changing `name` or `database` takes a new backup. Set timeouts with the `timeouts` attribute, for example `timeouts = { create = "90m" }` (defaults: create 60m, delete 15m).
+Backups and restores are not yet available on Kupe. Setting `backup` or `source` on a `kupe_database`, or creating a `kupe_database_backup`, fails with error code `backups_unavailable`. Keep your own backups for now.
+
+Once backups are available, this resource takes a manual backup of a Kupe database. Create waits until the backup has completed (phase `Completed`) and fails at once if it fails. A backup that fails or times out on create stays in state, marked tainted. Changing `name` or `database` takes a new backup. Set timeouts with the `timeouts` attribute, for example `timeouts = { create = "90m" }` (defaults: create 60m, delete 15m).
 
 A manual backup is kept until you delete it, even after the database is deleted, and a new database can be restored from it with `source.backup` on `kupe_database`. It is deleted with your account. A database can keep up to 20 manual backups. Reading and deleting a backup works even while the Kupe platform has databases or backups switched off.
 
@@ -21,6 +24,9 @@ Destroying this resource deletes the backup: it can no longer be restored from. 
 ## Example Usage
 
 ```terraform
+# Backups are not yet available on Kupe: applying this fails with
+# backups_unavailable until they are.
+#
 # Take a manual backup before a schema migration. It is kept until you delete
 # it, even after the database is deleted. Set `name` when a restored database
 # refers to the backup.
