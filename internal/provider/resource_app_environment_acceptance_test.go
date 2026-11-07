@@ -232,11 +232,39 @@ func TestAccAppEnvironmentUnreferencedSecretEditMakesNoRelease(t *testing.T) {
 	}
 }
 
+func TestAccAppEnvironmentReferencedSecretEditMakesRelease(t *testing.T) {
+	shrinkPollInterval(t)
+	mock := newMockKupeAPI()
+	defer mock.close()
+	config := func(path string) string {
+		base := testAccAppEnvironmentConfig(mock.url(), "a", fmt.Sprintf("secrets = [{ name = \"db\", path = %q }]\ntimeouts = { create = \"5s\", update = \"5s\" }", path))
+		return strings.Replace(base, "port = 8080", "port = 8080\n    env = [{ name = \"DB_PASSWORD\", secret_key_ref = { secret = \"db\", key = \"password\" } }]", 1)
+	}
+	acc.UnitTest(t, acc.TestCase{ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(), Steps: []acc.TestStep{
+		{Config: config("apps/old")},
+		{Config: config("apps/new"), Check: acc.TestCheckResourceAttr(appEnvironmentAddr, "secrets.0.path", "apps/new")},
+	}})
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if got := len(mock.appReleases["shop/production"]); got != 2 {
+		t.Fatalf("editing a referenced secret made %d releases, want 2", got)
+	}
+}
+
 func TestMockReleaseSecretsOnlyCountsReferencedSecrets(t *testing.T) {
 	web := &client.AppWeb{Env: []client.AppEnvVar{{Name: "A", ValueFrom: &client.AppValueFrom{SecretKeyRef: client.AppSecretKeyRef{Secret: "used", Key: "k"}}}}}
 	got := mockReleaseSecrets(web, []client.AppSecret{{Name: "used", Path: "apps/u"}, {Name: "unused", Path: "apps/x"}})
 	if len(got) != 1 || got[0].Name != "used" {
 		t.Fatalf("release secrets = %+v, want only the referenced one", got)
+	}
+	two := &client.AppWeb{Env: []client.AppEnvVar{
+		{Name: "A", ValueFrom: &client.AppValueFrom{SecretKeyRef: client.AppSecretKeyRef{Secret: "a", Key: "k"}}},
+		{Name: "B", ValueFrom: &client.AppValueFrom{SecretKeyRef: client.AppSecretKeyRef{Secret: "b", Key: "k"}}},
+	}}
+	if !reflect.DeepEqual(
+		mockReleaseSecrets(two, []client.AppSecret{{Name: "a", Path: "p"}, {Name: "b", Path: "p"}}),
+		mockReleaseSecrets(two, []client.AppSecret{{Name: "b", Path: "p"}, {Name: "a", Path: "p"}})) {
+		t.Fatal("a pure reorder of referenced secrets changed the release secrets")
 	}
 	if got := mockReleaseSecrets(nil, []client.AppSecret{{Name: "used"}}); len(got) != 0 {
 		t.Fatalf("nil web produced %+v", got)
