@@ -272,5 +272,6 @@ func mockReleaseSecrets(web *client.AppWeb, secrets []client.AppSecret) []client
 			out = append(out, client.AppReleaseSecret{Name: secret.Name, Path: secret.Path, Keys: names})
 		}
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }

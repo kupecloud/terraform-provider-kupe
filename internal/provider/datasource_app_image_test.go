@@ -459,15 +459,31 @@ func TestAccAppImageDataSourceAppsOffDestroyOnly(t *testing.T) {
 		fmt.Sprintf(`
 data "kupe_app_image" "test" { image = %q }
 `, mockAppImageTag)
-	wantHint := regexp.MustCompile(`(?s)Apps are not enabled.*To\s+plan\s+or\s+destroy,\s+replace.*data.kupe_app_image`)
+	wantHint := regexp.MustCompile(`(?s)Apps are not enabled.*To\s+plan\s+or\s+destroy,\s+replace.*data.kupe_app_image.*digest\s+reference\s+from\s+Terraform\s+state`)
+	var pinnedSteps int
 	resource.UnitTest(t, resource.TestCase{ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(), Steps: []resource.TestStep{
 		{Config: withData},
 		{Config: withData, Destroy: true, PreConfig: func() { mock.setState(func(m *mockKupeAPI) { m.appsDisabled = true }) }, ExpectError: wantHint},
-		{Config: pinned, Destroy: true},
+		// The failed destroy must not have deleted anything. Checked here because
+		// the framework's own end-of-test cleanup would also empty the mock.
+		{Config: pinned, PreConfig: func() {
+			pinnedSteps++
+			if got := appEnvironmentRequestCount(mock, http.MethodDelete, ""); got != 0 {
+				t.Fatalf("failed destroy sent %d environment deletes", got)
+			}
+			mock.mu.Lock()
+			defer mock.mu.Unlock()
+			if len(mock.apps) != 1 {
+				t.Fatalf("failed destroy left %d apps, want 1", len(mock.apps))
+			}
+		}},
+		{Config: pinned, Destroy: true, PreConfig: func() { pinnedSteps++ }},
 	}})
-	mock.mu.Lock()
-	defer mock.mu.Unlock()
-	if len(mock.apps) != 0 {
-		t.Fatal("pinned digest workaround did not destroy the app")
+	// The framework's cleanup also destroys, so prove both pinned steps ran.
+	if pinnedSteps != 2 {
+		t.Fatalf("ran %d of the 2 pinned-config steps", pinnedSteps)
+	}
+	if got := appEnvironmentRequestCount(mock, http.MethodDelete, ""); got != 1 {
+		t.Fatalf("pinned destroy sent %d environment deletes, want 1", got)
 	}
 }
