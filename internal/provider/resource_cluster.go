@@ -215,7 +215,7 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				},
 			},
 			"version": schema.StringAttribute{
-				Description: "Kubernetes version (e.g., 1.31).",
+				Description: "Kubernetes version (e.g., 1.35).",
 				Optional:    true,
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{

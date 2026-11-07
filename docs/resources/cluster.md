@@ -28,7 +28,7 @@ The same contract applies whether you delete via Terraform, the `kupe` CLI, or t
 ```terraform
 resource "kupe_cluster" "prod" {
   name    = "prod"
-  version = "1.32"
+  version = "1.35"
 
   resources = {
     cpu     = "4"
@@ -86,7 +86,7 @@ output "prod_eu1_ha_ready" {
 - `resources` (Attributes) Resource limits for the cluster. Updates send a partial PATCH that includes only the fields present in this block: fields you omit are **left unchanged** on the server. To change an individual field, write it explicitly. Removing the entire `resources` block sends an empty `resources` object to the server to request clearing the limits. (see [below for nested schema](#nestedatt--resources))
 - `timeouts` (Attributes) (see [below for nested schema](#nestedatt--timeouts))
 - `type` (String, Deprecated) **Deprecated.** Cluster type. Only `shared` is supported today; the operator rejects `dedicated` with the canonical `CLUSTER_DEDICATED_UNSUPPORTED` error code. Leave unset (the provider defaults to `shared`) or omit from your configuration entirely. The attribute remains in the schema so that existing state migrates cleanly; future support for dedicated nodes will likely take a different shape (per-cluster node-pool reference) rather than reviving this enum.
-- `version` (String) Kubernetes version (e.g., 1.31).
+- `version` (String) Kubernetes version (e.g., 1.35).
 
 ### Read-Only
 

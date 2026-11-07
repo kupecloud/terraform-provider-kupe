@@ -28,7 +28,7 @@ data "kupe_app_image" "web" {
 # Create a production cluster
 resource "kupe_cluster" "prod" {
   name    = "prod"
-  version = "1.31"
+  version = "1.35"
 
   resources = {
     cpu     = "4"
@@ -40,7 +40,7 @@ resource "kupe_cluster" "prod" {
 # Create a staging cluster
 resource "kupe_cluster" "staging" {
   name    = "staging"
-  version = "1.31"
+  version = "1.35"
 
   resources = {
     cpu     = "2"
