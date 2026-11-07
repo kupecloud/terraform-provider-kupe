@@ -1,6 +1,6 @@
 resource "kupe_cluster" "prod" {
   name    = "prod"
-  version = "1.32"
+  version = "1.35"
 
   resources = {
     cpu     = "4"

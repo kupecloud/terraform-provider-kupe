@@ -77,7 +77,7 @@ supported for local development endpoints such as
 resource "kupe_cluster" "prod" {
   name         = "prod"
   type         = "shared"
-  version      = "1.31"
+  version      = "1.35"
 
   resources = {
     cpu     = "4"
