@@ -1,5 +1,15 @@
 # terraform-provider-kupe Makefile
 
+# Local gates run on the Go CI installs: setup-go reads go.mod's toolchain line,
+# else its go line. A GOTOOLCHAIN the caller set wins (setup-go and kupe-runner set local).
+ifndef GOTOOLCHAIN
+GO_MOD_TOOLCHAIN := $(shell awk '$$1=="toolchain"{t=$$2} $$1=="go"&&g==""{g="go"$$2} END{v=(t!=""?t:g); sub(/\r$$/,"",v); print v}' go.mod)
+ifeq ($(shell echo '$(GO_MOD_TOOLCHAIN)' | grep -Ex 'go1\.[0-9]+(\.[0-9]+|rc[0-9]+)'),)
+$(error go.mod names no Go release to run ('$(GO_MOD_TOOLCHAIN)'): set its go line to one, e.g. go mod edit -go=1.N.P)
+endif
+export GOTOOLCHAIN := $(GO_MOD_TOOLCHAIN)
+endif
+
 BINARY_NAME = terraform-provider-kupe
 VERSION ?= dev
 PROVIDER_ADDRESS ?= registry.terraform.io/kupecloud/kupe
