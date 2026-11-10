@@ -235,7 +235,7 @@ func TestAPIErrorDetail(t *testing.T) {
 				StatusCode: http.StatusConflict, Code: client.CodeRegistryAlreadyExists,
 				Message: "this tenant already has a registry",
 			},
-			wantSubstr:   []string{"A tenant has one registry.", "`terraform import kupe_registry.this registry`"},
+			wantSubstr:   []string{"The Kupe platform creates the registry when your plan includes one", "`import { to = kupe_registry.this, id = \"registry\" }`", "`terraform import kupe_registry.this registry`"},
 			wantNoSubstr: []string{"Usually means"},
 		},
 		{
