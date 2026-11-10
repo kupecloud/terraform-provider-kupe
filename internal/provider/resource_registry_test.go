@@ -261,7 +261,8 @@ func TestAccRegistryResource_ImportRejectsOtherNames(t *testing.T) {
 }
 
 // TestAccRegistryResource_SecondRegistry: a tenant that already has its
-// registry gets the import hint, not a bare conflict.
+// registry (the platform creates it, kupe-control-operator#523) gets the
+// import hint, not a bare conflict.
 func TestAccRegistryResource_SecondRegistry(t *testing.T) {
 	mock := newMockKupeAPI()
 	defer mock.close()
@@ -276,7 +277,8 @@ func TestAccRegistryResource_SecondRegistry(t *testing.T) {
 		Steps: []resource.TestStep{{
 			Config: testAccRegistryConfig(mock.url(), testRegistry{}),
 			ExpectError: regexp.MustCompile(`(?s)Error code: REGISTRY_ALREADY_EXISTS.*` +
-				wrappedText("A tenant has one registry. Import it: `terraform import kupe_registry.this registry`.")),
+				wrappedText("Import it instead of creating it: add `import { to = kupe_registry.this, id = "+
+					"\"registry\" }` to your configuration, or run `terraform import kupe_registry.this registry`")),
 		}},
 	})
 }

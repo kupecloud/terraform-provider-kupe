@@ -2,7 +2,7 @@
 page_title: "kupe_registry Resource - kupe"
 subcategory: ""
 description: |-
-  Manages the tenant's Kupe container registry. A tenant has one registry, always named registry; images live at registry.kupe.cloud/<tenant>/<repository>:<tag>. Create and Update wait for the registry to reach phase=Running with the change in effect. They fail at once if the registry is being deleted (Terminating), and after 2 minutes if it stays Degraded once the platform has picked up the change. If the timeout fires first, the apply fails; the platform carries on in the background, and a registry that timed out on Create stays in state, marked tainted. A change to deletion_protection alone takes effect at once and is not waited for. Delete waits until the registry is gone. Set timeouts with the timeouts attribute, for example timeouts = { create = "20m" } (defaults: create 10m, update 5m, delete 15m).
+  Manages the tenant's Kupe container registry. A tenant has one registry, always named registry; images live at registry.kupe.cloud/<tenant>/<repository>:<tag>. The Kupe platform creates it when the tenant's plan includes one: import it (ID registry) rather than creating it. Creating it when it exists fails with the import command. Create and Update wait for the registry to reach phase=Running with the change in effect. They fail at once if the registry is being deleted (Terminating), and after 2 minutes if it stays Degraded once the platform has picked up the change. If the timeout fires first, the apply fails; the platform carries on in the background, and a registry that timed out on Create stays in state, marked tainted. A change to deletion_protection alone takes effect at once and is not waited for. Delete waits until the registry is gone. Set timeouts with the timeouts attribute, for example timeouts = { create = "20m" } (defaults: create 10m, update 5m, delete 15m).
   Clusters pull from the registry through kupe_registry_binding, and CI systems sign in with a kupe_registry_token.
   Destroy semantics
   Deleting a registry deletes every image in it. They cannot be restored. deletion_protection (default true) makes the Kupe platform refuse the delete: set it to false and apply before destroying. Add lifecycle { prevent_destroy = true } to stop Terraform from planning the destroy at all.
@@ -10,7 +10,7 @@ description: |-
 
 # kupe_registry (Resource)
 
-Manages the tenant's Kupe container registry. A tenant has one registry, always named `registry`; images live at `registry.kupe.cloud/<tenant>/<repository>:<tag>`. Create and Update wait for the registry to reach phase=Running with the change in effect. They fail at once if the registry is being deleted (Terminating), and after 2 minutes if it stays Degraded once the platform has picked up the change. If the timeout fires first, the apply fails; the platform carries on in the background, and a registry that timed out on Create stays in state, marked tainted. A change to `deletion_protection` alone takes effect at once and is not waited for. Delete waits until the registry is gone. Set timeouts with the `timeouts` attribute, for example `timeouts = { create = "20m" }` (defaults: create 10m, update 5m, delete 15m).
+Manages the tenant's Kupe container registry. A tenant has one registry, always named `registry`; images live at `registry.kupe.cloud/<tenant>/<repository>:<tag>`. The Kupe platform creates it when the tenant's plan includes one: import it (ID `registry`) rather than creating it. Creating it when it exists fails with the import command. Create and Update wait for the registry to reach phase=Running with the change in effect. They fail at once if the registry is being deleted (Terminating), and after 2 minutes if it stays Degraded once the platform has picked up the change. If the timeout fires first, the apply fails; the platform carries on in the background, and a registry that timed out on Create stays in state, marked tainted. A change to `deletion_protection` alone takes effect at once and is not waited for. Delete waits until the registry is gone. Set timeouts with the `timeouts` attribute, for example `timeouts = { create = "20m" }` (defaults: create 10m, update 5m, delete 15m).
 
 Clusters pull from the registry through `kupe_registry_binding`, and CI systems sign in with a `kupe_registry_token`.
 
@@ -37,6 +37,21 @@ output "registry_endpoint" {
   value       = kupe_registry.this.endpoint
 }
 ```
+
+### Importing the registry the platform created
+
+The Kupe platform creates your registry when your plan includes one, so it is usually there before you write any configuration. Import it rather than creating it. With Terraform 1.5 or OpenTofu 1.5 and later, add an `import` block next to the resource and run `terraform apply`:
+
+```terraform
+# The Kupe platform creates the tenant's registry when the plan includes one.
+# Bring it under Terraform instead of creating it.
+import {
+  to = kupe_registry.this
+  id = "registry"
+}
+```
+
+Or import it once from the command line, as shown under [Import](#import). A `terraform apply` that tries to create the registry while it exists fails with error code `REGISTRY_ALREADY_EXISTS` and these import steps; nothing changes on the platform. If you deleted the registry, or your plan has none, `terraform apply` creates it.
 
 ### Deleting the registry
 
