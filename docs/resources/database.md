@@ -106,6 +106,45 @@ resource "kupe_database" "billing" {
 
 To delete a protected database, set `deletion_protection = false` (and remove `prevent_destroy`), run `terraform apply`, then destroy it.
 
+### Upgrading the major version
+
+Raise `version` to the next major and run `terraform apply`. The plan shows an update in place, never a replacement.
+
+```terraform
+# Step 1: create the database on PostgreSQL 17.
+resource "kupe_database" "orders" {
+  name    = "orders-db"
+  version = "17"
+
+  resources = {
+    cpu     = "1"
+    memory  = "2Gi"
+    storage = "50Gi"
+  }
+
+  # A large database takes longer than the 30 minute default to back up and
+  # upgrade.
+  timeouts = {
+    update = "60m"
+  }
+}
+
+# Step 2: raise `version` to "18" and run `terraform apply`. The apply updates
+# the database in place and returns once it runs PostgreSQL 18. To cancel an
+# upgrade that has not started, was rolled back or failed, set `version` back
+# to "17" and apply.
+```
+
+An upgrade goes one major at a time. The platform takes a backup first, then stops the database and moves its data to the new major, so the database is offline until it finishes. `terraform apply` waits until the database is Running on the new major with Ready true, and `phase` reads `Upgrading` while it is offline. The default `timeouts.update` is 30 minutes. Set it higher for a large database, because the backup comes first.
+
+While the platform does not offer major upgrades, raising `version` plans as an update and the apply fails with `major_upgrade_unavailable`. Nothing changes and the state keeps the current version. The apply fails with `DATABASE_UPGRADE_NOT_READY` when the database cannot be upgraded yet. The message says why: it must be running and healthy, have a recent backup and room for one more, and `version` must be one major above the one it runs. While an upgrade is running, changes to `resources` and `high_availability` fail with `DATABASE_UPGRADE_IN_PROGRESS`.
+
+`version` can only move up. Setting it to a lower major fails during planning, except the major the database runs, which cancels an upgrade that is waiting, taking its backup, rolled back, or failed. A cancel is accepted whether or not the platform offers upgrades. Once the database is offline for the upgrade, it cannot be cancelled.
+
+If the platform rolls the upgrade back (the status message says the upgrade stopped before it changed any data, and the database runs its old major) or the upgrade fails, `terraform apply` fails at once with the platform's message. The platform holds the database, with no platform updates, until you set `version` back to the major it runs and apply. To try again, fix the cause and raise `version` again. The failed apply records the new `version` in state, so `terraform plan` shows no change until you set it back. Every plan and refresh warns while the database is held or an upgrade is in progress. `current_version` shows the release the database runs.
+
+If the apply times out while the upgrade is waiting for a check or taking its backup, the upgrade carries on. Apply again with a longer `timeouts.update`, or set `version` back to cancel.
+
 ### Backups
 
 Backups and restores are not yet available on Kupe. Setting `backup` or `source`, or creating a `kupe_database_backup`, fails with `backups_unavailable`. Keep your own backups for now.
@@ -202,7 +241,7 @@ Grant access with [`kupe_database_binding`](database_binding.md). Each binding p
 - `postgres` (Attributes) PostgreSQL databases, group roles and extensions. Omitted settings keep their current values. Roles and extensions can be cleared with []; databases and schemas can only grow. The platform grants declared roles no privileges. (see [below for nested schema](#nestedatt--postgres))
 - `source` (Attributes) Restore the new database from a manual backup or from another database, instead of starting it empty. Set exactly one of `backup` and `database`. The new database runs the source's major version: leave `version` unset, or set that one. Its storage must be at least the source's. The source is unchanged, and the new database counts against the plan's database limit like any other. `source` is read only when the database is created, and any change to it replaces the database: Terraform deletes it and restores a new one. That includes a value Terraform knows only at apply time, such as the name of a `kupe_database_backup` without `name` that is taken again. Once the database exists, remove `source` from the configuration (the database keeps it), or keep it constant: name the backup with a literal or a backup resource that sets `name`, and write `point_in_time` literally. Null on a database that was not restored. Restores are not yet available on Kupe, so setting `source` fails with error code `backups_unavailable`. (see [below for nested schema](#nestedatt--source))
 - `timeouts` (Attributes) (see [below for nested schema](#nestedatt--timeouts))
-- `version` (String) Engine major version, e.g. `18`. When unset, the platform default is used and recorded here; a database restored with `source` runs the source's major version. Major version upgrades are not available yet, so changing the version of an existing database fails the plan.
+- `version` (String) Engine major version, e.g. `18`. When unset, the platform default is used and recorded here; a database restored with `source` runs the source's major version. Raising it upgrades the database in place, one major at a time: the platform takes a backup first, then the database is offline while it upgrades. The version can only move up. Setting the version back to the major the database runs cancels an upgrade that is waiting, taking its backup, rolled back, or failed. Raising it fails with `major_upgrade_unavailable` while the platform does not offer major upgrades.
 
 ### Read-Only
 
@@ -211,7 +250,7 @@ Grant access with [`kupe_database_binding`](database_binding.md). Each binding p
 - `current_version` (String) Full engine version running, e.g. `18.0`.
 - `etag` (String) Resource version used for optimistic locking during updates.
 - `last_backup_at` (String) When the newest full backup finished (RFC 3339). Empty until the first backup completes.
-- `phase` (String) Current phase: Pending, Provisioning, Running, Degraded or Terminating.
+- `phase` (String) Current phase: Pending, Provisioning, Running, Upgrading, Degraded or Terminating. It is `Upgrading` while a major version upgrade is running and the database is offline.
 - `recovery_window` (Attributes) The restore window: the oldest and newest points you can restore the database to. Null until the backups report them. (see [below for nested schema](#nestedatt--recovery_window))
 
 <a id="nestedatt--resources"></a>

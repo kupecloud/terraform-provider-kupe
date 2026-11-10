@@ -208,6 +208,12 @@ var databaseKind = serviceKind[DatabaseResourceModel, client.Database]{
 		phase:     databasePhase,
 		converged: databaseConverged,
 		failed: func(db *client.Database) (time.Duration, bool) {
+			// The platform holds a database whose upgrade rolled back or
+			// failed until the version is set back: waiting does not clear
+			// it, so it ends at once, Degraded or not.
+			if upgradeHeld(db) {
+				return 0, true
+			}
 			switch databasePhase(db) {
 			case phaseTerminating:
 				return 0, true
@@ -218,12 +224,21 @@ var databaseKind = serviceKind[DatabaseResourceModel, client.Database]{
 			}
 			return 0, false
 		},
-		message: databaseReadyMessage,
-		timedOutDetail: func(_ *DatabaseResourceModel, db *client.Database) string {
-			if message := databaseReadyMessage(db); message != "" {
-				return "\n\nStatus message: " + message
+		message:       databaseReadyMessage,
+		failureDetail: databaseUpgradeFailure,
+		overtaken: func(op string, m *DatabaseResourceModel, db *client.Database) string {
+			if op != "update" || m.Version.IsUnknown() || m.Version.IsNull() {
+				return ""
 			}
-			return ""
+			return databaseVersionOvertaken(m.Version.ValueString(), db)
+		},
+		readNotice: databaseUpgradeNotice,
+		timedOutDetail: func(_ *DatabaseResourceModel, db *client.Database) string {
+			detail := ""
+			if message := databaseReadyMessage(db); message != "" {
+				detail = "\n\nStatus message: " + message
+			}
+			return detail + databaseUpgradeTimedOutDetail(db)
 		},
 		notApplied: func(db *client.Database) bool {
 			return db != nil && db.Status != nil &&
@@ -306,16 +321,18 @@ func (r *DatabaseResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 			"version": schema.StringAttribute{
 				Description: "Engine major version, e.g. `18`. When unset, the platform default is used and recorded here; " +
 					"a database restored with `source` runs the source's major version. " +
-					"Major version upgrades are not available yet, so changing the version of an existing database " +
-					"fails the plan.",
+					"Raising it upgrades the database in place, one major at a time: the platform takes a backup " +
+					"first, then the database is offline while it upgrades. The version can only move up. " +
+					"Setting the version back to the major the database runs cancels an upgrade that is waiting, " +
+					"taking its backup, rolled back, or failed. Raising it fails with `major_upgrade_unavailable` " +
+					"while the platform does not offer major upgrades.",
 				Optional: true,
 				Computed: true,
 				PlanModifiers: []planmodifier.String{
 					// Keep the recorded version when config is unset so an
 					// unrelated edit never sends a version.
 					stringplanmodifier.UseStateForUnknown(),
-					rejectInPlaceChange("Major version upgrades are not available yet",
-						"Keep the current version, or create a new database with the version you need and migrate the data."),
+					versionMovesUp(),
 				},
 			},
 			"resources": requiredResourcesAttribute("Per-instance resources in Kubernetes quantity format. Billing " +
@@ -424,7 +441,7 @@ func (r *DatabaseResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 				},
 			},
 			"phase": schema.StringAttribute{
-				Description: "Current phase: Pending, Provisioning, Running, Degraded or Terminating.",
+				Description: "Current phase: Pending, Provisioning, Running, Upgrading, Degraded or Terminating. It is `Upgrading` while a major version upgrade is running and the database is offline.",
 				Computed:    true,
 			},
 			"current_version": schema.StringAttribute{
@@ -529,8 +546,9 @@ func protectionOnly(patch client.PatchDatabaseRequest) bool {
 
 // databasePatch builds the merge patch for the fields that differ between
 // plan and state. Version is only sent when the planned value is known, so
-// an unset version can never reach the wire as "". The plan rejects version
-// changes while major upgrades are unavailable; the API refuses them too.
+// an unset version can never reach the wire as "". A raise is a major
+// upgrade, and a lowering back to the running major a cancel: the plan
+// refuses any other lowering, and the API judges all of them.
 func databasePatch(plan, state *DatabaseResourceModel) (client.PatchDatabaseRequest, bool) {
 	var patch client.PatchDatabaseRequest
 	hasChanges := false
@@ -680,12 +698,14 @@ func settingsChanged(prior *databaseModel, current databaseModel) []string {
 // spec in effect. Phase alone is not enough: the platform marks a change
 // applied (observedGeneration reaches generation) as soon as it hands it to
 // the instances, and the phase stays Running while they roll onto it, with
-// the Ready condition False until they have.
+// the Ready condition False until they have. A database that runs a major
+// other than its spec's has not finished an upgrade, whatever Ready says.
 func databaseConverged(db *client.Database) bool {
 	return db.Status != nil &&
 		db.Status.Phase == databasePhaseRunning &&
 		db.Status.ObservedGeneration >= db.Generation &&
-		db.Status.Ready()
+		db.Status.Ready() &&
+		runsSpecMajor(db)
 }
 
 // databasePhase is db's phase, "" when it has no status yet.

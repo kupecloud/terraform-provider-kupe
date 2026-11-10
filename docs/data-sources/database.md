@@ -39,7 +39,7 @@ output "orders_db_running_version" {
 - `engine` (String) Database engine, e.g. `postgres`.
 - `high_availability` (Boolean) Whether the database runs two instances with a synchronous standby.
 - `last_backup_at` (String) When the newest full backup finished (RFC 3339). Empty until the first backup completes.
-- `phase` (String) Current phase: Pending, Provisioning, Running, Degraded or Terminating.
+- `phase` (String) Current phase: Pending, Provisioning, Running, Upgrading, Degraded or Terminating. It is `Upgrading` while a major version upgrade is running and the database is offline.
 - `postgres` (Attributes) PostgreSQL databases, declared roles and extensions returned by the database. (see [below for nested schema](#nestedatt--postgres))
 - `recovery_window` (Attributes) The restore window: the oldest and newest points you can restore the database to. Null until the backups report them. (see [below for nested schema](#nestedatt--recovery_window))
 - `resources` (Attributes) Per-instance resources. (see [below for nested schema](#nestedatt--resources))

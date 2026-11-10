@@ -170,6 +170,31 @@ type Condition struct {
 // runs with its latest change in effect.
 const ConditionReady = "Ready"
 
+// ConditionUpgradeInProgress is the condition that reports a major upgrade:
+// True with reason ReasonUpgradeWaiting, ReasonPreUpgradeBackup or
+// ReasonUpgrading while one is asked for or running, False otherwise.
+const ConditionUpgradeInProgress = "UpgradeInProgress"
+
+// Reasons of a database's UpgradeInProgress and Ready conditions while a
+// major upgrade is asked for. While one waits, takes its backup, or has
+// rolled back or failed, Ready is False with the same reason.
+const (
+	// ReasonUpgradeWaiting: a check is not met yet; the message says which.
+	ReasonUpgradeWaiting = "UpgradeWaiting"
+	// ReasonPreUpgradeBackup: the pre-upgrade backup is being taken.
+	ReasonPreUpgradeBackup = "PreUpgradeBackup"
+	// ReasonUpgrading: the database is offline while it moves to the new
+	// major (status.phase is Upgrading).
+	ReasonUpgrading = "Upgrading"
+	// ReasonUpgradeRolledBack: the upgrade stopped before it changed any
+	// data and the database runs its old major. The platform holds it, with
+	// no updates, until the version is set back.
+	ReasonUpgradeRolledBack = "UpgradeRolledBack"
+	// ReasonUpgradeFailed: the upgrade failed; the message says whether the
+	// database still runs its old major. Held like ReasonUpgradeRolledBack.
+	ReasonUpgradeFailed = "UpgradeFailed"
+)
+
 // ReasonReconcileFailed is the reason of a cluster's or database's Ready
 // condition while the platform fails to apply its spec and retries. The
 // platform does not mark a spec it failed to apply as observed.

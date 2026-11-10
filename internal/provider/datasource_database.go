@@ -111,7 +111,7 @@ func (d *DatabaseDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 				},
 			},
 			"phase": schema.StringAttribute{
-				Description: "Current phase: Pending, Provisioning, Running, Degraded or Terminating.",
+				Description: "Current phase: Pending, Provisioning, Running, Upgrading, Degraded or Terminating. It is `Upgrading` while a major version upgrade is running and the database is offline.",
 				Computed:    true,
 			},
 			"current_version": schema.StringAttribute{
