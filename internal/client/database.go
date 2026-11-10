@@ -74,6 +74,13 @@ func (s *DatabaseStatus) Ready() bool {
 	return s != nil && ConditionTrue(s.Conditions, ConditionReady)
 }
 
+// PoolerReady reports whether the database's connection pooler serves:
+// its PoolerReady condition is True. The platform removes the condition
+// while the pooler is off.
+func (s *DatabaseStatus) PoolerReady() bool {
+	return s != nil && ConditionTrue(s.Conditions, ConditionPoolerReady)
+}
+
 // CreateDatabaseRequest is the body for creating a database.
 type CreateDatabaseRequest struct {
 	Postgres         *DatabasePostgres   `json:"postgres,omitempty"`
@@ -169,6 +176,10 @@ type Condition struct {
 // ConditionReady is the condition that is True once a cluster or database
 // runs with its latest change in effect.
 const ConditionReady = "Ready"
+
+// ConditionPoolerReady is the database condition that is True while its
+// connection pooler serves. It is absent while the pooler is off.
+const ConditionPoolerReady = "PoolerReady"
 
 // ReasonReconcileFailed is the reason of a cluster's or database's Ready
 // condition while the platform fails to apply its spec and retries. The
@@ -327,6 +338,18 @@ type DatabasePostgres struct {
 	Databases  *[]LogicalDatabase `json:"databases,omitempty"`
 	Roles      *[]DeclaredRole    `json:"roles,omitempty"`
 	Extensions *[]Extension       `json:"extensions,omitempty"`
+	// Pooler is the connection pooler. A request sends only the fields to
+	// change; a response carries every field, the defaults filled in.
+	Pooler *DatabasePooler `json:"pooler,omitempty"`
+}
+
+// DatabasePooler is a database's connection pooler. Enabled is a pointer
+// so a request can send false; the other fields are left out of a request
+// when empty (the API accepts only transaction or session, and 1 or 2).
+type DatabasePooler struct {
+	Enabled   *bool  `json:"enabled,omitempty"`
+	PoolMode  string `json:"poolMode,omitempty"`
+	Instances int32  `json:"instances,omitempty"`
 }
 
 type DeclaredRole struct {
