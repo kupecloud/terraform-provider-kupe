@@ -68,7 +68,7 @@ const (
 		"`kupe_database_binding`). It can be turned on or off in place. Removing `pooler` from the " +
 		"configuration keeps the current setting: set `enabled = false` to turn it off. The platform sets the " +
 		"pool sizes. Connection pooling may not be available on every Kupe platform: turning it on or " +
-		"changing it then fails with error code `DATABASE_POOLER_UNAVAILABLE`."
+		"changing it while it is on then fails with error code `DATABASE_POOLER_UNAVAILABLE`."
 	poolerEnabledDescription  = "Run the pooler. `false` turns it off."
 	poolerPoolModeDescription = "How server connections are shared: `transaction` (the default) or `session`. " +
 		"`transaction` does not keep session state between transactions: `SET`, SQL `PREPARE`, `LISTEN`, " +

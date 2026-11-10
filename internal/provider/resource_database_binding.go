@@ -299,9 +299,11 @@ func (r *DatabaseBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 						},
 						"host": schema.StringAttribute{
 							Description: "In-cluster DNS name applications in this namespace connect to. For a " +
-								"`readwrite`, `readonly` or custom binding of a database whose connection pooler is on and " +
-								"serving, it is the pooler's, e.g. `orders-db--pooler.orders-api.svc.cluster.local`; " +
-								"otherwise, and always for an `owner` binding, it is the database's, e.g. " +
+								"`readwrite`, `readonly` or custom binding of a database with the connection pooler on, it " +
+								"is the pooler's, e.g. `orders-db--pooler.orders-api.svc.cluster.local`: the namespace moves " +
+								"there once the pooler has served and stays there while the pooler is on, and only turning " +
+								"the pooler off moves it back. For an `owner` binding, and before the pooler has served or " +
+								"after it is turned off, it is the database's, e.g. " +
 								"`orders-db.orders-api.svc.cluster.local`. Empty until the Service is delivered.",
 							Computed: true,
 						},

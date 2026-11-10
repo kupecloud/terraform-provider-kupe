@@ -29,7 +29,7 @@ func (d *DatabaseDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 		Attributes: map[string]schema.Attribute{
 			"postgres": schema.SingleNestedAttribute{Computed: true, Description: "PostgreSQL databases, declared roles, extensions and the connection pooler returned by the database.", Attributes: map[string]schema.Attribute{
 				"pooler": schema.SingleNestedAttribute{Computed: true, Description: poolerReadDescription, Attributes: map[string]schema.Attribute{
-					"enabled":   schema.BoolAttribute{Computed: true, Description: "Whether the pooler runs. Whether it serves is the database's `PoolerReady` condition."},
+					"enabled":   schema.BoolAttribute{Computed: true, Description: "Whether the pooler is turned on."},
 					"pool_mode": schema.StringAttribute{Computed: true, Description: "How server connections are shared: `transaction` or `session`."},
 					"instances": schema.Int64Attribute{Computed: true, Description: poolerInstancesDescription},
 				}},

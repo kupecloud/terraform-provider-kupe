@@ -337,7 +337,7 @@ func apiErrorDetail(err error) string {
 		case client.CodeBackupsUnavailable:
 			return base + "\n\n" + backupsUnavailableHint(apiErr.Field)
 		case client.CodeDatabasePoolerUnavailable:
-			return base + "\n\nConnection pooling is not available on this platform, so the pooler was not " +
+			return base + "\n\nConnection pooling is not available on this platform, so nothing was " +
 				"changed. Remove `postgres.pooler` from the configuration, or set `enabled = false`, then run " +
 				"`terraform apply` again."
 		case client.CodeRestoreSourceNotFound:
