@@ -415,3 +415,47 @@ func describePtr[T any](p *T) string {
 func describeBackup(b *DatabaseBackup) string {
 	return fmt.Sprintf("{retention %s schedule %s}", describePtr(b.Retention), describePtr(b.Schedule))
 }
+
+func TestDatabasePoolerWire(t *testing.T) {
+	off := false
+	body, err := json.Marshal(PatchDatabaseRequest{Postgres: &DatabasePostgres{Pooler: &DatabasePooler{Enabled: &off}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(body), `{"postgres":{"pooler":{"enabled":false}}}`; got != want {
+		t.Errorf("turning the pooler off sends %s, want %s (false must reach the wire, unset fields must not)", got, want)
+	}
+	body, err = json.Marshal(PatchDatabaseRequest{Postgres: &DatabasePostgres{Pooler: &DatabasePooler{PoolMode: "session"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(body), `{"postgres":{"pooler":{"poolMode":"session"}}}`; got != want {
+		t.Errorf("a mode change sends %s, want %s", got, want)
+	}
+	var db Database
+	if err := json.Unmarshal([]byte(`{"postgres":{"pooler":{"enabled":true,"poolMode":"transaction","instances":2}}}`), &db); err != nil {
+		t.Fatal(err)
+	}
+	p := db.Postgres.Pooler
+	if p == nil || p.Enabled == nil || !*p.Enabled || p.PoolMode != "transaction" || p.Instances != 2 {
+		t.Errorf("pooler decoded as %+v", p)
+	}
+}
+
+func TestPoolerReady(t *testing.T) {
+	tests := []struct {
+		name   string
+		status *DatabaseStatus
+		want   bool
+	}{
+		{"nil status", nil, false},
+		{"no condition (pooler off)", &DatabaseStatus{Conditions: []Condition{{Type: "Ready", Status: "True"}}}, false},
+		{"starting", &DatabaseStatus{Conditions: []Condition{{Type: "PoolerReady", Status: "False"}}}, false},
+		{"serving", &DatabaseStatus{Conditions: []Condition{{Type: "PoolerReady", Status: "True"}}}, true},
+	}
+	for _, tt := range tests {
+		if got := tt.status.PoolerReady(); got != tt.want {
+			t.Errorf("%s: PoolerReady = %t, want %t", tt.name, got, tt.want)
+		}
+	}
+}

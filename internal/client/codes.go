@@ -46,6 +46,11 @@ const (
 	// longer than the tenant may use: 44 characters, or 56 minus the length
 	// of the tenant name when that is less. The platform's own code.
 	CodeDatabaseNameTooLong = "DATABASE_NAME_TOO_LONG"
+	// CodeDatabasePoolerUnavailable comes with a 400 when a create or PATCH
+	// turns a database's connection pooler on, or changes it while it
+	// stays on, and the platform does not offer the pooler. Turning it off
+	// is never refused with it.
+	CodeDatabasePoolerUnavailable = "DATABASE_POOLER_UNAVAILABLE"
 	// CodeBackupsUnavailable comes with a 400 when a create or PATCH sets
 	// backup settings, a manual backup is taken or a database is restored
 	// while the platform does not offer backups; the field says which
