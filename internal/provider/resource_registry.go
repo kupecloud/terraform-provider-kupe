@@ -158,7 +158,9 @@ func (r *RegistryResource) Metadata(_ context.Context, req resource.MetadataRequ
 func (r *RegistryResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Manages the tenant's Kupe container registry. A tenant has one registry, always named " +
-			"`registry`; images live at `registry.kupe.cloud/<tenant>/<repository>:<tag>`. Create and Update wait " +
+			"`registry`; images live at `registry.kupe.cloud/<tenant>/<repository>:<tag>`. The Kupe platform " +
+			"creates it when the tenant's plan includes one: import it (ID `registry`) rather than creating it. " +
+			"Creating it when it exists fails with the import command. Create and Update wait " +
 			"for the registry to reach phase=Running with the change in effect. They fail at once if the registry " +
 			"is being deleted (Terminating), and after 2 minutes if it stays Degraded once the platform has picked " +
 			"up the change. If the timeout fires first, the apply fails; the platform carries on in the background, " +

@@ -408,7 +408,10 @@ func apiErrorDetail(err error) string {
 			return base + "\n\nYour tenant is suspended, so nothing new can be created in it and nothing can be " +
 				"made larger. Contact Kupe Cloud support to lift the suspension."
 		case client.CodeRegistryAlreadyExists:
-			return base + "\n\nA tenant has one registry. Import it: `terraform import kupe_registry.this registry`."
+			return base + "\n\nThe Kupe platform creates the registry when your plan includes one, so it is " +
+				"there already. Import it instead of creating it: add `import { to = kupe_registry.this, id = " +
+				"\"registry\" }` to your configuration, or run `terraform import kupe_registry.this registry` (use your " +
+				"resource's address), then run `terraform apply` again."
 		case client.CodeRegistryBindingExists:
 			return base + "\n\nA cluster has one cluster connection. Import it: " +
 				"`terraform import kupe_registry_binding.this registry/<cluster>`."
