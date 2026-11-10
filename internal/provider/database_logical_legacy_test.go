@@ -29,6 +29,7 @@ func (*preLogicalDatabaseProvider) Resources(context.Context) []func() resource.
 			if isSet(m.Postgres) {
 				values := m.Postgres.Attributes()
 				delete(values, "databases")
+				delete(values, "pooler")
 				m.Postgres = types.ObjectValueMust(map[string]attr.Type{"roles": types.SetType{ElemType: postgresNameType}, "extensions": types.SetType{ElemType: postgresNameType}}, values)
 			}
 		}
@@ -43,6 +44,7 @@ func (r *preLogicalDatabaseResource) Schema(ctx context.Context, req resource.Sc
 	r.DatabaseResource.Schema(ctx, req, resp)
 	p := resp.Schema.Attributes["postgres"].(schema.SingleNestedAttribute)
 	delete(p.Attributes, "databases")
+	delete(p.Attributes, "pooler")
 	resp.Schema.Attributes["postgres"] = p
 }
 func TestAccDatabaseResource_StateWithoutDatabasesHasNoDiff(t *testing.T) {

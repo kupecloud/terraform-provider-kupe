@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -80,6 +81,12 @@ type mockKupeAPI struct {
 	// databaseStatusesOnPatch, when set, become databaseStatuses once a
 	// PATCH succeeds, so the statuses play out after the update.
 	databaseStatusesOnPatch []map[string]any
+	// poolerUnavailable makes create and PATCH refuse turning the pooler on
+	// (or changing it while on) with DATABASE_POOLER_UNAVAILABLE.
+	poolerUnavailable bool
+	// poolerNotReady leaves the PoolerReady condition False while the
+	// pooler is on, until a test clears it.
+	poolerNotReady bool
 	// databaseBeforePatch is applied, one per PATCH, to the database just
 	// before the next PATCHes check If-Match: a write landing between the
 	// provider's read and its update.
@@ -924,7 +931,21 @@ func (m *mockKupeAPI) createDatabase(w http.ResponseWriter, r *http.Request) {
 		db["source"] = source
 	}
 	if v, ok := body["postgres"]; ok {
-		db["postgres"] = v
+		if pg, _ := v.(map[string]any); pg != nil && m.poolerUnavailable && mockPoolerOn(pg["pooler"]) {
+			mockError(w, http.StatusBadRequest, client.CodeDatabasePoolerUnavailable, "connection pooling is not available on this platform")
+			return
+		}
+		// A copy: the recorded request body must not gain the defaults
+		// mockEffectivePostgres fills in.
+		raw, err := json.Marshal(v)
+		if err != nil {
+			panic(err)
+		}
+		var stored any
+		if err := json.Unmarshal(raw, &stored); err != nil {
+			panic(err)
+		}
+		db["postgres"] = stored
 	}
 	mockEffectivePostgres(db)
 	m.databases[name] = db
@@ -949,6 +970,15 @@ func (m *mockKupeAPI) getDatabase(w http.ResponseWriter, name string) {
 		"lastBackupAt":       "",
 		"recoveryWindow":     nil,
 		"backupSizeBytes":    0,
+	}
+	if pg, _ := db["postgres"].(map[string]any); pg != nil {
+		if pooler, _ := pg["pooler"].(map[string]any); pooler != nil && pooler["enabled"] == true {
+			ready := "True"
+			if m.poolerNotReady {
+				ready = "False"
+			}
+			status["conditions"] = append(status["conditions"].([]any), map[string]any{"type": "PoolerReady", "status": ready, "reason": "PoolerRunning"})
+		}
 	}
 	// A database with backup settings reports the backups taken.
 	if backup, _ := db["backup"].(map[string]any); backup != nil {
@@ -1041,6 +1071,22 @@ func (m *mockKupeAPI) patchDatabase(w http.ResponseWriter, r *http.Request, name
 				mockError(w, http.StatusBadRequest, "", err.Error())
 				return
 			}
+		}
+		if sent, ok := incoming["pooler"].(map[string]any); ok {
+			// The API merges the pooler fields sent.
+			merged, _ := stored["pooler"].(map[string]any)
+			if merged == nil {
+				merged = map[string]any{}
+			}
+			for k, v := range sent {
+				merged[k] = v
+			}
+			if m.poolerUnavailable && mockPoolerOn(merged) {
+				mockError(w, http.StatusBadRequest, client.CodeDatabasePoolerUnavailable, "connection pooling is not available on this platform")
+				return
+			}
+			incoming = maps.Clone(incoming)
+			incoming["pooler"] = merged
 		}
 		for k, v := range incoming {
 			stored[k] = v
@@ -1407,4 +1453,10 @@ func (m *mockKupeAPI) rotateDatabaseBinding(w http.ResponseWriter, r *http.Reque
 	b["rotationToken"] = token
 	w.WriteHeader(http.StatusAccepted)
 	mustEncodeJSON(w, map[string]any{"database": database, "binding": name, "requestedAt": token})
+}
+
+// mockPoolerOn reports whether a request's pooler turns the pooler on.
+func mockPoolerOn(pooler any) bool {
+	p, _ := pooler.(map[string]any)
+	return p != nil && p["enabled"] == true
 }

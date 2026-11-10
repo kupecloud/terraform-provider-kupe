@@ -40,7 +40,7 @@ output "orders_db_running_version" {
 - `high_availability` (Boolean) Whether the database runs two instances with a synchronous standby.
 - `last_backup_at` (String) When the newest full backup finished (RFC 3339). Empty until the first backup completes.
 - `phase` (String) Current phase: Pending, Provisioning, Running, Degraded or Terminating.
-- `postgres` (Attributes) PostgreSQL databases, declared roles and extensions returned by the database. (see [below for nested schema](#nestedatt--postgres))
+- `postgres` (Attributes) PostgreSQL databases, declared roles, extensions and the connection pooler returned by the database. (see [below for nested schema](#nestedatt--postgres))
 - `recovery_window` (Attributes) The restore window: the oldest and newest points you can restore the database to. Null until the backups report them. (see [below for nested schema](#nestedatt--recovery_window))
 - `resources` (Attributes) Per-instance resources. (see [below for nested schema](#nestedatt--resources))
 - `source` (Attributes) What the database was restored from. Null for a database that was not restored. (see [below for nested schema](#nestedatt--source))
@@ -62,6 +62,7 @@ Read-Only:
 
 - `databases` (Attributes List) PostgreSQL databases on this instance, including its first database: 1 to 10 entries. For a new empty instance, the first name is the instance name with hyphens replaced by underscores (orders-db becomes orders_db). A restored instance keeps its source's first PostgreSQL name. Database names are at most 53 characters. Databases and schemas can only be added; the first entry cannot move. Use an owner binding to run grants inside added databases. Ready confirms provisioning, not tenant SQL grants. Restore first without this list, then update it using the effective first name. (see [below for nested schema](#nestedatt--postgres--databases))
 - `extensions` (Attributes Set) (see [below for nested schema](#nestedatt--postgres--extensions))
+- `pooler` (Attributes) Connection pooler settings. Off by default. (see [below for nested schema](#nestedatt--postgres--pooler))
 - `roles` (Attributes Set) (see [below for nested schema](#nestedatt--postgres--roles))
 
 <a id="nestedatt--postgres--databases"></a>
@@ -87,6 +88,16 @@ Read-Only:
 Read-Only:
 
 - `name` (String)
+
+
+<a id="nestedatt--postgres--pooler"></a>
+### Nested Schema for `postgres.pooler`
+
+Read-Only:
+
+- `enabled` (Boolean) Whether the pooler runs. Whether it serves is the database's `PoolerReady` condition.
+- `instances` (Number) Number of pooler instances: 1 (the default) or 2.
+- `pool_mode` (String) How server connections are shared: `transaction` or `session`.
 
 
 <a id="nestedatt--postgres--roles"></a>
