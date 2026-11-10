@@ -40,7 +40,7 @@ output "registry_endpoint" {
 
 ### Importing the registry the platform created
 
-The Kupe platform creates your registry when your plan includes one, so it is usually there before you write any configuration. Import it rather than creating it. With Terraform 1.5 or OpenTofu 1.5 and later, add an `import` block next to the resource and run `terraform apply`:
+The Kupe platform creates your registry when your plan includes one, so it is usually there before you write any configuration. Import it rather than creating it. With Terraform 1.5 or OpenTofu 1.6 and later, add an `import` block next to the resource and run `terraform apply`:
 
 ```terraform
 # The Kupe platform creates the tenant's registry when the plan includes one.
@@ -51,7 +51,7 @@ import {
 }
 ```
 
-Or import it once from the command line, as shown under [Import](#import). A `terraform apply` that tries to create the registry while it exists fails with error code `REGISTRY_ALREADY_EXISTS` and these import steps; nothing changes on the platform. If you deleted the registry, or your plan has none, `terraform apply` creates it.
+Or import it once from the command line, as shown under [Import](#import). A `terraform apply` that tries to create the registry while it exists fails with error code `REGISTRY_ALREADY_EXISTS` and these import steps; nothing changes on the platform. If you deleted the registry, `terraform apply` creates it again. On a plan that does not include a registry, the apply fails with `plan_limit_reached`.
 
 ### Deleting the registry
 
