@@ -1074,7 +1074,9 @@ func (m *mockKupeAPI) patchDatabase(w http.ResponseWriter, r *http.Request, name
 		}
 		if sent, ok := incoming["pooler"].(map[string]any); ok {
 			// The API merges the pooler fields sent.
-			merged, _ := stored["pooler"].(map[string]any)
+			// A copy: a refused PATCH must leave the stored pooler as it was.
+			current, _ := stored["pooler"].(map[string]any)
+			merged := maps.Clone(current)
 			if merged == nil {
 				merged = map[string]any{}
 			}

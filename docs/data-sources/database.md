@@ -95,7 +95,7 @@ Read-Only:
 
 Read-Only:
 
-- `enabled` (Boolean) Whether the pooler runs. Whether it serves is the database's `PoolerReady` condition.
+- `enabled` (Boolean) Whether the pooler is turned on.
 - `instances` (Number) Number of pooler instances: 1 (the default) or 2.
 - `pool_mode` (String) How server connections are shared: `transaction` or `session`.
 

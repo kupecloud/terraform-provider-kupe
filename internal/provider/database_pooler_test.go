@@ -204,8 +204,11 @@ func TestAccDatabaseResource_PoolerChangeWaits(t *testing.T) {
 				PreConfig: func() {
 					mock.setState(func(m *mockKupeAPI) { m.databaseStatusesOnPatch = nil; m.databaseStatuses = nil })
 				},
-				Config: poolerConfig(mock, `{ pooler = { enabled = false } }`),
-				Check:  resource.TestCheckResourceAttr("kupe_database.test", "postgres.pooler.enabled", "false"),
+				// A short update timeout so a regression that waits fails fast.
+				Config: strings.Replace(poolerConfig(mock, `{ pooler = { enabled = false } }`),
+					`deletion_protection = false`, `deletion_protection = false
+  timeouts = { update = "5s" }`, 1),
+				Check: resource.TestCheckResourceAttr("kupe_database.test", "postgres.pooler.enabled", "false"),
 			},
 		},
 	})
@@ -255,6 +258,8 @@ func TestAccDatabaseResource_PoolerUnavailable(t *testing.T) {
 				Config:      poolerConfig(mock, `{ pooler = { enabled = true } }`),
 				ExpectError: regexp.MustCompile(`(?s)DATABASE_POOLER_UNAVAILABLE.*Connection pooling is not available on this platform`),
 			},
+			// The refused PATCH changed nothing: the pooler is still off.
+			{Config: poolerConfig(mock, `{ pooler = { enabled = false } }`), PlanOnly: true},
 			// Off is accepted while the platform does not offer the pooler.
 			{Config: poolerConfig(mock, `{ pooler = { enabled = false } }`)},
 		},
