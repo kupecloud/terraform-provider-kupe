@@ -21,9 +21,20 @@ const (
 	// paused creating clusters or databases. Existing resources are
 	// unaffected.
 	CodeCreationPaused = "creation_paused"
-	// CodeMajorUpgradeUnavailable comes with a 400 when a PATCH changes the
-	// engine major version.
+	// CodeMajorUpgradeUnavailable comes with a 400 when a PATCH raises the
+	// engine major version while the platform does not offer major upgrades.
+	// Setting the version back to the running major (a cancel) is accepted
+	// whatever the platform offers.
 	CodeMajorUpgradeUnavailable = "major_upgrade_unavailable"
+	// CodeDatabaseUpgradeNotReady comes with a 409 (field spec.version) when
+	// a version raise is refused because the database cannot be upgraded
+	// yet: it is not running and healthy, has no recent backup or room for
+	// one more, or the version is not one major above the one it runs. The
+	// message says which. The platform's own code, so upper case.
+	CodeDatabaseUpgradeNotReady = "DATABASE_UPGRADE_NOT_READY"
+	// CodeDatabaseUpgradeInProgress comes with a 409 when a change is
+	// refused because an upgrade is running. The platform's own code.
+	CodeDatabaseUpgradeInProgress = "DATABASE_UPGRADE_IN_PROGRESS"
 	// CodeStorageShrinkUnsupported comes with a 400 when a PATCH lowers the
 	// storage size.
 	CodeStorageShrinkUnsupported = "storage_shrink_unsupported"
