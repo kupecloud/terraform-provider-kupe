@@ -6,15 +6,18 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/setvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
@@ -22,13 +25,22 @@ import (
 )
 
 var postgresNameType = types.ObjectType{AttrTypes: map[string]attr.Type{"name": types.StringType}}
+
+// databasePoolerAttrTypes are the attributes of `postgres.pooler`.
+var databasePoolerAttrTypes = map[string]attr.Type{
+	"enabled":   types.BoolType,
+	"pool_mode": types.StringType,
+	"instances": types.Int64Type,
+}
+
 var databasePostgresAttrTypes = map[string]attr.Type{
+	"pooler":     types.ObjectType{AttrTypes: databasePoolerAttrTypes},
 	"databases":  types.ListType{ElemType: logicalDatabaseType},
 	"roles":      types.SetType{ElemType: postgresNameType},
 	"extensions": types.SetType{ElemType: postgresNameType},
 }
 
-const postgresDescription = "PostgreSQL databases, group roles and extensions. Omitted settings keep their current values. Roles and extensions can be cleared with []; databases and schemas can only grow. The platform grants declared roles no privileges."
+const postgresDescription = "PostgreSQL databases, group roles, extensions and the connection pooler. Omitted settings keep their current values. Roles and extensions can be cleared with []; databases and schemas can only grow. The platform grants declared roles no privileges."
 
 func databasePostgresSchema() schema.SingleNestedAttribute {
 	list := func(role bool) schema.SetNestedAttribute {
@@ -43,7 +55,137 @@ func databasePostgresSchema() schema.SingleNestedAttribute {
 			"name": schema.StringAttribute{Required: true, Validators: validators, Description: "Name declared in PostgreSQL."},
 		}}}
 	}
-	return schema.SingleNestedAttribute{Optional: true, Computed: true, Description: postgresDescription, PlanModifiers: []planmodifier.Object{objectplanmodifier.UseStateForUnknown()}, Attributes: map[string]schema.Attribute{"roles": list(true), "extensions": list(false), "databases": logicalDatabasesSchema()}}
+	return schema.SingleNestedAttribute{Optional: true, Computed: true, Description: postgresDescription, PlanModifiers: []planmodifier.Object{objectplanmodifier.UseStateForUnknown()}, Attributes: map[string]schema.Attribute{"roles": list(true), "extensions": list(false), "databases": logicalDatabasesSchema(), "pooler": poolerSchema()}}
+}
+
+// Descriptions of the `postgres.pooler` attributes.
+const (
+	poolerDescription = "Connection pooler. Turn it on if your app opens a lot of connections: many pods, " +
+		"serverless functions, or short-lived connections. Small apps with a few steady connections don't " +
+		"need it. Applications of `readwrite`, `readonly` and custom-role bindings connect through the " +
+		"pooler once it serves, and owner bindings connect to the database directly, so turning the pooler " +
+		"on or off changes the host those bindings use in each namespace (`namespace_status[].host` of " +
+		"`kupe_database_binding`). It can be turned on or off in place. Removing `pooler` from the " +
+		"configuration keeps the current setting: set `enabled = false` to turn it off. The platform sets the " +
+		"pool sizes. Connection pooling may not be available on every Kupe platform: turning it on or " +
+		"changing it then fails with error code `DATABASE_POOLER_UNAVAILABLE`."
+	poolerEnabledDescription  = "Run the pooler. `false` turns it off."
+	poolerPoolModeDescription = "How server connections are shared: `transaction` (the default) or `session`. " +
+		"`transaction` does not keep session state between transactions: `SET`, SQL `PREPARE`, `LISTEN`, " +
+		"session advisory locks and `WITH HOLD` cursors need `session`."
+	poolerInstancesDescription = "Number of pooler instances: 1 (the default) or 2."
+	poolerReadDescription      = "Connection pooler settings. Off by default."
+)
+
+func poolerSchema() schema.SingleNestedAttribute {
+	return schema.SingleNestedAttribute{
+		Description: poolerDescription,
+		Optional:    true,
+		Computed:    true,
+		// Unset in configuration, the current setting stays: the platform
+		// never changes it on its own.
+		PlanModifiers: []planmodifier.Object{objectplanmodifier.UseStateForUnknown()},
+		Attributes: map[string]schema.Attribute{
+			"enabled": schema.BoolAttribute{Required: true, Description: poolerEnabledDescription},
+			"pool_mode": schema.StringAttribute{
+				Description:   poolerPoolModeDescription,
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+				Validators:    []validator.String{stringvalidator.OneOf("transaction", "session")},
+			},
+			"instances": schema.Int64Attribute{
+				Description:   poolerInstancesDescription,
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()},
+				Validators:    []validator.Int64{int64validator.Between(1, 2)},
+			},
+		},
+	}
+}
+
+// postgresPooler is the `pooler` object of a `postgres` object: unknown
+// when postgres is unknown, null when it is null or has none.
+func postgresPooler(obj types.Object) types.Object {
+	if obj.IsUnknown() {
+		return types.ObjectUnknown(databasePoolerAttrTypes)
+	}
+	if obj.IsNull() {
+		return types.ObjectNull(databasePoolerAttrTypes)
+	}
+	v, ok := obj.Attributes()["pooler"].(types.Object)
+	if !ok {
+		return types.ObjectNull(databasePoolerAttrTypes)
+	}
+	return v
+}
+
+// poolerAttributes is the enabled, pool_mode and instances of a `pooler`
+// object: unknown when it is unknown, null when it is null.
+func poolerAttributes(pooler types.Object) (types.Bool, types.String, types.Int64) {
+	if pooler.IsUnknown() {
+		return types.BoolUnknown(), types.StringUnknown(), types.Int64Unknown()
+	}
+	if pooler.IsNull() {
+		return types.BoolNull(), types.StringNull(), types.Int64Null()
+	}
+	attrs := pooler.Attributes()
+	enabled, _ := attrs["enabled"].(types.Bool)
+	mode, _ := attrs["pool_mode"].(types.String)
+	instances, _ := attrs["instances"].(types.Int64)
+	return enabled, mode, instances
+}
+
+// poolerChanges is the pooler keys to send: the planned keys with a known
+// value that differs from prior's. nil when none does, so an unchanged
+// pooler never reaches the wire and the API is never sent an empty one.
+func poolerChanges(plan, prior types.Object) *client.DatabasePooler {
+	enabled, mode, instances := poolerAttributes(plan)
+	priorEnabled, priorMode, priorInstances := poolerAttributes(prior)
+	var pooler client.DatabasePooler
+	changed := false
+	if isSet(enabled) && !enabled.Equal(priorEnabled) {
+		v := enabled.ValueBool()
+		pooler.Enabled = &v
+		changed = true
+	}
+	if isSet(mode) && !mode.Equal(priorMode) {
+		pooler.PoolMode = mode.ValueString()
+		changed = true
+	}
+	if isSet(instances) && !instances.Equal(priorInstances) {
+		pooler.Instances = int32(instances.ValueInt64()) // #nosec G115 -- the schema validates 1 to 2
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	return &pooler
+}
+
+// poolerFromAPI is the `pooler` object for the API's settings. The API
+// sends every field with its default filled in; an API that sends none
+// reads as off, with the mode and instances null.
+func poolerFromAPI(p *client.DatabasePooler) types.Object {
+	enabled, mode, instances := types.BoolValue(false), types.StringNull(), types.Int64Null()
+	if p != nil {
+		if p.Enabled != nil {
+			enabled = types.BoolValue(*p.Enabled)
+		}
+		mode = stringOrNull(p.PoolMode)
+		if p.Instances != 0 {
+			instances = types.Int64Value(int64(p.Instances))
+		}
+	}
+	return types.ObjectValueMust(databasePoolerAttrTypes, map[string]attr.Value{
+		"enabled": enabled, "pool_mode": mode, "instances": instances,
+	})
+}
+
+// poolerOn reports whether the database's pooler is on.
+func poolerOn(db *client.Database) bool {
+	return db.Postgres != nil && db.Postgres.Pooler != nil && db.Postgres.Pooler.Enabled != nil && *db.Postgres.Pooler.Enabled
 }
 
 type reservedDatabaseRole struct{}
@@ -122,7 +264,8 @@ func postgresChanges(plan, prior types.Object) *client.DatabasePostgres {
 		v := logicalDatabasesFromValue(databases)
 		p.Databases = &v
 	}
-	if p.Roles == nil && p.Extensions == nil && p.Databases == nil {
+	p.Pooler = poolerChanges(postgresPooler(plan), postgresPooler(prior))
+	if p.Roles == nil && p.Extensions == nil && p.Databases == nil && p.Pooler == nil {
 		return nil
 	}
 	return &p
@@ -149,7 +292,7 @@ func postgresFromAPI(p *client.DatabasePostgres) types.Object {
 			extensions = append(extensions, e.Name)
 		}
 	}
-	return types.ObjectValueMust(databasePostgresAttrTypes, map[string]attr.Value{"roles": list(roles), "extensions": list(extensions), "databases": logicalDatabasesValue(p.Databases)})
+	return types.ObjectValueMust(databasePostgresAttrTypes, map[string]attr.Value{"roles": list(roles), "extensions": list(extensions), "databases": logicalDatabasesValue(p.Databases), "pooler": poolerFromAPI(p.Pooler)})
 }
 
 // ModifyPlan keeps read-only values known when filling an omitted postgres

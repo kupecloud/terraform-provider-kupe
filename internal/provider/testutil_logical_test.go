@@ -33,6 +33,17 @@ func mockEffectivePostgres(db map[string]any) {
 			entry["schemas"] = []any{}
 		}
 	}
+	// The API fills the pooler's defaults in every response.
+	pooler, _ := p["pooler"].(map[string]any)
+	if pooler == nil {
+		pooler = map[string]any{}
+	}
+	for k, v := range map[string]any{"enabled": false, "poolMode": "transaction", "instances": 1} {
+		if _, ok := pooler[k]; !ok {
+			pooler[k] = v
+		}
+	}
+	p["pooler"] = pooler
 	db["postgres"] = p
 }
 func mockRequestedLogical(db, body map[string]any) string {

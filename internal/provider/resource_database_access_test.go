@@ -166,7 +166,7 @@ func TestDatabaseBindingDeliveryRequiresCurrentGeneration(t *testing.T) {
 
 func TestPostgresPatchDistinguishesEmptyAndAbsent(t *testing.T) {
 	prior := postgresFromAPI(&client.DatabasePostgres{Roles: &[]client.DeclaredRole{{Name: "reporting"}}, Extensions: &[]client.Extension{{Name: "pgcrypto"}}})
-	plan := types.ObjectValueMust(databasePostgresAttrTypes, map[string]attr.Value{"roles": types.SetValueMust(postgresNameType, []attr.Value{}), "extensions": types.SetUnknown(postgresNameType), "databases": types.ListNull(logicalDatabaseType)})
+	plan := types.ObjectValueMust(databasePostgresAttrTypes, map[string]attr.Value{"roles": types.SetValueMust(postgresNameType, []attr.Value{}), "extensions": types.SetUnknown(postgresNameType), "databases": types.ListNull(logicalDatabaseType), "pooler": types.ObjectNull(databasePoolerAttrTypes)})
 	patch := postgresChanges(plan, prior)
 	if patch == nil || patch.Roles == nil || len(*patch.Roles) != 0 || patch.Extensions != nil {
 		t.Fatalf("clear patch=%+v", patch)

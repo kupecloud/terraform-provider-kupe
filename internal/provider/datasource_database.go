@@ -27,7 +27,12 @@ func (d *DatabaseDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 	resp.Schema = schema.Schema{
 		Description: "Reads an existing Kupe database by name. Credentials are never returned.",
 		Attributes: map[string]schema.Attribute{
-			"postgres": schema.SingleNestedAttribute{Computed: true, Description: "PostgreSQL databases, declared roles and extensions returned by the database.", Attributes: map[string]schema.Attribute{
+			"postgres": schema.SingleNestedAttribute{Computed: true, Description: "PostgreSQL databases, declared roles, extensions and the connection pooler returned by the database.", Attributes: map[string]schema.Attribute{
+				"pooler": schema.SingleNestedAttribute{Computed: true, Description: poolerReadDescription, Attributes: map[string]schema.Attribute{
+					"enabled":   schema.BoolAttribute{Computed: true, Description: "Whether the pooler runs. Whether it serves is the database's `PoolerReady` condition."},
+					"pool_mode": schema.StringAttribute{Computed: true, Description: "How server connections are shared: `transaction` or `session`."},
+					"instances": schema.Int64Attribute{Computed: true, Description: poolerInstancesDescription},
+				}},
 				"databases": schema.ListNestedAttribute{Computed: true, Description: logicalDatabasesDescription, NestedObject: schema.NestedAttributeObject{Attributes: map[string]schema.Attribute{
 					"name":    schema.StringAttribute{Computed: true},
 					"schemas": schema.ListNestedAttribute{Computed: true, NestedObject: schema.NestedAttributeObject{Attributes: map[string]schema.Attribute{"name": schema.StringAttribute{Computed: true}}}},

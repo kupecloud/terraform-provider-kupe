@@ -668,6 +668,9 @@ func settingsChanged(prior *databaseModel, current databaseModel) []string {
 	if !postgresDatabases(current.Postgres).Equal(postgresDatabases(prior.Postgres)) {
 		changed = append(changed, "postgres.databases")
 	}
+	if !postgresPooler(current.Postgres).Equal(postgresPooler(prior.Postgres)) {
+		changed = append(changed, "postgres.pooler")
+	}
 	for _, key := range []string{"roles", "extensions"} {
 		if !postgresList(current.Postgres, key).Equal(postgresList(prior.Postgres, key)) {
 			changed = append(changed, "postgres."+key)
@@ -685,7 +688,10 @@ func databaseConverged(db *client.Database) bool {
 	return db.Status != nil &&
 		db.Status.Phase == databasePhaseRunning &&
 		db.Status.ObservedGeneration >= db.Generation &&
-		db.Status.Ready()
+		db.Status.Ready() &&
+		// The pooler is on: the change is not in effect until it serves.
+		// Off, the platform removes the condition, so there is nothing to wait for.
+		(!poolerOn(db) || db.Status.PoolerReady())
 }
 
 // databasePhase is db's phase, "" when it has no status yet.

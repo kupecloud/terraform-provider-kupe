@@ -6,6 +6,11 @@ resource "kupe_database" "orders" {
     ]
     roles      = [{ name = "sales_reports" }]
     extensions = [{ name = "pgcrypto" }]
+
+    # Connection pooler: turn it on if your app opens a lot of connections.
+    # readwrite, readonly and custom bindings then connect through it. Can be
+    # turned on or off later. Removing `pooler` keeps the current setting.
+    # pooler = { enabled = true, pool_mode = "transaction" }
   }
   name    = "orders-db"
   version = "18"

@@ -29,6 +29,11 @@ resource "kupe_database" "orders" {
     ]
     roles      = [{ name = "sales_reports" }]
     extensions = [{ name = "pgcrypto" }]
+
+    # Connection pooler: turn it on if your app opens a lot of connections.
+    # readwrite, readonly and custom bindings then connect through it. Can be
+    # turned on or off later. Removing `pooler` keeps the current setting.
+    # pooler = { enabled = true, pool_mode = "transaction" }
   }
   name    = "orders-db"
   version = "18"
@@ -199,7 +204,7 @@ Grant access with [`kupe_database_binding`](database_binding.md). Each binding p
 - `deletion_protection` (Boolean) While `true`, the Kupe platform refuses to delete the database. Set it to `false` and apply before destroying. Default `true`, also for an existing database: importing an unprotected database without this attribute in configuration plans turning protection on.
 - `engine` (String) Database engine. Only `postgres` is supported, and it is the default. The engine of an existing database cannot change: a different value fails the plan instead of replacing the database.
 - `high_availability` (Boolean) Run two instances with a synchronous standby. Can be turned on or off in place. When unset, a new database is created without it and an existing or imported database keeps its current setting, so removing the attribute from configuration does not turn HA off: set it to `false` to do that.
-- `postgres` (Attributes) PostgreSQL databases, group roles and extensions. Omitted settings keep their current values. Roles and extensions can be cleared with []; databases and schemas can only grow. The platform grants declared roles no privileges. (see [below for nested schema](#nestedatt--postgres))
+- `postgres` (Attributes) PostgreSQL databases, group roles, extensions and the connection pooler. Omitted settings keep their current values. Roles and extensions can be cleared with []; databases and schemas can only grow. The platform grants declared roles no privileges. (see [below for nested schema](#nestedatt--postgres))
 - `source` (Attributes) Restore the new database from a manual backup or from another database, instead of starting it empty. Set exactly one of `backup` and `database`. The new database runs the source's major version: leave `version` unset, or set that one. Its storage must be at least the source's. The source is unchanged, and the new database counts against the plan's database limit like any other. `source` is read only when the database is created, and any change to it replaces the database: Terraform deletes it and restores a new one. That includes a value Terraform knows only at apply time, such as the name of a `kupe_database_backup` without `name` that is taken again. Once the database exists, remove `source` from the configuration (the database keeps it), or keep it constant: name the backup with a literal or a backup resource that sets `name`, and write `point_in_time` literally. Null on a database that was not restored. Restores are not yet available on Kupe, so setting `source` fails with error code `backups_unavailable`. (see [below for nested schema](#nestedatt--source))
 - `timeouts` (Attributes) (see [below for nested schema](#nestedatt--timeouts))
 - `version` (String) Engine major version, e.g. `18`. When unset, the platform default is used and recorded here; a database restored with `source` runs the source's major version. Major version upgrades are not available yet, so changing the version of an existing database fails the plan.
@@ -240,6 +245,7 @@ Optional:
 
 - `databases` (Attributes List) PostgreSQL databases on this instance, including its first database: 1 to 10 entries. For a new empty instance, the first name is the instance name with hyphens replaced by underscores (orders-db becomes orders_db). A restored instance keeps its source's first PostgreSQL name. Database names are at most 53 characters. Databases and schemas can only be added; the first entry cannot move. Use an owner binding to run grants inside added databases. Ready confirms provisioning, not tenant SQL grants. Restore first without this list, then update it using the effective first name. (see [below for nested schema](#nestedatt--postgres--databases))
 - `extensions` (Attributes Set) (see [below for nested schema](#nestedatt--postgres--extensions))
+- `pooler` (Attributes) Connection pooler. Turn it on if your app opens a lot of connections: many pods, serverless functions, or short-lived connections. Small apps with a few steady connections don't need it. Applications of `readwrite`, `readonly` and custom-role bindings connect through the pooler once it serves, and owner bindings connect to the database directly, so turning the pooler on or off changes the host those bindings use in each namespace (`namespace_status[].host` of `kupe_database_binding`). It can be turned on or off in place. Removing `pooler` from the configuration keeps the current setting: set `enabled = false` to turn it off. The platform sets the pool sizes. Connection pooling may not be available on every Kupe platform: turning it on or changing it then fails with error code `DATABASE_POOLER_UNAVAILABLE`. (see [below for nested schema](#nestedatt--postgres--pooler))
 - `roles` (Attributes Set) (see [below for nested schema](#nestedatt--postgres--roles))
 
 <a id="nestedatt--postgres--databases"></a>
@@ -265,6 +271,19 @@ Optional:
 Required:
 
 - `name` (String) Name declared in PostgreSQL.
+
+
+<a id="nestedatt--postgres--pooler"></a>
+### Nested Schema for `postgres.pooler`
+
+Required:
+
+- `enabled` (Boolean) Run the pooler. `false` turns it off.
+
+Optional:
+
+- `instances` (Number) Number of pooler instances: 1 (the default) or 2.
+- `pool_mode` (String) How server connections are shared: `transaction` (the default) or `session`. `transaction` does not keep session state between transactions: `SET`, SQL `PREPARE`, `LISTEN`, session advisory locks and `WITH HOLD` cursors need `session`.
 
 
 <a id="nestedatt--postgres--roles"></a>
