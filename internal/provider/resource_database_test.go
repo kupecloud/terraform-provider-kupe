@@ -348,10 +348,10 @@ func TestAccDatabaseResource_PlanTimeErrors(t *testing.T) {
 			wantErr: `Storage cannot shrink`,
 		},
 		{
-			name:    "version change is an error while major upgrades are unavailable",
-			initial: testDatabase{version: "17"},
-			changed: testDatabase{version: "18"},
-			wantErr: `Major version upgrades are not available yet`,
+			name:    "version lowering is an error",
+			initial: testDatabase{version: "18"},
+			changed: testDatabase{version: "17"},
+			wantErr: `Database major version can only move up`,
 		},
 	}
 	for _, tt := range tests {
