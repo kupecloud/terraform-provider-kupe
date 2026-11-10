@@ -408,6 +408,13 @@ func apiErrorDetail(err error) string {
 			return base + "\n\nYour tenant is suspended, so nothing new can be created in it and nothing can be " +
 				"made larger. Contact Kupe Cloud support to lift the suspension."
 		case client.CodeRegistryAlreadyExists:
+			// Same code for a registry still being deleted (kupe-api's
+			// "it is being deleted; try again when it is gone"): no import
+			// advice for that one.
+			if strings.Contains(strings.ToLower(apiErr.Message), "being deleted") {
+				return base + "\n\nThe registry is being deleted. Once it is gone, run `terraform apply` again " +
+					"to create it."
+			}
 			return base + "\n\nThe Kupe platform creates the registry when your plan includes one, so it is " +
 				"there already. Import it instead of creating it: add `import { to = kupe_registry.this, id = " +
 				"\"registry\" }` to your configuration, or run `terraform import kupe_registry.this registry` (use your " +

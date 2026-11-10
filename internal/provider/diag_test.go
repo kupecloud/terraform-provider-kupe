@@ -239,6 +239,15 @@ func TestAPIErrorDetail(t *testing.T) {
 			wantNoSubstr: []string{"Usually means"},
 		},
 		{
+			name: "409 REGISTRY_ALREADY_EXISTS while it is being deleted gives no import advice",
+			err: &client.APIError{
+				StatusCode: http.StatusConflict, Code: client.CodeRegistryAlreadyExists,
+				Message: "this tenant already has a registry, and it is being deleted; try again when it is gone",
+			},
+			wantSubstr:   []string{"The registry is being deleted. Once it is gone, run `terraform apply` again"},
+			wantNoSubstr: []string{"import", "Usually means"},
+		},
+		{
 			name: "409 REGISTRY_BINDING_EXISTS gives the import command",
 			err: &client.APIError{
 				StatusCode: http.StatusConflict, Code: client.CodeRegistryBindingExists,
