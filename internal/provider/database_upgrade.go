@@ -36,20 +36,73 @@ func runsSpecMajor(db *client.Database) bool {
 	return !upgradeAsked(db)
 }
 
-// upgradeHeld reports whether the platform is holding db on its old major
-// after an upgrade rolled back or failed: Ready is False with one of those
-// reasons, the platform has seen the spec, and the spec still asks for the
-// new major. A reason left over from an earlier attempt, before
-// observedGeneration catches up with a new change, is not a verdict on it.
-func upgradeHeld(db *client.Database) bool {
-	if db == nil || db.Status == nil || db.Status.ObservedGeneration < db.Generation || !upgradeAsked(db) {
-		return false
+// Ways the platform holds a database on its old major after a raise.
+const (
+	holdRolledBack  = "rolled back"
+	holdFailed      = "failed"
+	holdSwitchedOff = "switched off"
+)
+
+// upgradeHold says how the platform is holding db on its old major, "" when
+// it is not. A hold is only a verdict once the platform has seen the spec
+// (observedGeneration caught up) and the spec still asks for a major above
+// the one running; a reason left over from an earlier attempt is not one on a
+// new change. Ready False with UpgradeRolledBack or UpgradeFailed is a
+// rollback or failure. Ready False UpgradeSwitchedOff, or, from an operator
+// that has no such reason, VersionUnsupported True MajorChangeUnsupported, is
+// the platform no longer offering major upgrades. The older signal is stale
+// while an upgrade runs, so it counts only when the phase is not Upgrading and
+// Ready is not False with the reason of an upgrade that waits, takes its
+// backup or runs.
+func upgradeHold(db *client.Database) string {
+	if db == nil || db.Status == nil || db.Status.ObservedGeneration < db.Generation || !upgradeRaised(db) {
+		return ""
 	}
-	switch client.ConditionReason(db.Status.Conditions, client.ConditionReady) {
-	case client.ReasonUpgradeRolledBack, client.ReasonUpgradeFailed:
-		return true
+	ready := findReady(db)
+	if ready.Status == "False" {
+		switch ready.Reason {
+		case client.ReasonUpgradeRolledBack:
+			return holdRolledBack
+		case client.ReasonUpgradeFailed:
+			return holdFailed
+		case client.ReasonUpgradeSwitchedOff:
+			return holdSwitchedOff
+		case client.ReasonUpgradeWaiting, client.ReasonPreUpgradeBackup, client.ReasonUpgrading:
+			return ""
+		}
 	}
-	return false
+	if db.Status.Phase == databasePhaseUpgrading {
+		return ""
+	}
+	unsupported := conditionOf(db, client.ConditionVersionUnsupported)
+	if unsupported.Status == "True" && unsupported.Reason == client.ReasonMajorChangeUnsupported {
+		return holdSwitchedOff
+	}
+	return ""
+}
+
+// upgradeRaised reports whether db's spec asks for a major above the one it
+// runs. False when either is unknown.
+func upgradeRaised(db *client.Database) bool {
+	want, okWant := majorOf(db.Version)
+	running, okRunning := majorOf(db.Status.CurrentVersion)
+	return okWant && okRunning && want > running
+}
+
+// conditionOf is db's condition of type t, the zero Condition when absent.
+func conditionOf(db *client.Database, t string) client.Condition {
+	if db != nil && db.Status != nil {
+		for _, c := range db.Status.Conditions {
+			if c.Type == t {
+				return c
+			}
+		}
+	}
+	return client.Condition{}
+}
+
+func findReady(db *client.Database) client.Condition {
+	return conditionOf(db, client.ConditionReady)
 }
 
 // upgradeRunning reports whether the UpgradeInProgress condition is True:
@@ -81,30 +134,57 @@ func cancelUpgradeHint(db *client.Database) string {
 }
 
 // databaseUpgradeFailure names an apply that ended because the platform
-// rolled the upgrade back or it failed, and explains it. Both are "" when db
-// is not held.
+// holds the database on its old major, and explains it. Both are "" when it
+// does not.
 func databaseUpgradeFailure(db *client.Database) (summary, detail string) {
-	if !upgradeHeld(db) {
+	hold := upgradeHold(db)
+	if hold == "" {
 		return "", ""
+	}
+	if hold == holdSwitchedOff {
+		return "database upgrade is on hold", databaseUpgradeDetail(db)
 	}
 	return "database upgrade did not complete", databaseUpgradeDetail(db)
 }
 
+// holdMessage is what the platform says about the hold on db: Ready's
+// message, or the VersionUnsupported message from an operator that has no
+// switched-off reason.
+func holdMessage(db *client.Database) string {
+	if msg := findReady(db).Message; msg != "" && findReady(db).Reason == client.ReasonUpgradeSwitchedOff {
+		return msg
+	}
+	if upgradeHold(db) == holdSwitchedOff {
+		if msg := conditionOf(db, client.ConditionVersionUnsupported).Message; msg != "" {
+			return msg
+		}
+	}
+	return databaseReadyMessage(db)
+}
+
 // databaseUpgradeDetail explains a database held on its old major.
 func databaseUpgradeDetail(db *client.Database) string {
-	reason := client.ConditionReason(db.Status.Conditions, client.ConditionReady)
-	outcome := "rolled back"
-	if reason == client.ReasonUpgradeFailed {
-		outcome = "failed"
+	hold := upgradeHold(db)
+	var detail string
+	if hold == holdSwitchedOff {
+		detail = fmt.Sprintf("The platform stopped offering major upgrades after major version %s was set for "+
+			"database %q, so it holds the database on %s and does not start the upgrade.",
+			db.Version, db.Name, db.Status.CurrentVersion)
+	} else {
+		detail = fmt.Sprintf("The upgrade of database %q to major version %s %s. It reports version %s.",
+			db.Name, db.Version, hold, db.Status.CurrentVersion)
 	}
-	detail := fmt.Sprintf("The upgrade of database %q to major version %s %s. It reports version %s.",
-		db.Name, db.Version, outcome, db.Status.CurrentVersion)
-	if msg := databaseReadyMessage(db); msg != "" {
+	if msg := holdMessage(db); msg != "" {
 		detail += "\n\nStatus message: " + msg
 	}
 	detail += "\n\nThe Kupe platform holds the database, with no platform updates, until you set `version` back " +
-		"to the major it runs. " + cancelUpgradeHint(db) + " To try again, fix the cause and then raise " +
-		"`version` again.\n\nThe change is recorded in Terraform state, so until you set `version` back " +
+		"to the major it runs. " + cancelUpgradeHint(db)
+	if hold == holdSwitchedOff {
+		detail += " Raise `version` again once the platform offers major upgrades."
+	} else {
+		detail += " To try again, fix the cause and then raise `version` again."
+	}
+	detail += "\n\nThe change is recorded in Terraform state, so until you set `version` back " +
 		"`terraform plan` shows no change even though the database runs its old major."
 	return detail
 }
@@ -113,12 +193,14 @@ func databaseUpgradeDetail(db *client.Database) string {
 // upgrade is held or still running, "" when there is nothing to say.
 func databaseUpgradeNotice(db *client.Database) (summary, detail string) {
 	switch {
-	case upgradeHeld(db):
+	case upgradeHold(db) != "":
 		return "database upgrade is on hold", databaseUpgradeDetail(db)
 	case upgradeRunning(db):
 		reason := client.ConditionReason(db.Status.Conditions, client.ConditionUpgradeInProgress)
-		detail := fmt.Sprintf("Database %q has a major upgrade in progress (%s). Other changes are refused until it "+
-			"finishes.", db.Name, reason)
+		detail := fmt.Sprintf("Database %q has a major upgrade in progress (%s).", db.Name, reason)
+		if reason == client.ReasonPreUpgradeBackup || reason == client.ReasonUpgrading {
+			detail += " Changes to resources and high availability are refused until it finishes."
+		}
 		if msg := client.ConditionMessage(db.Status.Conditions, client.ConditionUpgradeInProgress); msg != "" {
 			detail += "\n\nStatus message: " + msg
 		}
@@ -128,6 +210,58 @@ func databaseUpgradeNotice(db *client.Database) (summary, detail string) {
 		return "database upgrade in progress", detail
 	}
 	return "", ""
+}
+
+// cancelsUpgrade reports whether setting db's version to planned goes back
+// to the major it runs from a spec above it: a cancel, which the platform
+// admits only in some states.
+func cancelsUpgrade(planned string, db *client.Database) bool {
+	if db == nil || db.Status == nil {
+		return false
+	}
+	want, okWant := majorOf(planned)
+	spec, okSpec := majorOf(db.Version)
+	running, okRunning := majorOf(db.Status.CurrentVersion)
+	return okWant && okSpec && okRunning && want == running && want < spec
+}
+
+// cancelRefusal is why setting db back to the major it runs would not be a
+// cancel, or "" when it is one (or when the platform should decide). An
+// operator before the cancel fix reads a version equal to the running major
+// as a cancel right after a successful upgrade, before currentVersion has
+// moved, and would undo the upgrade; so a cancel is only sent when the
+// status shows something to cancel: an upgrade waiting or taking its backup,
+// a rollback, a failure, or the switched-off hold.
+func cancelRefusal(db *client.Database) (summary, detail string) {
+	st := db.Status
+	if st == nil || st.ObservedGeneration < db.Generation {
+		return "database has not applied its last change yet",
+			fmt.Sprintf("Database %q has not applied its last change yet, so setting `version` back could be "+
+				"misread and nothing was sent. Try again in a moment: run `terraform plan`, then `terraform apply`.", db.Name)
+	}
+	inProgress := conditionOf(db, client.ConditionUpgradeInProgress)
+	ready := findReady(db)
+	switch {
+	case st.Phase == databasePhaseUpgrading || (inProgress.Status == "True" && inProgress.Reason == client.ReasonUpgrading):
+		// Too late to cancel: the platform's own answer says so.
+		return "", ""
+	case inProgress.Status == "True" &&
+		(inProgress.Reason == client.ReasonUpgradeWaiting || inProgress.Reason == client.ReasonPreUpgradeBackup):
+		return "", ""
+	case ready.Status == "False" && (ready.Reason == client.ReasonUpgradeRolledBack ||
+		ready.Reason == client.ReasonUpgradeFailed || ready.Reason == client.ReasonUpgradeSwitchedOff):
+		return "", ""
+	case upgradeHold(db) == holdSwitchedOff:
+		return "", ""
+	case inProgress.Status != "True" && inProgress.Reason == client.ReasonUpgradeSucceeded:
+		return "database upgrade has finished",
+			fmt.Sprintf("The upgrade of database %q has finished, so there is nothing to cancel and nothing was "+
+				"sent. Setting `version` to %s now would not undo it. Set `version` to %s in the configuration.",
+				db.Name, runningMajor(db), db.Version)
+	}
+	return "nothing to cancel",
+		fmt.Sprintf("Database %q has no upgrade that is waiting, taking its backup, rolled back or failed, so "+
+			"there is nothing to cancel and nothing was sent. Set `version` to %s in the configuration.", db.Name, db.Version)
 }
 
 // databaseUpgradeTimedOutDetail adds to a timeout that fired on an upgrade
