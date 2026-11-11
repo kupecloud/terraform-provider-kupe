@@ -225,13 +225,59 @@ func cancelsUpgrade(planned string, db *client.Database) bool {
 	return okWant && okSpec && okRunning && want == running && want < spec
 }
 
+// upgradeCancellable mirrors the operator webhook's rule for a cancel
+// (kupe-control-operator#551): not while the database is offline for the
+// upgrade; always when the UpgradeInProgress condition is missing or has not
+// been written for this spec; otherwise only while it is True UpgradeWaiting
+// or PreUpgradeBackup, or False UpgradeRolledBack, UpgradeFailed or
+// UpgradeSwitchedOff. It keys on that condition, not on Ready, which a
+// blocking check rewrites.
+func upgradeCancellable(db *client.Database) bool {
+	if db.Status.Phase == databasePhaseUpgrading {
+		return false
+	}
+	c := findCondition(db, client.ConditionUpgradeInProgress)
+	if c == nil || c.ObservedGeneration < db.Generation {
+		return true
+	}
+	switch c.Status {
+	case "True":
+		return c.Reason == client.ReasonUpgradeWaiting || c.Reason == client.ReasonPreUpgradeBackup
+	case "False":
+		return c.Reason == client.ReasonUpgradeRolledBack || c.Reason == client.ReasonUpgradeFailed ||
+			c.Reason == client.ReasonUpgradeSwitchedOff
+	}
+	return false
+}
+
+// upgradeSucceeded reports whether UpgradeInProgress is False
+// UpgradeSucceeded as written for this spec: the upgrade has finished, though
+// currentVersion may still show the old major.
+func upgradeSucceeded(db *client.Database) bool {
+	c := findCondition(db, client.ConditionUpgradeInProgress)
+	return c != nil && c.Status == "False" && c.Reason == client.ReasonUpgradeSucceeded &&
+		c.ObservedGeneration >= db.Generation
+}
+
+// findCondition is db's condition of type t, nil when absent.
+func findCondition(db *client.Database, t string) *client.Condition {
+	for i := range db.Status.Conditions {
+		if db.Status.Conditions[i].Type == t {
+			return &db.Status.Conditions[i]
+		}
+	}
+	return nil
+}
+
 // cancelRefusal is why setting db back to the major it runs would not be a
 // cancel, or "" when it is one (or when the platform should decide). An
 // operator before the cancel fix reads a version equal to the running major
 // as a cancel right after a successful upgrade, before currentVersion has
 // moved, and would undo the upgrade; so a cancel is only sent when the
-// status shows something to cancel: an upgrade waiting or taking its backup,
-// a rollback, a failure, or the switched-off hold.
+// platform would see something to cancel (upgradeCancellable), when Ready
+// says so (rolled back, failed or switched off), or for the switched-off hold
+// an older operator reports as VersionUnsupported. A finished upgrade is
+// refused unless one of the holds applies.
 func cancelRefusal(db *client.Database) (summary, detail string) {
 	st := db.Status
 	if st == nil || st.ObservedGeneration < db.Generation {
@@ -239,25 +285,24 @@ func cancelRefusal(db *client.Database) (summary, detail string) {
 			fmt.Sprintf("Database %q has not applied its last change yet, so setting `version` back could be "+
 				"misread and nothing was sent. Try again in a moment: run `terraform plan`, then `terraform apply`.", db.Name)
 	}
-	inProgress := conditionOf(db, client.ConditionUpgradeInProgress)
-	ready := findReady(db)
-	switch {
-	case st.Phase == databasePhaseUpgrading || (inProgress.Status == "True" && inProgress.Reason == client.ReasonUpgrading):
+	if st.Phase == databasePhaseUpgrading {
 		// Too late to cancel: the platform's own answer says so.
 		return "", ""
-	case inProgress.Status == "True" &&
-		(inProgress.Reason == client.ReasonUpgradeWaiting || inProgress.Reason == client.ReasonPreUpgradeBackup):
+	}
+	ready := findReady(db)
+	switch {
+	case upgradeHold(db) == holdSwitchedOff:
 		return "", ""
 	case ready.Status == "False" && (ready.Reason == client.ReasonUpgradeRolledBack ||
 		ready.Reason == client.ReasonUpgradeFailed || ready.Reason == client.ReasonUpgradeSwitchedOff):
 		return "", ""
-	case upgradeHold(db) == holdSwitchedOff:
-		return "", ""
-	case inProgress.Status != "True" && inProgress.Reason == client.ReasonUpgradeSucceeded:
+	case upgradeSucceeded(db):
 		return "database upgrade has finished",
 			fmt.Sprintf("The upgrade of database %q has finished, so there is nothing to cancel and nothing was "+
 				"sent. Setting `version` to %s now would not undo it. Set `version` to %s in the configuration.",
 				db.Name, runningMajor(db), db.Version)
+	case upgradeCancellable(db):
+		return "", ""
 	}
 	return "nothing to cancel",
 		fmt.Sprintf("Database %q has no upgrade that is waiting, taking its backup, rolled back or failed, so "+
