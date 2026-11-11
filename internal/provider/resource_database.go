@@ -540,7 +540,7 @@ func (r *DatabaseResource) Update(ctx context.Context, req resource.UpdateReques
 	}
 	var send patchFunc[client.Database]
 	patch, hasChanges := databasePatch(&plan, &state)
-	if patch.Version != nil && r.refuseUnsafeCancel(ctx, plan.Name.ValueString(), *patch.Version, &resp.Diagnostics) {
+	if versionLowers(patch.Version, state.Version) && r.refuseUnsafeCancel(ctx, plan.Name.ValueString(), *patch.Version, &resp.Diagnostics) {
 		return
 	}
 	if hasChanges {
@@ -550,6 +550,18 @@ func (r *DatabaseResource) Update(ctx context.Context, req resource.UpdateReques
 		}
 	}
 	r.update(ctx, &plan, &state, state.ETag.ValueString(), send, !protectionOnly(patch), &resp.State, &resp.Diagnostics)
+}
+
+// versionLowers reports whether planned, when set, is a lower major than
+// current: only that can be a cancel, so only that is checked before it is
+// sent.
+func versionLowers(planned *string, current types.String) bool {
+	if planned == nil {
+		return false
+	}
+	want, okWant := majorOf(*planned)
+	have, okHave := majorOf(current.ValueString())
+	return okWant && okHave && want < have
 }
 
 // refuseUnsafeCancel stops a version lowered to the running major unless the

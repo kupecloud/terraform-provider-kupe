@@ -164,6 +164,10 @@ type Condition struct {
 	Status  string `json:"status"`
 	Reason  string `json:"reason"`
 	Message string `json:"message"`
+	// ObservedGeneration is the generation of the spec the condition was
+	// written for; below the object's generation it has not been judged for
+	// the current spec. 0 when the API sends none.
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }
 
 // ConditionReady is the condition that is True once a cluster or database
