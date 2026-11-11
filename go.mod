@@ -1,6 +1,6 @@
 module github.com/kupecloud/terraform-provider-kupe
 
-go 1.26.10
+go 1.26.11
 
 require (
 	github.com/hashicorp/go-retryablehttp v0.7.8
