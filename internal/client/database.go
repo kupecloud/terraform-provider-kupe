@@ -164,11 +164,57 @@ type Condition struct {
 	Status  string `json:"status"`
 	Reason  string `json:"reason"`
 	Message string `json:"message"`
+	// ObservedGeneration is the generation of the spec the condition was
+	// written for; below the object's generation it has not been judged for
+	// the current spec. 0 when the API sends none.
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }
 
 // ConditionReady is the condition that is True once a cluster or database
 // runs with its latest change in effect.
 const ConditionReady = "Ready"
+
+// ConditionUpgradeInProgress is the condition that reports a major upgrade:
+// True with reason ReasonUpgradeWaiting, ReasonPreUpgradeBackup or
+// ReasonUpgrading while one is asked for or running, False otherwise.
+const ConditionUpgradeInProgress = "UpgradeInProgress"
+
+// Reasons of a database's UpgradeInProgress and Ready conditions while a
+// major upgrade is asked for. While one waits, takes its backup, or has
+// rolled back or failed, Ready is False with the same reason.
+const (
+	// ReasonUpgradeWaiting: a check is not met yet; the message says which.
+	ReasonUpgradeWaiting = "UpgradeWaiting"
+	// ReasonPreUpgradeBackup: the pre-upgrade backup is being taken.
+	ReasonPreUpgradeBackup = "PreUpgradeBackup"
+	// ReasonUpgrading: the database is offline while it moves to the new
+	// major (status.phase is Upgrading).
+	ReasonUpgrading = "Upgrading"
+	// ReasonUpgradeRolledBack: the upgrade stopped before it changed any
+	// data and the database runs its old major. The platform holds it, with
+	// no updates, until the version is set back.
+	ReasonUpgradeRolledBack = "UpgradeRolledBack"
+	// ReasonUpgradeFailed: the upgrade failed; the message says whether the
+	// database still runs its old major. Held like ReasonUpgradeRolledBack.
+	ReasonUpgradeFailed = "UpgradeFailed"
+	// ReasonUpgradeSwitchedOff is the reason of Ready (False) and
+	// UpgradeInProgress (False) when the platform stopped offering major
+	// upgrades after the version was raised. It holds the database, with the
+	// platform's message, until the version is set back.
+	ReasonUpgradeSwitchedOff = "UpgradeSwitchedOff"
+	// ReasonUpgradeSucceeded is UpgradeInProgress's reason (False) once an
+	// upgrade has finished.
+	ReasonUpgradeSucceeded = "UpgradeSucceeded"
+)
+
+// ConditionVersionUnsupported is True with reason ReasonMajorChangeUnsupported
+// while the spec asks for a major the platform does not take. An operator
+// before the switched-off reason reports the hold only this way, and leaves
+// it stale after the hold ends.
+const ConditionVersionUnsupported = "VersionUnsupported"
+
+// ReasonMajorChangeUnsupported is ConditionVersionUnsupported's reason.
+const ReasonMajorChangeUnsupported = "MajorChangeUnsupported"
 
 // ReasonReconcileFailed is the reason of a cluster's or database's Ready
 // condition while the platform fails to apply its spec and retries. The

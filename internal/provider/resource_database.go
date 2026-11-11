@@ -10,6 +10,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -33,6 +34,9 @@ import (
 const (
 	databasePhaseRunning  = "Running"
 	databasePhaseDegraded = "Degraded"
+	// databasePhaseUpgrading is the phase while a major upgrade runs and the
+	// database is offline.
+	databasePhaseUpgrading = "Upgrading"
 )
 
 // databaseDegradedGrace is how long Create and Update ride out a Degraded
@@ -208,22 +212,48 @@ var databaseKind = serviceKind[DatabaseResourceModel, client.Database]{
 		phase:     databasePhase,
 		converged: databaseConverged,
 		failed: func(db *client.Database) (time.Duration, bool) {
+			// The platform holds a database whose upgrade rolled back,
+			// failed or was switched off until the version is set back:
+			// waiting does not clear it, so it ends at once, Degraded or not.
+			if upgradeHold(db) != "" {
+				return 0, true
+			}
 			switch databasePhase(db) {
 			case phaseTerminating:
 				return 0, true
 			case databasePhaseDegraded:
+				// Degraded is progress while the platform waits to start an
+				// upgrade or takes its backup: it begins once the database
+				// is healthy again.
+				switch client.ConditionReason(db.Status.Conditions, client.ConditionReady) {
+				case client.ReasonUpgradeWaiting, client.ReasonPreUpgradeBackup:
+					return 0, false
+				}
 				// Degraded from before the change (the first poll reads the
 				// status the PATCH found) is not a verdict on it.
 				return databaseDegradedGrace, db.Status.ObservedGeneration >= db.Generation
 			}
 			return 0, false
 		},
-		message: databaseReadyMessage,
-		timedOutDetail: func(_ *DatabaseResourceModel, db *client.Database) string {
-			if message := databaseReadyMessage(db); message != "" {
-				return "\n\nStatus message: " + message
+		message:       databaseReadyMessage,
+		failureDetail: databaseUpgradeFailure,
+		overtaken: func(op string, m *DatabaseResourceModel, db *client.Database) string {
+			if op != "update" || m.Version.IsUnknown() || m.Version.IsNull() {
+				return ""
 			}
-			return ""
+			return databaseVersionOvertaken(m.Version.ValueString(), db)
+		},
+		readNotice: databaseUpgradeNotice,
+		// An apply that only changes timeouts still waits while an upgrade
+		// is asked for or running, so applying again with a longer
+		// `timeouts.update` waits for it.
+		waitOnReadWhen: func(db *client.Database) bool { return upgradeAsked(db) || upgradeRunning(db) },
+		timedOutDetail: func(_ *DatabaseResourceModel, db *client.Database) string {
+			detail := ""
+			if message := databaseReadyMessage(db); message != "" {
+				detail = "\n\nStatus message: " + message
+			}
+			return detail + databaseUpgradeTimedOutDetail(db)
 		},
 		notApplied: func(db *client.Database) bool {
 			return db != nil && db.Status != nil &&
@@ -306,16 +336,18 @@ func (r *DatabaseResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 			"version": schema.StringAttribute{
 				Description: "Engine major version, e.g. `18`. When unset, the platform default is used and recorded here; " +
 					"a database restored with `source` runs the source's major version. " +
-					"Major version upgrades are not available yet, so changing the version of an existing database " +
-					"fails the plan.",
+					"Raising it upgrades the database in place, one major at a time: the platform takes a backup " +
+					"first, then the database is offline while it upgrades. The version can only move up. " +
+					"Setting the version back to the major the database runs cancels an upgrade that is waiting, " +
+					"taking its backup, rolled back, or failed. Raising it fails with `major_upgrade_unavailable` " +
+					"while the platform does not offer major upgrades.",
 				Optional: true,
 				Computed: true,
 				PlanModifiers: []planmodifier.String{
 					// Keep the recorded version when config is unset so an
 					// unrelated edit never sends a version.
 					stringplanmodifier.UseStateForUnknown(),
-					rejectInPlaceChange("Major version upgrades are not available yet",
-						"Keep the current version, or create a new database with the version you need and migrate the data."),
+					versionMovesUp(),
 				},
 			},
 			"resources": requiredResourcesAttribute("Per-instance resources in Kubernetes quantity format. Billing " +
@@ -424,7 +456,7 @@ func (r *DatabaseResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 				},
 			},
 			"phase": schema.StringAttribute{
-				Description: "Current phase: Pending, Provisioning, Running, Degraded or Terminating.",
+				Description: "Current phase: Pending, Provisioning, Running, Upgrading, Degraded or Terminating. It is `Upgrading` while a major version upgrade is running and the database is offline.",
 				Computed:    true,
 			},
 			"current_version": schema.StringAttribute{
@@ -508,6 +540,9 @@ func (r *DatabaseResource) Update(ctx context.Context, req resource.UpdateReques
 	}
 	var send patchFunc[client.Database]
 	patch, hasChanges := databasePatch(&plan, &state)
+	if r.refuseUnsafeCancel(ctx, plan.Name.ValueString(), patch.Version, state.Version, &resp.Diagnostics) {
+		return
+	}
 	if hasChanges {
 		name := plan.Name.ValueString()
 		send = func(ctx context.Context, etag string) (*client.Database, string, error) {
@@ -515,6 +550,43 @@ func (r *DatabaseResource) Update(ctx context.Context, req resource.UpdateReques
 		}
 	}
 	r.update(ctx, &plan, &state, state.ETag.ValueString(), send, !protectionOnly(patch), &resp.State, &resp.Diagnostics)
+}
+
+// versionLowers reports whether planned, when set, is a lower major than
+// current: only that can be a cancel, so only that is checked before it is
+// sent.
+func versionLowers(planned *string, current types.String) bool {
+	if planned == nil {
+		return false
+	}
+	want, okWant := majorOf(*planned)
+	have, okHave := majorOf(current.ValueString())
+	return okWant && okHave && want < have
+}
+
+// refuseUnsafeCancel stops a version lowered to the running major unless the
+// platform shows an upgrade to cancel. A cancel is judged on the database as
+// it is now, not on state: an operator before the cancel fix reads a version
+// equal to the running major as a cancel right after a successful upgrade,
+// while currentVersion still shows the old major, and would undo it. It
+// reports whether it added an error.
+func (r *DatabaseResource) refuseUnsafeCancel(ctx context.Context, name string, planned *string, stateVersion types.String, diags *diag.Diagnostics) bool {
+	if !versionLowers(planned, stateVersion) {
+		return false
+	}
+	current, _, err := r.client.GetDatabase(ctx, name)
+	if err != nil {
+		diags.AddError("failed to read database", apiErrorDetail(err))
+		return true
+	}
+	if !cancelsUpgrade(*planned, current) {
+		return false
+	}
+	if summary, detail := cancelRefusal(current); summary != "" {
+		diags.AddError(summary, detail)
+		return true
+	}
+	return false
 }
 
 // protectionOnly reports whether patch changes deletion protection and
@@ -529,8 +601,9 @@ func protectionOnly(patch client.PatchDatabaseRequest) bool {
 
 // databasePatch builds the merge patch for the fields that differ between
 // plan and state. Version is only sent when the planned value is known, so
-// an unset version can never reach the wire as "". The plan rejects version
-// changes while major upgrades are unavailable; the API refuses them too.
+// an unset version can never reach the wire as "". A raise is a major
+// upgrade, and a lowering back to the running major a cancel: the plan
+// refuses any other lowering, and the API judges all of them.
 func databasePatch(plan, state *DatabaseResourceModel) (client.PatchDatabaseRequest, bool) {
 	var patch client.PatchDatabaseRequest
 	hasChanges := false
@@ -680,12 +753,14 @@ func settingsChanged(prior *databaseModel, current databaseModel) []string {
 // spec in effect. Phase alone is not enough: the platform marks a change
 // applied (observedGeneration reaches generation) as soon as it hands it to
 // the instances, and the phase stays Running while they roll onto it, with
-// the Ready condition False until they have.
+// the Ready condition False until they have. A database that runs a major
+// other than its spec's has not finished an upgrade, whatever Ready says.
 func databaseConverged(db *client.Database) bool {
 	return db.Status != nil &&
 		db.Status.Phase == databasePhaseRunning &&
 		db.Status.ObservedGeneration >= db.Generation &&
-		db.Status.Ready()
+		db.Status.Ready() &&
+		runsSpecMajor(db)
 }
 
 // databasePhase is db's phase, "" when it has no status yet.

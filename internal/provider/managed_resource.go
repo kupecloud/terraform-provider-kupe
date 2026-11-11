@@ -77,6 +77,9 @@ type readiness[M, A any] struct {
 	// waitOnRead also waits when an update changed only an external source
 	// (secret values) and no definition PATCH was needed.
 	waitOnRead bool
+	// waitOnReadWhen, when set, is waitOnRead for the objects it reports
+	// true for.
+	waitOnReadWhen func(obj *A) bool
 	// createTimeoutWarning, when set, preserves an accepted definition after
 	// a confirmed external value write: a create timeout is a warning with
 	// this detail. Only timeout is downgraded; failures stay errors.
@@ -96,6 +99,17 @@ type readiness[M, A any] struct {
 	// failedDetail, when set, explains a failure of op ("create" or
 	// "update") instead of managedResource.failedDetail.
 	failedDetail func(op string, m *M, obj *A) string
+	// failureDetail, when set, names a failure of obj that is its own kind
+	// of failure, with the summary and detail to give instead of the phase
+	// and failedDetail; "" leaves it to those.
+	failureDetail func(obj *A) (summary, detail string)
+	// overtaken, when set, reports that obj no longer holds what op's plan
+	// set: another client changed it while the apply waited. A non-empty
+	// result ends the wait with that detail.
+	overtaken func(op string, m *M, obj *A) string
+	// readNotice, when set, is a warning for obj that a refresh gives: the
+	// summary and detail, "" when there is nothing to say.
+	readNotice func(obj *A) (summary, detail string)
 	// timedOutDetail, when set, is added to the error given when the
 	// timeout fires first while the resource is still progressing.
 	timedOutDetail func(m *M, obj *A) string
@@ -137,6 +151,11 @@ func (r *managedResource[M, A]) Read(ctx context.Context, req resource.ReadReque
 
 	r.kind.mapToState(obj, etag, &state)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+	if r.kind.ready.readNotice != nil {
+		if summary, detail := r.kind.ready.readNotice(obj); summary != "" {
+			resp.Diagnostics.AddWarning(summary, detail)
+		}
+	}
 }
 
 // ImportState imports by name. A resource whose ID says more shadows it.
@@ -180,7 +199,7 @@ func (r *managedResource[M, A]) update(
 		}
 		r.kind.mapToState(obj, etag, plan)
 		diags.Append(state.Set(ctx, plan)...)
-		if wait && r.kind.ready.waitOnRead && !diags.HasError() {
+		if wait && (r.kind.ready.waitOnRead || (r.kind.ready.waitOnReadWhen != nil && r.kind.ready.waitOnReadWhen(obj))) && !diags.HasError() {
 			timeout, d := r.kind.timeoutsOf(plan).Update(ctx, r.kind.defaults.update)
 			diags.Append(d...)
 			if !diags.HasError() {
@@ -259,6 +278,9 @@ func (r *managedResource[M, A]) updateWithRetry(ctx context.Context, prior *M, e
 	return send(ctx, currentETag)
 }
 
+// errOvertaken ends waitForReady when another client changed the resource.
+var errOvertaken = errors.New("changed while waiting")
+
 // errReadyFailed ends waitForReady when the resource failed.
 var errReadyFailed = errors.New("failed while waiting")
 
@@ -274,12 +296,23 @@ func (r *managedResource[M, A]) waitForReady(
 	ready := r.kind.ready
 	last := obj
 	var failingSince time.Time
+	var overtaken string
 	err := pollUntil(ctx, timeout, func(c context.Context) (bool, error) {
 		observed, etag, err := r.kind.get(c, r.client, m)
 		if err != nil {
 			return false, err
 		}
 		last = observed
+		if ready.overtaken != nil {
+			if detail := ready.overtaken(op, m, observed); detail != "" {
+				// Record what the API holds, not the plan: state must
+				// match the database, and the apply failed.
+				r.kind.mapToState(observed, etag, m)
+				diags.Append(state.Set(c, m)...)
+				overtaken = detail
+				return true, errOvertaken
+			}
+		}
 		r.kind.mapToState(observed, etag, m)
 		diags.Append(state.Set(c, m)...)
 		if ready.converged(observed) {
@@ -305,8 +338,16 @@ func (r *managedResource[M, A]) waitForReady(
 	switch {
 	case err == nil:
 		// ready
+	case errors.Is(err, errOvertaken):
+		diags.AddError(r.kind.noun+" changed outside this apply", overtaken)
 	case errors.Is(err, errReadyFailed):
-		diags.AddError(r.kind.noun+" "+strings.ToLower(phase), r.failedDetail(op, m, last))
+		summary := r.kind.noun + " " + strings.ToLower(phase)
+		if ready.failureDetail != nil {
+			if s, _ := ready.failureDetail(last); s != "" {
+				summary = s
+			}
+		}
+		diags.AddError(summary, r.failedDetail(op, m, last))
 	case isTerminalAPIError(err):
 		diags.AddError(fmt.Sprintf("%s %s failed while waiting for %s", r.kind.noun, op, ready.target), apiErrorDetail(err))
 	case !failingSince.IsZero():
@@ -361,6 +402,11 @@ const phaseTerminating = "Terminating"
 // state, marked tainted.
 func (r *managedResource[M, A]) failedDetail(op string, m *M, obj *A) string {
 	ready := r.kind.ready
+	if ready.failureDetail != nil {
+		if _, detail := ready.failureDetail(obj); detail != "" {
+			return detail
+		}
+	}
 	if ready.failedDetail != nil {
 		return ready.failedDetail(op, m, obj)
 	}
