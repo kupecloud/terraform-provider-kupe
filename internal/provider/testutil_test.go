@@ -985,6 +985,27 @@ func (m *mockKupeAPI) getDatabase(w http.ResponseWriter, name string) {
 			delete(m.upgradeCommit, name)
 		}
 	}
+	// The operator writes each condition for the generation it judged: the
+	// status's, unless a scripted condition says otherwise.
+	if conditions, ok := status["conditions"].([]any); ok {
+		stamped := make([]any, 0, len(conditions))
+		for _, c := range conditions {
+			cond, isMap := c.(map[string]any)
+			if !isMap {
+				stamped = append(stamped, c)
+				continue
+			}
+			copied := map[string]any{}
+			for k, v := range cond {
+				copied[k] = v
+			}
+			if _, set := copied["observedGeneration"]; !set {
+				copied["observedGeneration"] = status["observedGeneration"]
+			}
+			stamped = append(stamped, copied)
+		}
+		status["conditions"] = stamped
+	}
 	db["status"] = status
 	w.Header().Set("ETag", `"`+db["resourceVersion"].(string)+`"`)
 	mustEncodeJSON(w, db)
@@ -1467,7 +1488,7 @@ func (m *mockKupeAPI) mockVersionChange(w http.ResponseWriter, name string, db m
 			mockError(w, http.StatusConflict, client.CodeDatabaseUpgradeInProgress, "the database is upgrading")
 			return false
 		}
-		if !mockCancellable(status) {
+		if !mockCancellable(status, db["generation"].(int)) {
 			mockError(w, http.StatusBadRequest, "", "postgres version downgrades are not supported")
 			return false
 		}
@@ -1502,25 +1523,50 @@ func mockCondition(status map[string]any, t string) (state, reason string) {
 	return state, reason
 }
 
-// mockCancellable reports whether a status shows something to cancel, as
-// kupe-control-operator#551 reads it: UpgradeInProgress True UpgradeWaiting or
-// PreUpgradeBackup, Ready False UpgradeRolledBack, UpgradeFailed or
-// UpgradeSwitchedOff, or an operator's older switched-off hold
-// (VersionUnsupported True). A database with no scripted status has none.
-func mockCancellable(status map[string]any) bool {
+// mockCancellable reports whether the webhook admits a cancel against a
+// status (kupe-control-operator#551, upgradeCancellable): not while the phase
+// is Upgrading; always when UpgradeInProgress is missing or was written for an
+// older generation (a condition's own observedGeneration defaults to the
+// status's); otherwise only True UpgradeWaiting or PreUpgradeBackup, or False
+// UpgradeRolledBack, UpgradeFailed or UpgradeSwitchedOff. One more case: an
+// operator before #551 admits the hold it reports as VersionUnsupported True.
+// A nil status is a database with nothing scripted: no condition.
+func mockCancellable(status map[string]any, generation int) bool {
 	if status == nil {
+		return true
+	}
+	if status["phase"] == "Upgrading" {
 		return false
 	}
-	inProgress, inProgressReason := mockCondition(status, "UpgradeInProgress")
-	ready, readyReason := mockCondition(status, "Ready")
-	unsupported, _ := mockCondition(status, "VersionUnsupported")
-	switch {
-	case inProgress == "True" && (inProgressReason == "UpgradeWaiting" || inProgressReason == "PreUpgradeBackup"):
-		return true
-	case ready == "False" && (readyReason == "UpgradeRolledBack" || readyReason == "UpgradeFailed" || readyReason == "UpgradeSwitchedOff"):
+	if unsupported, _ := mockCondition(status, "VersionUnsupported"); unsupported == "True" {
 		return true
 	}
-	return unsupported == "True"
+	conditions, _ := status["conditions"].([]any)
+	for _, c := range conditions {
+		cond, _ := c.(map[string]any)
+		if cond["type"] != "UpgradeInProgress" {
+			continue
+		}
+		observed := generation
+		if v, ok := status["observedGeneration"].(int); ok {
+			observed = v
+		}
+		if v, ok := cond["observedGeneration"].(int); ok {
+			observed = v
+		}
+		if observed < generation {
+			return true
+		}
+		state, reason := cond["status"], cond["reason"]
+		switch state {
+		case "True":
+			return reason == "UpgradeWaiting" || reason == "PreUpgradeBackup"
+		case "False":
+			return reason == "UpgradeRolledBack" || reason == "UpgradeFailed" || reason == "UpgradeSwitchedOff"
+		}
+		return false
+	}
+	return true
 }
 
 // mockUpgradeStatuses is what an accepted upgrade from running to version
