@@ -31,7 +31,7 @@ TF_ACC_TERRAFORM_PATH ?= $(shell command -v tofu 2>/dev/null || command -v terra
 TF_ACC_PROVIDER_HOST ?= $(if $(findstring tofu,$(TF_ACC_TERRAFORM_PATH)),registry.opentofu.org,registry.terraform.io)
 TF_ACC_PROVIDER_NAMESPACE ?= kupecloud
 
-.PHONY: all build test gosec govulncheck install local-provider tidy fmt vet tofu-validate docs-install docs-generate docs-validate docs publish-dryrun clean help
+.PHONY: all build test gosec govulncheck install local-provider tidy fmt vet tofu-validate docs-install docs-generate docs-validate docs publish-dryrun clean help go-env
 
 all: build
 
@@ -59,6 +59,11 @@ gosec: ## Run gosec against the provider codebase
 
 govulncheck: ## Run govulncheck against the provider codebase
 	GOCACHE=$(GOCACHE) GOWORK=off $(GO) run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+
+# The pre-commit hooks that run Go read this through .github/hooks/go-env.sh,
+# so they run on the Go and lint cache make uses. One NAME=value per line.
+go-env: ## Print the Go environment the pre-commit Go hooks run with
+	@printf 'GOTOOLCHAIN=%s\nGOLANGCI_LINT_CACHE=%s\n' "$$GOTOOLCHAIN" "$$GOLANGCI_LINT_CACHE"
 
 install: build ## Install to local Terraform plugin directory
 	mkdir -p ~/.terraform.d/plugins/registry.terraform.io/kupecloud/kupe/$(VERSION)/darwin_arm64

@@ -53,13 +53,17 @@ repos:
   # Hooks under `stages: [manual]` are the slow CI gates: a local commit skips
   # them, and CI (and `pre-commit run --all-files --hook-stage manual`) runs
   # them (kupecloud/github-workflows#14).
+  #
+  # Every hook that runs Go goes through .github/hooks/go-env.sh, so it runs on
+  # the go.mod toolchain (and lint cache) make uses; a caller's GOTOOLCHAIN
+  # wins, and CI's setup-go sets local (kupe-control-operator#555).
   - repo: local
     hooks:
       # v2.1.6 is the version CI's go-lint job really ran (the go-lint.yaml
       # v2.5.2 default), with this repository's .golangci.yaml. Bump separately.
       - id: golangci-lint
         name: golangci-lint
-        entry: bash -c 'GOWORK=off go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.1.6 run --timeout=10m'
+        entry: bash .github/hooks/go-env.sh env GOWORK=off go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.1.6 run --timeout=10m
         language: system
         pass_filenames: false
         files: (\.go|^go\.(mod|sum)|^\.golangci\.yaml)$
@@ -67,7 +71,7 @@ repos:
           - manual
       - id: go-vet
         name: go vet
-        entry: go vet ./...
+        entry: bash .github/hooks/go-env.sh go vet ./...
         language: system
         pass_filenames: false
         files: (\.go|^go\.(mod|sum))$
@@ -75,7 +79,7 @@ repos:
           - manual
       - id: go-unit-tests
         name: go test -race (unit and mock-backed acceptance tests)
-        entry: .github/hooks/go-unit-tests.sh
+        entry: bash .github/hooks/go-env.sh .github/hooks/go-unit-tests.sh
         language: system
         pass_filenames: false
         files: (\.go|^go\.(mod|sum)|^\.github/hooks/go-unit-tests\.sh)$
@@ -83,7 +87,7 @@ repos:
           - manual
       - id: go-mod-tidy
         name: go mod tidy check
-        entry: .github/hooks/go-mod-tidy.sh
+        entry: bash .github/hooks/go-env.sh .github/hooks/go-mod-tidy.sh
         language: system
         pass_filenames: false
         files: (\.go|^go\.(mod|sum)|^\.github/hooks/go-mod-tidy\.sh)$
@@ -115,13 +119,13 @@ repos:
           - manual
       - id: actionlint
         name: actionlint
-        entry: bash -c 'GOWORK=off go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12'
+        entry: bash .github/hooks/go-env.sh env GOWORK=off go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
         language: system
         pass_filenames: false
         files: ^\.github/workflows/.*\.ya?ml$
       - id: gofmt
         name: gofmt
-        entry: gofmt -w
+        entry: bash .github/hooks/go-env.sh gofmt -w
         language: system
         types:
           - go
@@ -134,13 +138,13 @@ repos:
         files: ^(internal/.*\.go|templates/.*|examples/.*|docs/.*|scripts/.*|main\.go|go\.(mod|sum)|Makefile)$
       - id: govulncheck
         name: govulncheck
-        entry: bash -c 'GOWORK=off go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...'
+        entry: bash .github/hooks/go-env.sh env GOWORK=off go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
         language: system
         pass_filenames: false
         files: ^(internal/|scripts/|main\.go|go\.mod|Makefile)
       - id: gosec
         name: gosec
-        entry: bash -c 'GOWORK=off go run github.com/securego/gosec/v2/cmd/gosec@v2.25.0 -exclude-generated ./...'
+        entry: bash .github/hooks/go-env.sh env GOWORK=off go run github.com/securego/gosec/v2/cmd/gosec@v2.25.0 -exclude-generated ./...
         language: system
         pass_filenames: false
         files: ^(internal/|scripts/|main\.go|go\.mod|Makefile)
