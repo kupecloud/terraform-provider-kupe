@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
@@ -609,6 +610,47 @@ func TestAccDatabaseResource_MajorUpgradeCancelWithResize(t *testing.T) {
 	})
 }
 
+// TestAccDatabaseResource_MajorUpgradeCancelHeldOnBlockedPass: a blocking
+// check (quota, namespace, cluster) rewrites Ready on a pass that never reaches
+// the upgrade, so Ready no longer says the upgrade rolled back; UpgradeInProgress
+// still does, and the webhook admits the cancel on it. The provider must too.
+func TestAccDatabaseResource_MajorUpgradeCancelHeldOnBlockedPass(t *testing.T) {
+	shrinkPollInterval(t)
+	mock := newMockKupeAPI()
+	defer mock.close()
+	mock.majorUpgrades, mock.upgradeOutcome = true, mockUpgradeRolledBack
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		CheckDestroy:             testAccCheckNoDatabases(mock),
+		Steps: []resource.TestStep{
+			{Config: testAccDatabaseConfig(mock.url(), upgradeDB("17", ""))},
+			{
+				Config:      testAccDatabaseConfig(mock.url(), upgradeDB("18", "")),
+				ExpectError: regexp.MustCompile(`database upgrade did not complete`),
+			},
+			{
+				PreConfig: func() {
+					mock.setState(func(m *mockKupeAPI) {
+						m.databaseStatuses = []map[string]any{{
+							"phase": "Running", "currentVersion": "17.0",
+							"conditions": []any{
+								map[string]any{"type": "Ready", "status": "False", "reason": "QuotaExceeded", "message": "the tenant is over quota"},
+								map[string]any{"type": "UpgradeInProgress", "status": "False", "reason": "UpgradeRolledBack"},
+							},
+						}}
+					})
+				},
+				Config: testAccDatabaseConfig(mock.url(), upgradeDB("17", "")),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("kupe_database.test", "version", "17"),
+					testAccCheckDatabaseVersionRequests(mock, "18", "17"),
+				),
+			},
+		},
+	})
+}
+
 func TestMajorOf(t *testing.T) {
 	tests := []struct {
 		in     string
@@ -634,6 +676,9 @@ func upgradeDatabase(version, current, phase, readyStatus, readyReason, upgradeS
 	conditions := []client.Condition{{Type: "Ready", Status: readyStatus, Reason: readyReason, Message: "the message"}}
 	if upgradeStatus != "" {
 		conditions = append(conditions, client.Condition{Type: "UpgradeInProgress", Status: upgradeStatus, Reason: upgradeReason})
+	}
+	for i := range conditions {
+		conditions[i].ObservedGeneration = observed
 	}
 	return client.Database{
 		Name: "orders-db", Version: version, Generation: 3,
@@ -859,7 +904,17 @@ func TestCancelRefusal(t *testing.T) {
 	}{
 		{"after success, before currentVersion moved", succeeded(3), "database upgrade has finished"},
 		{"the change is not applied yet", upgradeDatabase("18", "17.6", "Running", "False", "UpgradeWaiting", "True", "UpgradeWaiting", 2), "database has not applied its last change yet"},
-		{"nothing recorded to cancel", upgradeDatabase("18", "17.6", "Running", "True", "Healthy", "", "", 3), "nothing to cancel"},
+		{"UpgradeInProgress written and idle: nothing to cancel", upgradeDatabase("18", "17.6", "Running", "True", "Healthy", "False", "NoUpgrade", 3), "nothing to cancel"},
+		// The webhook keys on UpgradeInProgress and its own observedGeneration,
+		// not on Ready, which a blocking check rewrites.
+		{"held on a blocked pass, Ready rewritten (rolled back)", upgradeDatabase("18", "17.6", "Running", "False", "QuotaExceeded", "False", "UpgradeRolledBack", 3), ""},
+		{"held on a blocked pass, Ready rewritten (failed)", upgradeDatabase("18", "17.6", "Running", "False", "NamespaceTerminating", "False", "UpgradeFailed", 3), ""},
+		{"held on a blocked pass, Ready rewritten (switched off)", upgradeDatabase("18", "17.6", "Running", "False", "ClusterNotReady", "False", "UpgradeSwitchedOff", 3), ""},
+		{"no UpgradeInProgress condition", upgradeDatabase("18", "17.6", "Running", "True", "Healthy", "", "", 3), ""},
+		{"an older UpgradeInProgress: not judged for this spec", staleCondition(upgradeDatabase("18", "17.6", "Running", "True", "Healthy", "False", "UpgradeSucceeded", 3), 2), ""},
+		{"an older UpgradeInProgress that is idle", staleCondition(upgradeDatabase("18", "17.6", "Running", "True", "Healthy", "False", "NoUpgrade", 3), 1), ""},
+		{"UpgradeSucceeded written for this spec", upgradeDatabase("18", "17.6", "Running", "True", "Healthy", "False", "UpgradeSucceeded", 3), "database upgrade has finished"},
+		{"True with a reason that is not an upgrade in flight", upgradeDatabase("18", "17.6", "Running", "True", "Healthy", "True", "Other", 3), "nothing to cancel"},
 		{"the stale hold of an earlier upgrade", withCondition(succeeded(3), "VersionUnsupported", "True", "MajorChangeUnsupported", "x"), ""},
 		{"Ready False UpgradeSwitchedOff", upgradeDatabase("18", "17.6", "Running", "False", "UpgradeSwitchedOff", "False", "UpgradeSwitchedOff", 3), ""},
 		{"UpgradeInProgress True UpgradeWaiting", upgradeDatabase("18", "17.6", "Running", "False", "x", "True", "UpgradeWaiting", 3), ""},
@@ -875,6 +930,67 @@ func TestCancelRefusal(t *testing.T) {
 			}
 		})
 	}
+}
+
+// staleCondition sets the UpgradeInProgress condition of db to generation gen.
+func staleCondition(db client.Database, gen int64) client.Database {
+	conditions := append([]client.Condition{}, db.Status.Conditions...)
+	for i := range conditions {
+		if conditions[i].Type == "UpgradeInProgress" {
+			conditions[i].ObservedGeneration = gen
+		}
+	}
+	db.Status.Conditions = conditions
+	return db
+}
+
+func TestVersionLowers(t *testing.T) {
+	for _, tt := range []struct {
+		planned string
+		current string
+		want    bool
+	}{{"17", "18", true}, {"17.6", "18", true}, {"18", "18", false}, {"19", "18", false}, {"x", "18", false}, {"17", "", false}} {
+		planned := tt.planned
+		if got := versionLowers(&planned, types.StringValue(tt.current)); got != tt.want {
+			t.Errorf("versionLowers(%q, %q) = %v, want %v", tt.planned, tt.current, got, tt.want)
+		}
+	}
+	if versionLowers(nil, types.StringValue("18")) {
+		t.Error("no planned version lowers nothing")
+	}
+}
+
+// TestAccDatabaseResource_TimeoutsOnlyPlansComputedUnknown: an update that
+// changes only `timeouts` plans the values an upgrade wait would move as
+// unknown, whatever the state says, so the plan and the apply cannot disagree
+// about whether it waits.
+func TestAccDatabaseResource_TimeoutsOnlyPlansComputedUnknown(t *testing.T) {
+	const addr = "kupe_database.test"
+	mock := newMockKupeAPI()
+	defer mock.close()
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		CheckDestroy:             testAccCheckNoDatabases(mock),
+		Steps: []resource.TestStep{
+			{Config: testAccDatabaseConfig(mock.url(), upgradeDB("17", "10m"))},
+			{
+				Config: testAccDatabaseConfig(mock.url(), upgradeDB("17", "20m")),
+				ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+					plancheck.ExpectResourceAction(addr, plancheck.ResourceActionUpdate),
+					plancheck.ExpectUnknownValue(addr, tfjsonpath.New("phase")),
+					plancheck.ExpectUnknownValue(addr, tfjsonpath.New("current_version")),
+				}},
+			},
+			{
+				// Nothing changed: the values stay known.
+				Config: testAccDatabaseConfig(mock.url(), upgradeDB("17", "20m")),
+				ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+					plancheck.ExpectResourceAction(addr, plancheck.ResourceActionNoop),
+				}},
+			},
+		},
+	})
 }
 
 func TestCancelsUpgrade(t *testing.T) {
