@@ -10,6 +10,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -33,6 +34,9 @@ import (
 const (
 	databasePhaseRunning  = "Running"
 	databasePhaseDegraded = "Degraded"
+	// databasePhaseUpgrading is the phase while a major upgrade runs and the
+	// database is offline.
+	databasePhaseUpgrading = "Upgrading"
 )
 
 // databaseDegradedGrace is how long Create and Update ride out a Degraded
@@ -208,16 +212,23 @@ var databaseKind = serviceKind[DatabaseResourceModel, client.Database]{
 		phase:     databasePhase,
 		converged: databaseConverged,
 		failed: func(db *client.Database) (time.Duration, bool) {
-			// The platform holds a database whose upgrade rolled back or
-			// failed until the version is set back: waiting does not clear
-			// it, so it ends at once, Degraded or not.
-			if upgradeHeld(db) {
+			// The platform holds a database whose upgrade rolled back,
+			// failed or was switched off until the version is set back:
+			// waiting does not clear it, so it ends at once, Degraded or not.
+			if upgradeHold(db) != "" {
 				return 0, true
 			}
 			switch databasePhase(db) {
 			case phaseTerminating:
 				return 0, true
 			case databasePhaseDegraded:
+				// Degraded is progress while the platform waits to start an
+				// upgrade or takes its backup: it begins once the database
+				// is healthy again.
+				switch client.ConditionReason(db.Status.Conditions, client.ConditionReady) {
+				case client.ReasonUpgradeWaiting, client.ReasonPreUpgradeBackup:
+					return 0, false
+				}
 				// Degraded from before the change (the first poll reads the
 				// status the PATCH found) is not a verdict on it.
 				return databaseDegradedGrace, db.Status.ObservedGeneration >= db.Generation
@@ -233,6 +244,10 @@ var databaseKind = serviceKind[DatabaseResourceModel, client.Database]{
 			return databaseVersionOvertaken(m.Version.ValueString(), db)
 		},
 		readNotice: databaseUpgradeNotice,
+		// An apply that only changes timeouts still waits while an upgrade
+		// is asked for or running, so applying again with a longer
+		// `timeouts.update` waits for it.
+		waitOnReadWhen: func(db *client.Database) bool { return upgradeAsked(db) || upgradeRunning(db) },
 		timedOutDetail: func(_ *DatabaseResourceModel, db *client.Database) string {
 			detail := ""
 			if message := databaseReadyMessage(db); message != "" {
@@ -525,6 +540,9 @@ func (r *DatabaseResource) Update(ctx context.Context, req resource.UpdateReques
 	}
 	var send patchFunc[client.Database]
 	patch, hasChanges := databasePatch(&plan, &state)
+	if patch.Version != nil && r.refuseUnsafeCancel(ctx, plan.Name.ValueString(), *patch.Version, &resp.Diagnostics) {
+		return
+	}
 	if hasChanges {
 		name := plan.Name.ValueString()
 		send = func(ctx context.Context, etag string) (*client.Database, string, error) {
@@ -532,6 +550,28 @@ func (r *DatabaseResource) Update(ctx context.Context, req resource.UpdateReques
 		}
 	}
 	r.update(ctx, &plan, &state, state.ETag.ValueString(), send, !protectionOnly(patch), &resp.State, &resp.Diagnostics)
+}
+
+// refuseUnsafeCancel stops a version lowered to the running major unless the
+// platform shows an upgrade to cancel. A cancel is judged on the database as
+// it is now, not on state: an operator before the cancel fix reads a version
+// equal to the running major as a cancel right after a successful upgrade,
+// while currentVersion still shows the old major, and would undo it. It
+// reports whether it added an error.
+func (r *DatabaseResource) refuseUnsafeCancel(ctx context.Context, name, planned string, diags *diag.Diagnostics) bool {
+	current, _, err := r.client.GetDatabase(ctx, name)
+	if err != nil {
+		diags.AddError("failed to read database", apiErrorDetail(err))
+		return true
+	}
+	if !cancelsUpgrade(planned, current) {
+		return false
+	}
+	if summary, detail := cancelRefusal(current); summary != "" {
+		diags.AddError(summary, detail)
+		return true
+	}
+	return false
 }
 
 // protectionOnly reports whether patch changes deletion protection and

@@ -184,6 +184,14 @@ func (r *DatabaseResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 	if len(settingsChanged(&state.databaseModel, plan.databaseModel)) != 0 || !plan.Name.Equal(state.Name) || !plan.Engine.Equal(state.Engine) || !plan.Source.Equal(state.Source) {
 		return
 	}
+	// While an upgrade is asked for (the spec major is not the one running)
+	// an apply that changes only `timeouts` still waits for it, and these
+	// values move while it does: leave them unknown.
+	want, okWant := majorOf(state.Version.ValueString())
+	running, okRunning := majorOf(state.CurrentVersion.ValueString())
+	if okWant && okRunning && want != running && !plan.Timeouts.Equal(state.Timeouts) {
+		return
+	}
 	plan.Phase = state.Phase
 	plan.CurrentVersion = state.CurrentVersion
 	plan.LastBackupAt = state.LastBackupAt

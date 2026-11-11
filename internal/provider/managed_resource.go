@@ -77,6 +77,9 @@ type readiness[M, A any] struct {
 	// waitOnRead also waits when an update changed only an external source
 	// (secret values) and no definition PATCH was needed.
 	waitOnRead bool
+	// waitOnReadWhen, when set, is waitOnRead for the objects it reports
+	// true for.
+	waitOnReadWhen func(obj *A) bool
 	// createTimeoutWarning, when set, preserves an accepted definition after
 	// a confirmed external value write: a create timeout is a warning with
 	// this detail. Only timeout is downgraded; failures stay errors.
@@ -196,7 +199,7 @@ func (r *managedResource[M, A]) update(
 		}
 		r.kind.mapToState(obj, etag, plan)
 		diags.Append(state.Set(ctx, plan)...)
-		if wait && r.kind.ready.waitOnRead && !diags.HasError() {
+		if wait && (r.kind.ready.waitOnRead || (r.kind.ready.waitOnReadWhen != nil && r.kind.ready.waitOnReadWhen(obj))) && !diags.HasError() {
 			timeout, d := r.kind.timeoutsOf(plan).Update(ctx, r.kind.defaults.update)
 			diags.Append(d...)
 			if !diags.HasError() {
