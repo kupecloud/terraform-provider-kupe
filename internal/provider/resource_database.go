@@ -540,7 +540,7 @@ func (r *DatabaseResource) Update(ctx context.Context, req resource.UpdateReques
 	}
 	var send patchFunc[client.Database]
 	patch, hasChanges := databasePatch(&plan, &state)
-	if versionLowers(patch.Version, state.Version) && r.refuseUnsafeCancel(ctx, plan.Name.ValueString(), *patch.Version, &resp.Diagnostics) {
+	if r.refuseUnsafeCancel(ctx, plan.Name.ValueString(), patch.Version, state.Version, &resp.Diagnostics) {
 		return
 	}
 	if hasChanges {
@@ -570,13 +570,16 @@ func versionLowers(planned *string, current types.String) bool {
 // equal to the running major as a cancel right after a successful upgrade,
 // while currentVersion still shows the old major, and would undo it. It
 // reports whether it added an error.
-func (r *DatabaseResource) refuseUnsafeCancel(ctx context.Context, name, planned string, diags *diag.Diagnostics) bool {
+func (r *DatabaseResource) refuseUnsafeCancel(ctx context.Context, name string, planned *string, stateVersion types.String, diags *diag.Diagnostics) bool {
+	if !versionLowers(planned, stateVersion) {
+		return false
+	}
 	current, _, err := r.client.GetDatabase(ctx, name)
 	if err != nil {
 		diags.AddError("failed to read database", apiErrorDetail(err))
 		return true
 	}
-	if !cancelsUpgrade(planned, current) {
+	if !cancelsUpgrade(*planned, current) {
 		return false
 	}
 	if summary, detail := cancelRefusal(current); summary != "" {

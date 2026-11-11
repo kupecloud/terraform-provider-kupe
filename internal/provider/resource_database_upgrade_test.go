@@ -1,12 +1,14 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
@@ -957,6 +959,19 @@ func TestVersionLowers(t *testing.T) {
 	}
 	if versionLowers(nil, types.StringValue("18")) {
 		t.Error("no planned version lowers nothing")
+	}
+}
+
+// TestRefuseUnsafeCancel_OnlyReadsWhenLowering: a raise, or no version change,
+// never reads the database first (the resource has no client here, so a read
+// would panic).
+func TestRefuseUnsafeCancel_OnlyReadsWhenLowering(t *testing.T) {
+	r := &DatabaseResource{}
+	for _, planned := range []*string{nil, strPtr("18"), strPtr("19")} {
+		var diags diag.Diagnostics
+		if r.refuseUnsafeCancel(context.Background(), "orders-db", planned, types.StringValue("18"), &diags) || diags.HasError() {
+			t.Errorf("planned %v: refused or errored without a lowering", planned)
+		}
 	}
 }
 
