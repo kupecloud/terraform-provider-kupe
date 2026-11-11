@@ -14,7 +14,8 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A run on main is never cancelled (kupe-runner#208): a second ping queues.
+  cancel-in-progress: false
 
 permissions:
   contents: read
