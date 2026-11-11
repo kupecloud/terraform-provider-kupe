@@ -1019,7 +1019,7 @@ func (m *mockKupeAPI) patchDatabase(w http.ResponseWriter, r *http.Request, name
 		}
 	}
 	if v, ok := body["version"].(string); ok && v != db["version"] {
-		if !m.mockVersionChange(w, name, db, v) {
+		if !m.mockVersionChange(w, name, db, v, body) {
 			return
 		}
 	}
@@ -1396,6 +1396,21 @@ const (
 	mockUpgradeFailed     = "failed"
 	mockUpgradeWaiting    = "waiting"
 	mockUpgradeBackup     = "backup"
+	// mockUpgradeSwitchedOff is the hold of an operator with the
+	// UpgradeSwitchedOff reason: Ready False, phase Running.
+	mockUpgradeSwitchedOff = "switchedOff"
+	// The same hold as an operator without that reason reports it: Ready
+	// True and VersionUnsupported True, with the UpgradeInProgress condition
+	// it left behind (none, NoUpgrade, a stale UpgradeWaiting, a stale
+	// UpgradeSucceeded).
+	mockUpgradeHeldOld          = "heldOld"
+	mockUpgradeHeldOldNoUpgrade = "heldOldNoUpgrade"
+	mockUpgradeHeldOldWaiting   = "heldOldWaiting"
+	mockUpgradeHeldOldSucceeded = "heldOldSucceeded"
+	// mockUpgradeLag is the window after a successful upgrade: Running,
+	// UpgradeInProgress False UpgradeSucceeded, and currentVersion still on
+	// the old major until the instances are healthy.
+	mockUpgradeLag = "lag"
 )
 
 // mockRunningVersion is the full version the database runs: the one it was
@@ -1421,7 +1436,7 @@ func mockMajor(v string) int {
 // (MDB2-6b, MDB2-6c): a lowering is admitted only back to the running major
 // (a cancel); a raise needs the switch on, a database that is not already
 // upgrading, and one major at a time. It reports whether the PATCH goes on.
-func (m *mockKupeAPI) mockVersionChange(w http.ResponseWriter, name string, db map[string]any, v string) bool {
+func (m *mockKupeAPI) mockVersionChange(w http.ResponseWriter, name string, db map[string]any, v string, body map[string]any) bool {
 	running := mockRunningVersion(db)
 	want, current := mockMajor(v), mockMajor(running)
 	switch {
@@ -1432,10 +1447,28 @@ func (m *mockKupeAPI) mockVersionChange(w http.ResponseWriter, name string, db m
 		mockError(w, http.StatusBadRequest, "", "postgres version downgrades are not supported")
 		return false
 	case want == current:
-		// A cancel: back to the running major, the switch on or off. Once
-		// the database is offline for the upgrade, the webhook refuses it.
-		if len(m.databaseStatuses) > 0 && m.databaseStatuses[0]["phase"] == "Upgrading" {
+		// A cancel: back to the running major, the switch on or off. The
+		// webhook reads it as one only when resources and highAvailability
+		// are not changed with it, and (kupe-control-operator#551) only
+		// while there is an upgrade to cancel.
+		if _, resized := body["resources"]; resized {
+			mockError(w, http.StatusBadRequest, "", "postgres version downgrades are not supported")
+			return false
+		}
+		if _, resized := body["highAvailability"]; resized {
+			mockError(w, http.StatusBadRequest, "", "postgres version downgrades are not supported")
+			return false
+		}
+		var status map[string]any
+		if len(m.databaseStatuses) > 0 {
+			status = m.databaseStatuses[0]
+		}
+		if status != nil && status["phase"] == "Upgrading" {
 			mockError(w, http.StatusConflict, client.CodeDatabaseUpgradeInProgress, "the database is upgrading")
+			return false
+		}
+		if !mockCancellable(status) {
+			mockError(w, http.StatusBadRequest, "", "postgres version downgrades are not supported")
 			return false
 		}
 		db["version"] = v
@@ -1456,6 +1489,40 @@ func (m *mockKupeAPI) mockVersionChange(w http.ResponseWriter, name string, db m
 	return true
 }
 
+// mockCondition is the status and reason of the status's condition of type t.
+func mockCondition(status map[string]any, t string) (state, reason string) {
+	conditions, _ := status["conditions"].([]any)
+	for _, c := range conditions {
+		cond, _ := c.(map[string]any)
+		if cond["type"] == t {
+			state, _ = cond["status"].(string)
+			reason, _ = cond["reason"].(string)
+		}
+	}
+	return state, reason
+}
+
+// mockCancellable reports whether a status shows something to cancel, as
+// kupe-control-operator#551 reads it: UpgradeInProgress True UpgradeWaiting or
+// PreUpgradeBackup, Ready False UpgradeRolledBack, UpgradeFailed or
+// UpgradeSwitchedOff, or an operator's older switched-off hold
+// (VersionUnsupported True). A database with no scripted status has none.
+func mockCancellable(status map[string]any) bool {
+	if status == nil {
+		return false
+	}
+	inProgress, inProgressReason := mockCondition(status, "UpgradeInProgress")
+	ready, readyReason := mockCondition(status, "Ready")
+	unsupported, _ := mockCondition(status, "VersionUnsupported")
+	switch {
+	case inProgress == "True" && (inProgressReason == "UpgradeWaiting" || inProgressReason == "PreUpgradeBackup"):
+		return true
+	case ready == "False" && (readyReason == "UpgradeRolledBack" || readyReason == "UpgradeFailed" || readyReason == "UpgradeSwitchedOff"):
+		return true
+	}
+	return unsupported == "True"
+}
+
 // mockUpgradeStatuses is what an accepted upgrade from running to version
 // reports, one status per GET: the pre-upgrade backup, then Upgrading, then
 // the outcome, which repeats.
@@ -1468,6 +1535,32 @@ func (m *mockKupeAPI) mockUpgradeStatuses(name, running, version string) []map[s
 			"waiting for a backup from the last 26 hours", running, true)}
 	case mockUpgradeBackup:
 		return []map[string]any{backup}
+	case mockUpgradeSwitchedOff:
+		return []map[string]any{backup, mockUpgradeStatus("Running", "UpgradeSwitchedOff", "UpgradeSwitchedOff",
+			"major upgrades are switched off on this platform", running, false)}
+	case mockUpgradeHeldOld, mockUpgradeHeldOldNoUpgrade, mockUpgradeHeldOldWaiting, mockUpgradeHeldOldSucceeded:
+		conditions := []any{
+			map[string]any{"type": "Ready", "status": "True", "reason": "Healthy"},
+			map[string]any{"type": "VersionUnsupported", "status": "True", "reason": "MajorChangeUnsupported",
+				"message": "major version upgrades are not offered by this platform"},
+		}
+		switch m.upgradeOutcome {
+		case mockUpgradeHeldOldNoUpgrade:
+			conditions = append(conditions, map[string]any{"type": "UpgradeInProgress", "status": "False", "reason": "NoUpgrade"})
+		case mockUpgradeHeldOldWaiting:
+			conditions = append(conditions, map[string]any{"type": "UpgradeInProgress", "status": "True", "reason": "UpgradeWaiting"})
+		case mockUpgradeHeldOldSucceeded:
+			conditions = append(conditions, map[string]any{"type": "UpgradeInProgress", "status": "False", "reason": "UpgradeSucceeded"})
+		}
+		return []map[string]any{{"phase": "Running", "currentVersion": running, "conditions": conditions}}
+	case mockUpgradeLag:
+		return []map[string]any{backup, upgrading, {
+			"phase": "Running", "currentVersion": running,
+			"conditions": []any{
+				map[string]any{"type": "Ready", "status": "False", "reason": "InstancesStarting", "message": "the instances are starting"},
+				map[string]any{"type": "UpgradeInProgress", "status": "False", "reason": "UpgradeSucceeded"},
+			},
+		}}
 	case mockUpgradeRolledBack:
 		return []map[string]any{backup, upgrading, mockUpgradeStatus("Running", "UpgradeRolledBack", "UpgradeRolledBack",
 			"the upgrade stopped before it changed any data and the database runs its old major", running, false)}

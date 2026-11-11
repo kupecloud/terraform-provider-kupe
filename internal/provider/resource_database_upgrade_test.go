@@ -3,6 +3,7 @@ package provider
 import (
 	"fmt"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -407,6 +408,207 @@ func TestAccDatabaseResource_MajorUpgradeCancelledElsewhere(t *testing.T) {
 	})
 }
 
+// TestAccDatabaseResource_MajorUpgradeSwitchedOff: the platform stops
+// offering major upgrades after the raise was admitted and holds the database.
+// The apply ends at once (not at the 30 minute timeout) with the platform's
+// message and how to cancel, whichever way the operator reports the hold, and
+// the cancel is admitted with the switch off.
+func TestAccDatabaseResource_MajorUpgradeSwitchedOff(t *testing.T) {
+	shrinkPollInterval(t)
+	const addr = "kupe_database.test"
+	tests := []struct {
+		name    string
+		outcome string
+		message string
+	}{
+		{"Ready False UpgradeSwitchedOff", mockUpgradeSwitchedOff, "major upgrades are switched off on this platform"},
+		{"older operator, no upgrade recorded", mockUpgradeHeldOldNoUpgrade, "major version upgrades are not offered by this platform"},
+		{"older operator, no UpgradeInProgress", mockUpgradeHeldOld, "major version upgrades are not offered by this platform"},
+		{"older operator, stale UpgradeWaiting", mockUpgradeHeldOldWaiting, "major version upgrades are not offered by this platform"},
+		{"older operator, stale UpgradeSucceeded", mockUpgradeHeldOldSucceeded, "major version upgrades are not offered by this platform"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := newMockKupeAPI()
+			defer mock.close()
+			mock.majorUpgrades, mock.upgradeOutcome = true, tt.outcome
+
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+				CheckDestroy:             testAccCheckNoDatabases(mock),
+				Steps: []resource.TestStep{
+					{Config: testAccDatabaseConfig(mock.url(), upgradeDB("17", ""))},
+					{
+						Config: testAccDatabaseConfig(mock.url(), upgradeDB("18", "")),
+						ExpectError: regexp.MustCompile(`(?s)database upgrade is on hold.*` +
+							wrappedText("The platform stopped offering major upgrades after major version 18 was set") +
+							`.*` + wrappedText("Status message: "+tt.message) + `.*` +
+							wrappedText("To cancel, set `version = \"17\"` and run `terraform apply`.")),
+					},
+					{
+						PreConfig: func() { mock.setState(func(m *mockKupeAPI) { m.majorUpgrades = false }) },
+						Config:    testAccDatabaseConfig(mock.url(), upgradeDB("17", "")),
+						ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+							plancheck.ExpectResourceAction(addr, plancheck.ResourceActionUpdate),
+						}},
+						Check: resource.ComposeAggregateTestCheckFunc(
+							resource.TestCheckResourceAttr(addr, "version", "17"),
+							testAccCheckDatabaseVersionRequests(mock, "18", "17"),
+						),
+					},
+				},
+			})
+		})
+	}
+}
+
+// TestAccDatabaseResource_MajorUpgradeApplyAgainWaits: after an apply times
+// out on an upgrade that waits, an apply that only lengthens
+// `timeouts.update` still waits for it, as the docs say.
+func TestAccDatabaseResource_MajorUpgradeApplyAgainWaits(t *testing.T) {
+	shrinkPollInterval(t)
+	const addr = "kupe_database.test"
+	mock := newMockKupeAPI()
+	defer mock.close()
+	mock.majorUpgrades, mock.upgradeOutcome = true, mockUpgradeWaiting
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		CheckDestroy:             testAccCheckNoDatabases(mock),
+		Steps: []resource.TestStep{
+			{Config: testAccDatabaseConfig(mock.url(), upgradeDB("17", ""))},
+			{
+				Config:      testAccDatabaseConfig(mock.url(), upgradeDB("18", "1s")),
+				ExpectError: regexp.MustCompile(`database update timed out`),
+			},
+			{
+				// The upgrade finishes while the second apply waits.
+				PreConfig: func() {
+					go func() {
+						time.Sleep(500 * time.Millisecond)
+						mock.setState(func(m *mockKupeAPI) {
+							m.databaseStatuses = []map[string]any{{
+								"phase": "Running", "currentVersion": "18.1",
+								"conditions": []any{
+									map[string]any{"type": "Ready", "status": "True", "reason": "Healthy"},
+									map[string]any{"type": "UpgradeInProgress", "status": "False", "reason": "UpgradeSucceeded"},
+								},
+							}}
+						})
+					}()
+				},
+				Config: testAccDatabaseConfig(mock.url(), upgradeDB("18", "2m")),
+				ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+					plancheck.ExpectResourceAction(addr, plancheck.ResourceActionUpdate),
+				}},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(addr, "current_version", "18.1"),
+					testAccCheckDatabaseVersionRequests(mock, "18"),
+				),
+			},
+		},
+	})
+}
+
+// TestAccDatabaseResource_MajorUpgradeCancelAfterSuccess: in the window after
+// a successful upgrade, before currentVersion moves, an operator before the
+// cancel fix would read the old major as a cancel and undo the upgrade. The
+// provider checks the database first and refuses; nothing is sent.
+func TestAccDatabaseResource_MajorUpgradeCancelAfterSuccess(t *testing.T) {
+	shrinkPollInterval(t)
+	mock := newMockKupeAPI()
+	defer mock.close()
+	mock.majorUpgrades, mock.upgradeOutcome = true, mockUpgradeLag
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		CheckDestroy:             testAccCheckNoDatabases(mock),
+		Steps: []resource.TestStep{
+			{Config: testAccDatabaseConfig(mock.url(), upgradeDB("17", ""))},
+			{
+				// currentVersion has not moved yet: the wait goes on.
+				Config:      testAccDatabaseConfig(mock.url(), upgradeDB("18", "1s")),
+				ExpectError: regexp.MustCompile(`database update timed out`),
+			},
+			{
+				Config: testAccDatabaseConfig(mock.url(), upgradeDB("17", "1s")),
+				ExpectError: regexp.MustCompile(`(?s)database upgrade has finished.*` +
+					wrappedText(`The upgrade of database "orders-db" has finished, so there is nothing to cancel and nothing was sent.`)),
+			},
+			{
+				Config: testAccDatabaseConfig(mock.url(), upgradeDB("18", "1s")),
+				Check:  testAccCheckDatabaseVersionRequests(mock, "18"),
+			},
+		},
+	})
+}
+
+// TestAccDatabaseResource_MajorUpgradeCancelNotObserved: a cancel is not sent
+// while the platform has not applied the last change yet.
+func TestAccDatabaseResource_MajorUpgradeCancelNotObserved(t *testing.T) {
+	shrinkPollInterval(t)
+	mock := newMockKupeAPI()
+	defer mock.close()
+	mock.majorUpgrades, mock.upgradeOutcome = true, mockUpgradeWaiting
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		CheckDestroy:             testAccCheckNoDatabases(mock),
+		Steps: []resource.TestStep{
+			{Config: testAccDatabaseConfig(mock.url(), upgradeDB("17", ""))},
+			{
+				Config:      testAccDatabaseConfig(mock.url(), upgradeDB("18", "1s")),
+				ExpectError: regexp.MustCompile(`database update timed out`),
+			},
+			{
+				PreConfig: func() {
+					mock.setState(func(m *mockKupeAPI) {
+						m.databaseStatuses = []map[string]any{mockUpgradeStatus("Running", "UpgradeWaiting", "UpgradeWaiting", "w", "17.0", true)}
+						m.databaseStatuses[0]["observedGeneration"] = 0
+					})
+				},
+				Config: testAccDatabaseConfig(mock.url(), upgradeDB("17", "1s")),
+				ExpectError: regexp.MustCompile(`(?s)database has not applied its last change yet.*` +
+					wrappedText("Try again in a moment")),
+			},
+			{
+				PreConfig: func() { mock.setState(func(m *mockKupeAPI) { m.databaseStatuses = nil }) },
+				Config:    testAccDatabaseConfig(mock.url(), upgradeDB("18", "1s")),
+				PlanOnly:  true,
+			},
+		},
+	})
+}
+
+// TestAccDatabaseResource_MajorUpgradeCancelWithResize: the webhook refuses
+// a cancel sent with a resize (it is read as a plain downgrade); the mock
+// refuses it too, so no test can rely on it being admitted.
+func TestAccDatabaseResource_MajorUpgradeCancelWithResize(t *testing.T) {
+	shrinkPollInterval(t)
+	mock := newMockKupeAPI()
+	defer mock.close()
+	mock.majorUpgrades, mock.upgradeOutcome = true, mockUpgradeRolledBack
+
+	resized := upgradeDB("17", "")
+	resized.cpu = "1"
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		CheckDestroy:             testAccCheckNoDatabases(mock),
+		Steps: []resource.TestStep{
+			{Config: testAccDatabaseConfig(mock.url(), upgradeDB("17", ""))},
+			{
+				Config:      testAccDatabaseConfig(mock.url(), upgradeDB("18", "")),
+				ExpectError: regexp.MustCompile(`database upgrade did not complete`),
+			},
+			{
+				Config:      testAccDatabaseConfig(mock.url(), resized),
+				ExpectError: regexp.MustCompile(`postgres version downgrades are not supported`),
+			},
+			{Config: testAccDatabaseConfig(mock.url(), upgradeDB("17", ""))},
+		},
+	})
+}
+
 func TestMajorOf(t *testing.T) {
 	tests := []struct {
 		in     string
@@ -532,5 +734,157 @@ func TestDatabaseUpgradeNotice(t *testing.T) {
 	}
 	if _, detail := databaseUpgradeNotice(&upgrading); regexp.MustCompile("To cancel").MatchString(detail) {
 		t.Errorf("an upgrade that is running offers a cancel: %q", detail)
+	}
+}
+
+// withCondition adds a condition to db's status.
+func withCondition(db client.Database, typ, status, reason, message string) client.Database {
+	db.Status.Conditions = append(append([]client.Condition{}, db.Status.Conditions...),
+		client.Condition{Type: typ, Status: status, Reason: reason, Message: message})
+	return db
+}
+
+// TestUpgradeHold: the hold verdicts, and the states that must not end an
+// apply, among them a stale VersionUnsupported of an earlier hold.
+func TestUpgradeHold(t *testing.T) {
+	unsupported := func(db client.Database) client.Database {
+		return withCondition(db, "VersionUnsupported", "True", "MajorChangeUnsupported", "major 18 is not offered")
+	}
+	tests := []struct {
+		name string
+		db   client.Database
+		want string
+	}{
+		{"Ready False UpgradeSwitchedOff", upgradeDatabase("18", "17.6", "Running", "False", "UpgradeSwitchedOff", "False", "UpgradeSwitchedOff", 3), holdSwitchedOff},
+		{"older operator: Ready True, VersionUnsupported, no upgrade recorded", unsupported(upgradeDatabase("18", "17.6", "Running", "True", "Healthy", "False", "NoUpgrade", 3)), holdSwitchedOff},
+		{"older operator: no UpgradeInProgress at all", unsupported(upgradeDatabase("18", "17.6", "Running", "True", "Healthy", "", "", 3)), holdSwitchedOff},
+		{"older operator: stale UpgradeWaiting", unsupported(upgradeDatabase("18", "17.6", "Running", "True", "Healthy", "True", "UpgradeWaiting", 3)), holdSwitchedOff},
+		{"older operator: stale UpgradeSucceeded", unsupported(upgradeDatabase("18", "17.6", "Running", "True", "Healthy", "False", "UpgradeSucceeded", 3)), holdSwitchedOff},
+		{"older operator: Degraded", unsupported(upgradeDatabase("18", "17.6", "Degraded", "False", "NotHealthy", "", "", 3)), holdSwitchedOff},
+		{"rolled back", upgradeDatabase("18", "17.6", "Running", "False", "UpgradeRolledBack", "False", "UpgradeRolledBack", 3), holdRolledBack},
+		{"failed", upgradeDatabase("18", "17.6", "Degraded", "False", "UpgradeFailed", "False", "UpgradeFailed", 3), holdFailed},
+
+		{"stale VersionUnsupported while Upgrading", unsupported(upgradeDatabase("18", "17.6", "Upgrading", "False", "Upgrading", "True", "Upgrading", 3)), ""},
+		{"stale VersionUnsupported, phase Upgrading, Ready True", unsupported(upgradeDatabase("18", "17.6", "Upgrading", "True", "Healthy", "", "", 3)), ""},
+		{"stale VersionUnsupported during the backup", unsupported(upgradeDatabase("18", "17.6", "Running", "False", "PreUpgradeBackup", "True", "PreUpgradeBackup", 3)), ""},
+		{"stale VersionUnsupported while waiting", unsupported(upgradeDatabase("18", "17.6", "Running", "False", "UpgradeWaiting", "True", "UpgradeWaiting", 3)), ""},
+		{"stale VersionUnsupported, already on the target", unsupported(upgradeDatabase("18", "18.1", "Running", "True", "Healthy", "False", "UpgradeSucceeded", 3)), ""},
+		{"VersionUnsupported before the platform saw the change", unsupported(upgradeDatabase("18", "17.6", "Running", "True", "Healthy", "", "", 2)), ""},
+		{"switched off before the platform saw the change", upgradeDatabase("18", "17.6", "Running", "False", "UpgradeSwitchedOff", "False", "UpgradeSwitchedOff", 2), ""},
+		{"spec set back to the running major", unsupported(upgradeDatabase("17", "17.6", "Running", "True", "Healthy", "", "", 3)), ""},
+		{"no running version reported", unsupported(upgradeDatabase("18", "", "Running", "True", "Healthy", "", "", 3)), ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := upgradeHold(&tt.db); got != tt.want {
+				t.Errorf("upgradeHold() = %q, want %q", got, tt.want)
+			}
+			grace, failed := databaseKind.ready.failed(&tt.db)
+			if tt.want != "" && (!failed || grace != 0) {
+				t.Errorf("failed() = %v, %v; a hold ends the wait at once", grace, failed)
+			}
+			if tt.want == "" && failed && databasePhase(&tt.db) != "Degraded" && databasePhase(&tt.db) != "Terminating" {
+				t.Errorf("failed() ended the wait on %s", tt.name)
+			}
+		})
+	}
+}
+
+// TestDatabaseKindFailed_DegradedWhileUpgradeStarts: Degraded is progress
+// while the platform waits to start an upgrade or takes its backup, and gets
+// its grace otherwise.
+func TestDatabaseKindFailed_DegradedWhileUpgradeStarts(t *testing.T) {
+	waiting := upgradeDatabase("18", "17.6", "Degraded", "False", "UpgradeWaiting", "True", "UpgradeWaiting", 3)
+	backup := upgradeDatabase("18", "17.6", "Degraded", "False", "PreUpgradeBackup", "True", "PreUpgradeBackup", 3)
+	plain := upgradeDatabase("18", "17.6", "Degraded", "False", "NotHealthy", "True", "UpgradeWaiting", 3)
+	for name, tt := range map[string]struct {
+		db         client.Database
+		wantFailed bool
+	}{"waiting": {waiting, false}, "backup": {backup, false}, "degraded for its own reasons": {plain, true}} {
+		t.Run(name, func(t *testing.T) {
+			if _, failed := databaseKind.ready.failed(&tt.db); failed != tt.wantFailed {
+				t.Errorf("failed() = %v, want %v", failed, tt.wantFailed)
+			}
+		})
+	}
+}
+
+// TestHoldDetail: a switched-off hold says how to cancel and does not tell
+// the user to fix a cause or to wait longer.
+func TestHoldDetail(t *testing.T) {
+	db := withCondition(upgradeDatabase("18", "17.6", "Running", "True", "Healthy", "False", "NoUpgrade", 3),
+		"VersionUnsupported", "True", "MajorChangeUnsupported", "major 18 is not offered")
+	db.Name = "orders-db"
+	summary, detail := databaseUpgradeFailure(&db)
+	if summary != "database upgrade is on hold" {
+		t.Errorf("summary = %q", summary)
+	}
+	for _, want := range []string{"major 18 is not offered", "`version = \"17\"`", "stopped offering major upgrades"} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("detail %q lacks %q", detail, want)
+		}
+	}
+	for _, unwanted := range []string{"fix the cause", "timeouts", "wait longer"} {
+		if strings.Contains(detail, unwanted) {
+			t.Errorf("detail %q contains %q", detail, unwanted)
+		}
+	}
+	if s, d := databaseUpgradeNotice(&db); s != "database upgrade is on hold" || !strings.Contains(d, "`version = \"17\"`") {
+		t.Errorf("refresh notice = %q, %q", s, d)
+	}
+}
+
+// TestUpgradeNoticeResizeRefusal: resource and HA changes are refused from
+// the pre-upgrade backup on, not while the upgrade waits.
+func TestUpgradeNoticeResizeRefusal(t *testing.T) {
+	waiting := upgradeDatabase("18", "17.6", "Running", "False", "UpgradeWaiting", "True", "UpgradeWaiting", 3)
+	backup := upgradeDatabase("18", "17.6", "Running", "False", "PreUpgradeBackup", "True", "PreUpgradeBackup", 3)
+	if _, d := databaseUpgradeNotice(&waiting); strings.Contains(d, "refused") {
+		t.Errorf("a waiting upgrade refuses nothing: %q", d)
+	}
+	if _, d := databaseUpgradeNotice(&backup); !strings.Contains(d, "Changes to resources and high availability are refused") {
+		t.Errorf("the backup refuses resizes: %q", d)
+	}
+}
+
+// TestCancelRefusal: what the provider checks before it sends a cancel.
+func TestCancelRefusal(t *testing.T) {
+	succeeded := func(obs int64) client.Database {
+		return upgradeDatabase("18", "17.6", "Running", "True", "Healthy", "False", "UpgradeSucceeded", obs)
+	}
+	tests := []struct {
+		name string
+		db   client.Database
+		want string // summary; "" when the cancel goes ahead
+	}{
+		{"after success, before currentVersion moved", succeeded(3), "database upgrade has finished"},
+		{"the change is not applied yet", upgradeDatabase("18", "17.6", "Running", "False", "UpgradeWaiting", "True", "UpgradeWaiting", 2), "database has not applied its last change yet"},
+		{"nothing recorded to cancel", upgradeDatabase("18", "17.6", "Running", "True", "Healthy", "", "", 3), "nothing to cancel"},
+		{"the stale hold of an earlier upgrade", withCondition(succeeded(3), "VersionUnsupported", "True", "MajorChangeUnsupported", "x"), ""},
+		{"Ready False UpgradeSwitchedOff", upgradeDatabase("18", "17.6", "Running", "False", "UpgradeSwitchedOff", "False", "UpgradeSwitchedOff", 3), ""},
+		{"UpgradeInProgress True UpgradeWaiting", upgradeDatabase("18", "17.6", "Running", "False", "x", "True", "UpgradeWaiting", 3), ""},
+		{"UpgradeInProgress True PreUpgradeBackup", upgradeDatabase("18", "17.6", "Running", "False", "x", "True", "PreUpgradeBackup", 3), ""},
+		{"Ready False UpgradeRolledBack", upgradeDatabase("18", "17.6", "Running", "False", "UpgradeRolledBack", "False", "UpgradeRolledBack", 3), ""},
+		{"Ready False UpgradeFailed", upgradeDatabase("18", "17.6", "Degraded", "False", "UpgradeFailed", "False", "UpgradeFailed", 3), ""},
+		{"Upgrading is the platform's to answer", upgradeDatabase("18", "17.6", "Upgrading", "False", "Upgrading", "True", "Upgrading", 3), ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if summary, _ := cancelRefusal(&tt.db); summary != tt.want {
+				t.Errorf("cancelRefusal() summary = %q, want %q", summary, tt.want)
+			}
+		})
+	}
+}
+
+func TestCancelsUpgrade(t *testing.T) {
+	db := upgradeDatabase("18", "17.6", "Running", "True", "Healthy", "", "", 3)
+	for planned, want := range map[string]bool{"17": true, "17.6": true, "18": false, "19": false, "16": false, "x": false} {
+		if got := cancelsUpgrade(planned, &db); got != want {
+			t.Errorf("cancelsUpgrade(%q) = %v, want %v", planned, got, want)
+		}
+	}
+	if cancelsUpgrade("17", &client.Database{Version: "18"}) {
+		t.Error("a database with no status has no running major to cancel to")
 	}
 }
