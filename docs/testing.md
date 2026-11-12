@@ -105,7 +105,7 @@ test/manual/
 ├── kupe_cluster.tf               # resource + data-source smoke
 ├── kupe_database.tf              # database + binding + data-source smoke
 ├── kupe_registry.tf              # registry + connection + token + data-source smoke
-├── kupe_secret.tf                # resource
+├── kupe_secret.tf                # resource (own cluster unless TF_VAR_existing_cluster)
 ├── kupe_api_key.tf               # resource
 ├── kupe_tenant_member.tf         # resource
 ├── kupe_alertmanager_receiver.tf # resource
@@ -151,6 +151,11 @@ tofu apply -auto-approve
 
 # Or narrow to one resource — the `.smoke` label is consistent across every file
 tofu apply -target=kupe_cluster.smoke -auto-approve
+
+# kupe_secret syncs to its own smoke-secret-cluster by default, so the full run
+# needs two cluster slots. On a single-cluster tenant, point it at an existing
+# cluster and target it alone:
+TF_VAR_existing_cluster=<cluster-name> tofu apply -target=kupe_secret.smoke -auto-approve
 
 # When done
 tofu destroy -auto-approve

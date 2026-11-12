@@ -18,11 +18,13 @@
 # plan is empty only once values_wo and values_wo_version are removed from
 # config (imported state has no counter), as in the adoption note above.
 #
-# Cluster: by default the fixture creates its own cluster, so the tenant
-# needs room for one more. A starter tenant allows one cluster, and the plan
-# refuses a second (400 plan_limit_reached). There, set existing_cluster to
-# the name of a cluster the tenant already has, for example
+# Cluster: with existing_cluster unset the fixture creates its own
+# smoke-secret-cluster, so a full apply needs two cluster slots (this one and
+# kupe_cluster.smoke). A starter tenant allows one cluster and the plan refuses
+# a second (400 plan_limit_reached). There, set existing_cluster to the name of
+# a cluster the tenant already has and run only this fixture:
 #   export TF_VAR_existing_cluster=<cluster-name>
+#   tofu apply -target=kupe_secret.smoke
 # and no cluster is created or destroyed.
 
 variable "smoke_secret_values" {
