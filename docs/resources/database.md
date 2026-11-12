@@ -211,7 +211,7 @@ Grant access with [`kupe_database_binding`](database_binding.md). Each binding p
 
 ### Read-Only
 
-- `backup_size_bytes` (Number) Bytes every full backup and all WAL kept for the database take up in storage, manual backups included. 0 until measured.
+- `backup_size_bytes` (Number) Bytes the database's backups take up in storage, manual backups included. 0 until measured.
 - `created_at` (String) Timestamp when the database was created.
 - `current_version` (String) Full engine version running, e.g. `18.0`.
 - `etag` (String) Resource version used for optimistic locking during updates.

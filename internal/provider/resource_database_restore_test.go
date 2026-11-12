@@ -346,6 +346,18 @@ func TestAccDatabaseResource_RestoreRefusals(t *testing.T) {
 			wantErr: `(?s)Error code: restore_source_not_ready.*` + wrappedText("has not completed"),
 		},
 		{
+			name:    "a latest restore with no usable backup",
+			source:  `database = kupe_database.test.name`,
+			setup:   func(m *mockKupeAPI) { m.databaseRestoreNotReady = true },
+			wantErr: `(?s)Error code: restore_source_not_ready.*` + wrappedText("needs a usable backup"),
+		},
+		{
+			name:    "a point in time with no restore window",
+			source:  `database = kupe_database.test.name, point_in_time = "2026-10-20T00:00:00Z"`,
+			setup:   func(m *mockKupeAPI) { m.databaseRestoreNotReady = true },
+			wantErr: `(?s)Error code: restore_source_not_ready.*` + wrappedText("Leave `point_in_time` unset"),
+		},
+		{
 			name:    "backups off",
 			source:  `backup = kupe_database_backup.test.name`,
 			setup:   func(m *mockKupeAPI) { m.backupsUnavailable = true },

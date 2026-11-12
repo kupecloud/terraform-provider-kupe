@@ -220,6 +220,39 @@ func registryChildCreateErrorDetail(err error) string {
 	return apiErrorDetail(err)
 }
 
+// restoreNotReadyHint is the hint for a 409 restore_source_not_ready on the
+// create of a database. The source in the request decides the text, as the
+// operator's webhook decides the refusal, never the API's wording: a backup
+// that has not completed, a point in time with no restore window, or a latest
+// restore with no usable backup.
+func restoreNotReadyHint(src *client.DatabaseSource) string {
+	switch {
+	case src != nil && src.Backup != "":
+		return "The backup named in `source` has not completed, so nothing was created. Wait for it, then " +
+			"run `terraform apply` again."
+	case src != nil && src.PointInTime != "":
+		return "The database named in `source` has no restore window available yet, so it cannot be restored " +
+			"to a point in time and nothing was created. Leave `point_in_time` unset to restore to the latest " +
+			"point, or wait until a restore window is available, then run `terraform apply` again."
+	default:
+		return "Restoring the database named in `source` to its latest point needs a usable backup, and it has " +
+			"none yet, so nothing was created. This can take a few minutes after a backup completes. Try " +
+			"again shortly with `terraform apply`."
+	}
+}
+
+// databaseCreateErrorDetail is apiErrorDetail for the create of a database:
+// a restore_source_not_ready refusal gets the hint for the source the request
+// named (restoreNotReadyHint).
+func databaseCreateErrorDetail(err error, src *client.DatabaseSource) string {
+	var apiErr *client.APIError
+	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusConflict &&
+		apiErr.Code == client.CodeRestoreSourceNotReady {
+		return apiErrorSummary(apiErr) + "\n\n" + restoreNotReadyHint(src)
+	}
+	return apiErrorDetail(err)
+}
+
 // apiErrorSummary is the status, message and, when present, the canonical
 // error code and field path of an API error. The code is a stable identifier
 // users can quote to support or branch on.
@@ -430,20 +463,8 @@ func apiErrorDetail(err error) string {
 			return base + "\n\nThe registry holds as many access tokens as it can. Revoke one you no longer use " +
 				"(destroy its `kupe_registry_token`, or revoke it in the Kupe Console), then run `terraform apply` again."
 		case client.CodeRestoreSourceNotReady:
-			// One code, three reasons; the message tells them apart.
-			msg := strings.ToLower(apiErr.Message)
-			switch {
-			case strings.Contains(msg, "no usable backup"):
-				return base + "\n\nThe database named in `source` has no usable backup yet, so it cannot be " +
-					"restored to its latest point and nothing was created. Wait until it has a completed backup, " +
-					"then run `terraform apply` again."
-			case strings.Contains(msg, "no restore window"):
-				return base + "\n\nThe database named in `source` has no restore window yet, so it cannot be " +
-					"restored to a point in time and nothing was created. Wait until one is published, then run " +
-					"`terraform apply` again."
-			}
-			return base + "\n\nThe backup named in `source` has not completed, so nothing was created. Wait for " +
-				"it, then run `terraform apply` again."
+			return base + "\n\nThe source of the restore is not ready yet, so nothing was created. Wait a little, " +
+				"then run `terraform apply` again."
 		case client.CodeBackupLimitReached:
 			return base + "\n\nThe database already keeps 20 manual backups, the most it can, so no backup was " +
 				"taken. Delete one you no longer need, then run `terraform apply` again."

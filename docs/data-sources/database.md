@@ -32,7 +32,7 @@ output "orders_db_running_version" {
 ### Read-Only
 
 - `backup` (Attributes) Backup settings. Null when the database has never set them: it keeps the defaults, 7 days and `Daily`. (see [below for nested schema](#nestedatt--backup))
-- `backup_size_bytes` (Number) Bytes every full backup and all WAL kept for the database take up in storage, manual backups included. 0 until measured.
+- `backup_size_bytes` (Number) Bytes the database's backups take up in storage, manual backups included. 0 until measured.
 - `created_at` (String) Timestamp when the database was created.
 - `current_version` (String) Full engine version running, e.g. `18.0`.
 - `deletion_protection` (Boolean) Whether the Kupe platform refuses to delete the database.

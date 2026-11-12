@@ -254,6 +254,16 @@ func (m *mockKupeAPI) mockRestore(w http.ResponseWriter, body map[string]any) (s
 				fmt.Sprintf("database %q not found", database))
 			return "", nil, false
 		}
+		if m.databaseRestoreNotReady {
+			if _, set := stored["pointInTime"].(string); set {
+				mockError(w, http.StatusConflict, client.CodeRestoreSourceNotReady,
+					fmt.Sprintf("database %q has no restore window yet", database))
+			} else {
+				mockError(w, http.StatusConflict, client.CodeRestoreSourceNotReady,
+					fmt.Sprintf("database %q has no usable backup yet", database))
+			}
+			return "", nil, false
+		}
 		if at, set := stored["pointInTime"].(string); set && (at < mockRecoveryWindowEarliest || at > mockRecoveryWindowLatest) {
 			mockFieldError(w, http.StatusBadRequest, client.CodeRestorePointOutsideWindow, "spec.source.pointInTime",
 				fmt.Sprintf("%s is outside the restore window of database %q", at, database))
