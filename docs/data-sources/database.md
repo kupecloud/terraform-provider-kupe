@@ -32,7 +32,7 @@ output "orders_db_running_version" {
 ### Read-Only
 
 - `backup` (Attributes) Backup settings. Null when the database has never set them: it keeps the defaults, 7 days and `Daily`. (see [below for nested schema](#nestedatt--backup))
-- `backup_size_bytes` (Number) Bytes every full backup and all WAL kept for the database take up in storage, manual backups included. 0 until measured.
+- `backup_size_bytes` (Number) Bytes the database's backups take up in storage, manual backups included. 0 until measured.
 - `created_at` (String) Timestamp when the database was created.
 - `current_version` (String) Full engine version running, e.g. `18.0`.
 - `deletion_protection` (Boolean) Whether the Kupe platform refuses to delete the database.
@@ -41,7 +41,7 @@ output "orders_db_running_version" {
 - `last_backup_at` (String) When the newest full backup finished (RFC 3339). Empty until the first backup completes.
 - `phase` (String) Current phase: Pending, Provisioning, Running, Degraded or Terminating.
 - `postgres` (Attributes) PostgreSQL databases, declared roles, extensions and the connection pooler returned by the database. (see [below for nested schema](#nestedatt--postgres))
-- `recovery_window` (Attributes) The restore window: the oldest and newest points you can restore the database to. Null until the backups report them. (see [below for nested schema](#nestedatt--recovery_window))
+- `recovery_window` (Attributes) The restore window: the oldest and newest points you can restore the database to. Null until a restore window is published; restoring to the latest point does not need it. (see [below for nested schema](#nestedatt--recovery_window))
 - `resources` (Attributes) Per-instance resources. (see [below for nested schema](#nestedatt--resources))
 - `source` (Attributes) What the database was restored from. Null for a database that was not restored. (see [below for nested schema](#nestedatt--source))
 - `version` (String) Requested engine major version, e.g. `18`.
@@ -115,7 +115,7 @@ Read-Only:
 Read-Only:
 
 - `earliest` (String) The oldest point you can restore to (RFC 3339).
-- `latest` (String) The newest point you can restore to: the newest WAL saved (RFC 3339).
+- `latest` (String) The newest point you can restore to: the newest point the backups can reach (RFC 3339).
 
 
 <a id="nestedatt--resources"></a>

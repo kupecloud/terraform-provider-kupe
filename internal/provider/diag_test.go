@@ -367,12 +367,12 @@ func TestAPIErrorDetail(t *testing.T) {
 			wantSubstr: []string{"at least the storage its source had", "`source_storage`"},
 		},
 		{
-			name: "409 restore_source_not_ready says to wait",
+			name: "409 restore_source_not_ready without a source says to wait",
 			err: &client.APIError{
 				StatusCode: http.StatusConflict, Code: client.CodeRestoreSourceNotReady,
 				Message: "the backup has not completed",
 			},
-			wantSubstr:   []string{"has not completed", "Wait for it"},
+			wantSubstr:   []string{"has not completed", "not ready yet", "Wait a little"},
 			wantNoSubstr: []string{"already exists on the tenant"},
 		},
 		{
@@ -763,4 +763,75 @@ func TestAPIErrorDetailRateLimitRetryAfter(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDatabaseCreateErrorDetail_RestoreNotReady(t *testing.T) {
+	notReady := func(msg string) error {
+		return &client.APIError{StatusCode: http.StatusConflict, Code: client.CodeRestoreSourceNotReady, Message: msg}
+	}
+	tests := []struct {
+		name         string
+		err          error
+		src          *client.DatabaseSource
+		wantSubstr   []string
+		wantNoSubstr []string
+	}{
+		{
+			name:         "a backup source has not completed",
+			err:          notReady(`backup "nightly" has not completed`),
+			src:          &client.DatabaseSource{Backup: "nightly"},
+			wantSubstr:   []string{"has not completed", "The backup named in `source`"},
+			wantNoSubstr: []string{"restore window", "usable backup"},
+		},
+		{
+			name:         "a point in time with no window",
+			err:          notReady(`database "orders" has no restore window yet`),
+			src:          &client.DatabaseSource{Database: "orders", PointInTime: "2026-10-30T09:00:00Z"},
+			wantSubstr:   []string{"no restore window available yet", "Leave `point_in_time` unset", "latest point"},
+			wantNoSubstr: []string{"usable backup", "backup named in"},
+		},
+		{
+			name:         "a latest restore with no usable backup",
+			err:          notReady(`database "orders" has no usable backup yet`),
+			src:          &client.DatabaseSource{Database: "orders"},
+			wantSubstr:   []string{"needs a usable backup", "a few minutes after a backup completes", "Try again shortly"},
+			wantNoSubstr: []string{"restore window", "backup named in"},
+		},
+		{
+			name:         "a database source with reworded text still gets the database hint",
+			err:          notReady("the source is not ready"),
+			src:          &client.DatabaseSource{Database: "orders"},
+			wantSubstr:   []string{"needs a usable backup"},
+			wantNoSubstr: []string{"backup named in", "has not completed"},
+		},
+		{
+			name:         "the message is never the key",
+			err:          notReady(`backup "x" has not completed`),
+			src:          &client.DatabaseSource{Database: "orders", PointInTime: "2026-10-30T09:00:00Z"},
+			wantSubstr:   []string{"no restore window available yet"},
+			wantNoSubstr: []string{"backup named in"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := databaseCreateErrorDetail(tt.err, tt.src)
+			for _, want := range tt.wantSubstr {
+				if !strings.Contains(got, want) {
+					t.Errorf("detail missing %q:\n%s", want, got)
+				}
+			}
+			for _, no := range tt.wantNoSubstr {
+				if strings.Contains(got, no) {
+					t.Errorf("detail should not contain %q:\n%s", no, got)
+				}
+			}
+		})
+	}
+
+	t.Run("other errors keep the generic detail", func(t *testing.T) {
+		err := &client.APIError{StatusCode: http.StatusConflict, Message: "exists"}
+		if got, want := databaseCreateErrorDetail(err, nil), apiErrorDetail(err); got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
 }

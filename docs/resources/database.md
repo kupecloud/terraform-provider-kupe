@@ -119,7 +119,7 @@ Once backups are available, Kupe takes a full backup of every database each day 
 
 A change applies in place, and `terraform apply` waits for the database to take it, as it does for a resize. Fields you leave out keep their current value, and removing `backup` keeps the current settings: to go back to the defaults, set them.
 
-`last_backup_at`, `recovery_window` and `backup_size_bytes` report the newest full backup, the restore window (the oldest and newest points you can restore to), and the storage the backups take up. The `kupe_database` data source returns the same values.
+`last_backup_at`, `recovery_window` and `backup_size_bytes` report the newest full backup, the restore window (the oldest and newest points you can restore to), and the storage the backups take up. `recovery_window` is null until a restore window is published. The `kupe_database` data source returns the same values.
 
 ### Restoring from a backup or another database
 
@@ -211,13 +211,13 @@ Grant access with [`kupe_database_binding`](database_binding.md). Each binding p
 
 ### Read-Only
 
-- `backup_size_bytes` (Number) Bytes every full backup and all WAL kept for the database take up in storage, manual backups included. 0 until measured.
+- `backup_size_bytes` (Number) Bytes the database's backups take up in storage, manual backups included. 0 until measured.
 - `created_at` (String) Timestamp when the database was created.
 - `current_version` (String) Full engine version running, e.g. `18.0`.
 - `etag` (String) Resource version used for optimistic locking during updates.
 - `last_backup_at` (String) When the newest full backup finished (RFC 3339). Empty until the first backup completes.
 - `phase` (String) Current phase: Pending, Provisioning, Running, Degraded or Terminating.
-- `recovery_window` (Attributes) The restore window: the oldest and newest points you can restore the database to. Null until the backups report them. (see [below for nested schema](#nestedatt--recovery_window))
+- `recovery_window` (Attributes) The restore window: the oldest and newest points you can restore the database to. Null until a restore window is published; restoring to the latest point does not need it. (see [below for nested schema](#nestedatt--recovery_window))
 
 <a id="nestedatt--resources"></a>
 ### Nested Schema for `resources`
@@ -321,7 +321,7 @@ Optional:
 Read-Only:
 
 - `earliest` (String) The oldest point you can restore to (RFC 3339).
-- `latest` (String) The newest point you can restore to: the newest WAL saved (RFC 3339).
+- `latest` (String) The newest point you can restore to: the newest point the backups can reach (RFC 3339).
 
 ## Import
 

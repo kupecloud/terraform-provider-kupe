@@ -71,7 +71,8 @@ const (
 	// a restore names does not exist.
 	CodeRestoreSourceNotFound = "restore_source_not_found"
 	// CodeRestoreSourceNotReady comes with a 409 when a restore's backup has
-	// not completed or its database has no restore window yet.
+	// not completed, its database has no restore window yet (a point in time)
+	// or has no usable backup yet (the latest point).
 	CodeRestoreSourceNotReady = "restore_source_not_ready"
 	// CodeRestorePointOutsideWindow comes with a 400 when a restore's point
 	// in time is outside the source database's restore window.

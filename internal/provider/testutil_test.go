@@ -63,6 +63,10 @@ type mockKupeAPI struct {
 	// backups: a database create or PATCH that sets backup is refused, and a
 	// database created meanwhile has no backup settings.
 	backupsUnavailable bool
+	// databaseRestoreNotReady makes a restore from a database answer with
+	// the operator's refusal: no usable backup (latest) or no restore window
+	// (point in time).
+	databaseRestoreNotReady bool
 	// databaseRequests records each database POST and PATCH body the routes
 	// decoded.
 	databaseRequests []mockRequest

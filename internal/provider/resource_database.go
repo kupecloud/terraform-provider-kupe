@@ -81,11 +81,11 @@ const (
 	lastBackupAtDescription = "When the newest full backup finished (RFC 3339). Empty until the first backup " +
 		"completes."
 	recoveryWindowDescription = "The restore window: the oldest and newest points you can restore the database " +
-		"to. Null until the backups report them."
+		"to. Null until a restore window is published; restoring to the latest point does not need it."
 	recoveryWindowEarliestDescription = "The oldest point you can restore to (RFC 3339)."
-	recoveryWindowLatestDescription   = "The newest point you can restore to: the newest WAL saved (RFC 3339)."
-	backupSizeBytesDescription        = "Bytes every full backup and all WAL kept for the database take up in " +
-		"storage, manual backups included. 0 until measured."
+	recoveryWindowLatestDescription   = "The newest point you can restore to: the newest point the backups can reach (RFC 3339)."
+	backupSizeBytesDescription        = "Bytes the database's backups take up in storage, manual backups " +
+		"included. 0 until measured."
 )
 
 // Descriptions of the `source` attributes.
@@ -476,6 +476,7 @@ func (r *DatabaseResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 	deletionProtection := plan.DeletionProtection.ValueBool()
+	source := sourceOnCreate(plan.Source)
 	db, etag, err := r.client.CreateDatabase(ctx, client.CreateDatabaseRequest{
 		Postgres:           postgresChanges(plan.Postgres, types.ObjectNull(databasePostgresAttrTypes)),
 		Name:               plan.Name.ValueString(),
@@ -485,10 +486,10 @@ func (r *DatabaseResource) Create(ctx context.Context, req resource.CreateReques
 		HighAvailability:   plan.HighAvailability.ValueBool(),
 		DeletionProtection: &deletionProtection,
 		Backup:             backupOnCreate(plan.Backup),
-		Source:             sourceOnCreate(plan.Source),
+		Source:             source,
 	})
 	if err != nil {
-		resp.Diagnostics.AddError("failed to create database", apiErrorDetail(err))
+		resp.Diagnostics.AddError("failed to create database", databaseCreateErrorDetail(err, source))
 		return
 	}
 	r.created(ctx, db, etag, &plan, &resp.State, &resp.Diagnostics)
