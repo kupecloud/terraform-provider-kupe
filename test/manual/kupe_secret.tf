@@ -14,13 +14,47 @@
 # reaches Synced before apply returns. Remove keys to deliver the whole entry.
 # Remove the sync target and apply: wait for Withdrawing to disappear; the
 # cluster copy goes shortly after. Destroy keeps the stored Vault values.
-# Import by name and check a subsequent plan is empty with the same keys.
+# Import by name and check a subsequent plan is empty with the same keys. The
+# plan is empty only once values_wo and values_wo_version are removed from
+# config (imported state has no counter), as in the adoption note above.
+#
+# Cluster: by default the fixture creates its own cluster, so the tenant
+# needs room for one more. A starter tenant allows one cluster, and the plan
+# refuses a second (400 plan_limit_reached). There, set existing_cluster to
+# the name of a cluster the tenant already has, for example
+#   export TF_VAR_existing_cluster=<cluster-name>
+# and no cluster is created or destroyed.
 
 variable "smoke_secret_values" {
   description = "Complete non-production smoke values, with username and password keys."
   type        = map(string)
   sensitive   = true
   ephemeral   = true
+}
+
+variable "existing_cluster" {
+  description = "Name of an existing cluster to sync to. Empty creates a cluster for this fixture."
+  type        = string
+  default     = ""
+}
+
+# Created only when existing_cluster is unset, so a single-cluster tenant can
+# run the fixture against the cluster it already has.
+resource "kupe_cluster" "secret_smoke" {
+  count = var.existing_cluster == "" ? 1 : 0
+
+  name    = "smoke-secret-cluster"
+  version = "1.35"
+
+  resources = {
+    cpu     = "2"
+    memory  = "4Gi"
+    storage = "20Gi"
+  }
+}
+
+locals {
+  secret_smoke_cluster = var.existing_cluster != "" ? var.existing_cluster : kupe_cluster.secret_smoke[0].name
 }
 
 resource "kupe_secret" "smoke" {
@@ -32,7 +66,7 @@ resource "kupe_secret" "smoke" {
 
   sync = [
     {
-      cluster   = kupe_cluster.smoke.name
+      cluster   = local.secret_smoke_cluster
       namespace = "default"
       keys      = ["username", "password"]
     },
