@@ -430,8 +430,20 @@ func apiErrorDetail(err error) string {
 			return base + "\n\nThe registry holds as many access tokens as it can. Revoke one you no longer use " +
 				"(destroy its `kupe_registry_token`, or revoke it in the Kupe Console), then run `terraform apply` again."
 		case client.CodeRestoreSourceNotReady:
-			return base + "\n\nThe backup named in `source` has not completed, or the database named in `source` " +
-				"has no restore window yet, so nothing was created. Wait for it, then run `terraform apply` again."
+			// One code, three reasons; the message tells them apart.
+			msg := strings.ToLower(apiErr.Message)
+			switch {
+			case strings.Contains(msg, "no usable backup"):
+				return base + "\n\nThe database named in `source` has no usable backup yet, so it cannot be " +
+					"restored to its latest point and nothing was created. Wait until it has a completed backup, " +
+					"then run `terraform apply` again."
+			case strings.Contains(msg, "no restore window"):
+				return base + "\n\nThe database named in `source` has no restore window yet, so it cannot be " +
+					"restored to a point in time and nothing was created. Wait until one is published, then run " +
+					"`terraform apply` again."
+			}
+			return base + "\n\nThe backup named in `source` has not completed, so nothing was created. Wait for " +
+				"it, then run `terraform apply` again."
 		case client.CodeBackupLimitReached:
 			return base + "\n\nThe database already keeps 20 manual backups, the most it can, so no backup was " +
 				"taken. Delete one you no longer need, then run `terraform apply` again."

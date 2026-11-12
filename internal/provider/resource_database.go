@@ -81,9 +81,9 @@ const (
 	lastBackupAtDescription = "When the newest full backup finished (RFC 3339). Empty until the first backup " +
 		"completes."
 	recoveryWindowDescription = "The restore window: the oldest and newest points you can restore the database " +
-		"to. Null until the backups report them."
+		"to. Null until a restore window is published; restoring to the latest point does not need it."
 	recoveryWindowEarliestDescription = "The oldest point you can restore to (RFC 3339)."
-	recoveryWindowLatestDescription   = "The newest point you can restore to: the newest WAL saved (RFC 3339)."
+	recoveryWindowLatestDescription   = "The newest point you can restore to: the newest point the backups can reach (RFC 3339)."
 	backupSizeBytesDescription        = "Bytes every full backup and all WAL kept for the database take up in " +
 		"storage, manual backups included. 0 until measured."
 )

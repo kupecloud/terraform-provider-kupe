@@ -376,6 +376,24 @@ func TestAPIErrorDetail(t *testing.T) {
 			wantNoSubstr: []string{"already exists on the tenant"},
 		},
 		{
+			name: "409 restore_source_not_ready with no usable backup names the latest restore",
+			err: &client.APIError{
+				StatusCode: http.StatusConflict, Code: client.CodeRestoreSourceNotReady,
+				Message: `database "orders" has no usable backup yet`,
+			},
+			wantSubstr:   []string{"no usable backup yet", "latest point", "completed backup"},
+			wantNoSubstr: []string{"no restore window", "already exists on the tenant"},
+		},
+		{
+			name: "409 restore_source_not_ready with no window names the point in time restore",
+			err: &client.APIError{
+				StatusCode: http.StatusConflict, Code: client.CodeRestoreSourceNotReady,
+				Message: `database "orders" has no restore window yet`,
+			},
+			wantSubstr:   []string{"no restore window yet", "point in time"},
+			wantNoSubstr: []string{"no usable backup", "already exists on the tenant"},
+		},
+		{
 			name: "409 backup_limit_reached says to delete one",
 			err: &client.APIError{
 				StatusCode: http.StatusConflict, Code: client.CodeBackupLimitReached,
