@@ -10,7 +10,7 @@ resource "kupe_cluster" "prod" {
 }
 
 # HA cluster: 3 replicas, chart-managed external etcd StatefulSet, hard
-# anti-affinity, encrypted etcd at rest. Adds an hourly charge; see
+# anti-affinity. Adds an hourly charge; see
 # your plan's HA rate.
 #
 # `high_availability` is create-time-only. Changing this attribute on an
