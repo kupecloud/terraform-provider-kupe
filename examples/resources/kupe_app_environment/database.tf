@@ -28,8 +28,9 @@ resource "kupe_app_environment" "orders" {
   }
 
   databases = [
-    # The URL of the first PostgreSQL database arrives in DATABASE_URL.
+    # Connects to orders_db, the first entry, and sets DATABASE_URL.
     { name = "main", database = kupe_database.orders.name },
+    # Connects to analytics and sets REPORTS_URL.
     { name = "reports", database = kupe_database.orders.name, logical_database = "analytics", env = "REPORTS_URL" },
   ]
 }

@@ -184,7 +184,7 @@ func validateAppDatabases(config *AppEnvironmentResourceModel, diags *diag.Diagn
 			}
 			names[name.ValueString()] = true
 			if !config.App.IsUnknown() && !config.Name.IsUnknown() && len("app-"+config.App.ValueString()+"-"+config.Name.ValueString()+"-"+name.ValueString()+"-migrate") > 63 {
-				diags.AddAttributeError(base.AtName("name"), "Connection name too long", "The app, environment and connection name together must fit in the 63-character name of the connection's database binding.")
+				diags.AddAttributeError(base.AtName("name"), "Connection name too long", "The app, environment and connection names together can be at most 49 characters, so that the connection's database binding name, app-<app>-<environment>-<connection>-migrate, fits in 63.")
 			}
 		}
 		if !env.IsUnknown() {
@@ -193,17 +193,17 @@ func validateAppDatabases(config *AppEnvironmentResourceModel, diags *diag.Diagn
 				variable = defaultAppDatabaseEnv
 			}
 			if webEnvKnown && webEnv[variable] {
-				diags.AddAttributeError(base.AtName("env"), "Variable already set", "This env name is already set in web.env. Choose another name for the connection.")
+				diags.AddAttributeError(base.AtName("env"), "Variable already set", "web.env already sets this variable. Choose another env for this connection.")
 			}
 			if envs[variable] {
-				diags.AddAttributeError(base.AtName("env"), "Duplicate variable", "Each connection needs its own env variable name.")
+				diags.AddAttributeError(base.AtName("env"), "Duplicate variable", "Another connection already sets this variable. Give each connection its own env.")
 			}
 			envs[variable] = true
 		}
 		if !database.IsUnknown() && !logical.IsUnknown() {
 			target := [2]string{database.ValueString(), logical.ValueString()}
 			if targets[target] {
-				diags.AddAttributeError(base.AtName("database"), "Duplicate database", "Each database can be connected once per environment.")
+				diags.AddAttributeError(base.AtName("database"), "Duplicate database", "Another connection already uses this database and logical_database. Connect each one once per environment.")
 			}
 			targets[target] = true
 		}
