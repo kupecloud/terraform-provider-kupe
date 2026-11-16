@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"maps"
 	"sort"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -17,6 +18,7 @@ type appWebModel struct {
 	Image        types.String `tfsdk:"image"`
 	Port         types.Int64  `tfsdk:"port"`
 	Replicas     types.Int64  `tfsdk:"replicas"`
+	Autoscaling  types.Object `tfsdk:"autoscaling"`
 	Resources    types.Object `tfsdk:"resources"`
 	Command      types.List   `tfsdk:"command"`
 	Args         types.List   `tfsdk:"args"`
@@ -71,6 +73,7 @@ func appEnvironmentSettings(ctx context.Context, m *AppEnvironmentResourceModel)
 	resources := web.Resources.Attributes()
 	out.Resources.Requests = appQuantitiesFromObject(resources["requests"].(types.Object))
 	out.Resources.Limits = appQuantitiesFromObject(resources["limits"].(types.Object))
+	out.Autoscaling = appAutoscalingFromObject(web.Autoscaling)
 	var env []appEnvModel
 	diags.Append(web.Env.ElementsAs(ctx, &env, false)...)
 	if diags.HasError() {
@@ -178,6 +181,30 @@ func appProbeToObject(probe *client.AppProbe) types.Object {
 	return types.ObjectValueMust(appProbeTypes, map[string]attr.Value{"tcp": tcp, "http": http})
 }
 
+// appAutoscalingFromObject is nil for a null block, so removing the block
+// sends "autoscaling": null and the API stops autoscaling.
+func appAutoscalingFromObject(object types.Object) *client.AppAutoscaling {
+	if object.IsNull() || object.IsUnknown() {
+		return nil
+	}
+	attrs := object.Attributes()
+	// #nosec G115 -- The schema validates min_pods and max_pods in 1..10 and cpu_percent in 10..100 before apply.
+	return &client.AppAutoscaling{MinPods: int32(attrs["min_pods"].(types.Int64).ValueInt64()), MaxPods: int32(attrs["max_pods"].(types.Int64).ValueInt64()), CPUPercent: int32(attrs["cpu_percent"].(types.Int64).ValueInt64())}
+}
+
+// appAutoscalingToObject is null when the response has no block. A response
+// without cpuPercent (stored before the CRD default) reads as the default.
+func appAutoscalingToObject(autoscaling *client.AppAutoscaling) types.Object {
+	if autoscaling == nil {
+		return types.ObjectNull(appAutoscalingTypes)
+	}
+	cpu := autoscaling.CPUPercent
+	if cpu == 0 {
+		cpu = appDefaultCPUPercent
+	}
+	return types.ObjectValueMust(appAutoscalingTypes, map[string]attr.Value{"min_pods": types.Int64Value(int64(autoscaling.MinPods)), "max_pods": types.Int64Value(int64(autoscaling.MaxPods)), "cpu_percent": types.Int64Value(int64(cpu))})
+}
+
 func appWebToObject(web *client.AppWeb) types.Object {
 	if web == nil {
 		return types.ObjectNull(appWebTypes)
@@ -202,8 +229,9 @@ func appWebToObject(web *client.AppWeb) types.Object {
 	}
 	return types.ObjectValueMust(appWebTypes, map[string]attr.Value{
 		"image": types.StringValue(web.Image), "port": types.Int64Value(int64(web.Port)), "replicas": types.Int64Value(int64(web.Replicas)),
-		"resources": types.ObjectValueMust(appResourcesTypes, map[string]attr.Value{"requests": appDefaultQuantities(web.Resources.Requests.CPU, web.Resources.Requests.Memory), "limits": appDefaultQuantities(web.Resources.Limits.CPU, web.Resources.Limits.Memory)}),
-		"command":   stringsList(web.Command), "args": stringsList(web.Args), "env": types.ListValueMust(types.ObjectType{AttrTypes: appEnvTypes}, env),
+		"autoscaling": appAutoscalingToObject(web.Autoscaling),
+		"resources":   types.ObjectValueMust(appResourcesTypes, map[string]attr.Value{"requests": appDefaultQuantities(web.Resources.Requests.CPU, web.Resources.Requests.Memory), "limits": appDefaultQuantities(web.Resources.Limits.CPU, web.Resources.Limits.Memory)}),
+		"command":     stringsList(web.Command), "args": stringsList(web.Args), "env": types.ListValueMust(types.ObjectType{AttrTypes: appEnvTypes}, env),
 		"health_checks": types.ObjectValueMust(appHealthTypes, map[string]attr.Value{"readiness": appProbeToObject(web.HealthChecks.Readiness), "liveness": appProbeToObject(web.HealthChecks.Liveness)}),
 	})
 }
@@ -271,7 +299,7 @@ func appEnvironmentPatch(ctx context.Context, plan, prior *AppEnvironmentResourc
 // an unused Vault path is a settings update, just like a domain change. Any
 // database connection change, env included, deploys.
 func appEnvironmentDeployingChange(plan, prior *AppEnvironmentResourceModel) bool {
-	if !plan.Web.Equal(prior.Web) || !plan.DeploymentRevision.Equal(prior.DeploymentRevision) || !plan.Databases.Equal(prior.Databases) {
+	if !appWebReleaseIdentity(plan.Web).Equal(appWebReleaseIdentity(prior.Web)) || !plan.DeploymentRevision.Equal(prior.DeploymentRevision) || !plan.Databases.Equal(prior.Databases) {
 		return true
 	}
 	if plan.Secrets.Equal(prior.Secrets) {
@@ -326,4 +354,27 @@ func appEnvironmentDeployingChange(plan, prior *AppEnvironmentResourceModel) boo
 		}
 	}
 	return false
+}
+
+// appWebReleaseIdentity is web as a release records it. Under autoscaling a
+// release records min_pods as its replicas (kupe-control-operator
+// CanonicalRuntime), so changing replicas alone starts no release and is a
+// settings update. An unknown min_pods keeps web as it is, which counts as a
+// deploying change.
+func appWebReleaseIdentity(web types.Object) types.Object {
+	if web.IsNull() || web.IsUnknown() {
+		return web
+	}
+	attrs := web.Attributes()
+	autoscaling, ok := attrs["autoscaling"].(types.Object)
+	if !ok || autoscaling.IsNull() || autoscaling.IsUnknown() {
+		return web
+	}
+	minPods := autoscaling.Attributes()["min_pods"]
+	if minPods == nil || minPods.IsUnknown() {
+		return web
+	}
+	identity := maps.Clone(attrs)
+	identity["replicas"] = minPods
+	return types.ObjectValueMust(appWebTypes, identity)
 }

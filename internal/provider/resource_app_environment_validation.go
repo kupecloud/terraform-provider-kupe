@@ -125,6 +125,7 @@ func (r *AppEnvironmentResource) ValidateConfig(ctx context.Context, req resourc
 			}
 		}
 	}
+	validateAppAutoscaling(web["autoscaling"].(types.Object), &resp.Diagnostics)
 	if resources := web["resources"].(types.Object); !resources.IsNull() && !resources.IsUnknown() {
 		requests, limits := resources.Attributes()["requests"].(types.Object), resources.Attributes()["limits"].(types.Object)
 		if requests.IsNull() || requests.IsUnknown() || limits.IsNull() || limits.IsUnknown() {
@@ -228,5 +229,21 @@ func rejectNullAppListEntries(list types.List, base path.Path, diags *diag.Diagn
 		if value.IsNull() {
 			diags.AddAttributeError(base.AtListIndex(i), "Invalid nested entry", "List entries must be non-null objects.")
 		}
+	}
+}
+
+// validateAppAutoscaling refuses a pod range the API refuses
+// (web.autoscaling: "minPods must be at most maxPods"); the bounds are the
+// schema's. Unknown values are skipped.
+func validateAppAutoscaling(autoscaling types.Object, diags *diag.Diagnostics) {
+	if autoscaling.IsNull() || autoscaling.IsUnknown() {
+		return
+	}
+	minPods, maxPods := autoscaling.Attributes()["min_pods"].(types.Int64), autoscaling.Attributes()["max_pods"].(types.Int64)
+	if minPods.IsNull() || minPods.IsUnknown() || maxPods.IsNull() || maxPods.IsUnknown() {
+		return
+	}
+	if minPods.ValueInt64() > maxPods.ValueInt64() {
+		diags.AddAttributeError(path.Root("web").AtName("autoscaling").AtName("min_pods"), "Invalid pod range", "min_pods must be at most max_pods.")
 	}
 }

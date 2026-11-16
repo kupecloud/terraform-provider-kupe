@@ -474,6 +474,10 @@ func appReleaseMatches(accepted *client.AppEnvironment, release *client.AppRelea
 		return false
 	}
 	expectedWeb, releaseWeb := *accepted.Web, release.Runtime.AppWeb
+	if expectedWeb.Autoscaling != nil {
+		// The release records min_pods as its replicas under autoscaling.
+		expectedWeb.Replicas = expectedWeb.Autoscaling.MinPods
+	}
 	normaliseAppQuantities(&expectedWeb.Resources)
 	normaliseAppQuantities(&releaseWeb.Resources)
 	if !appWebToObject(&expectedWeb).Equal(appWebToObject(&releaseWeb)) {

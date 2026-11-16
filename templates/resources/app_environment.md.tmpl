@@ -33,6 +33,22 @@ Increase `deployment_revision` by exactly one to retry. For example, after revis
 
 If another client changes the environment before its release can be identified, Create warns and Update errors: “the environment changed before its release could be identified; check its current state before deploying again”. This can also happen when the concurrent edit only changes domains or protection. The provider retains the accepted settings and sends no further deployment request during that apply. A later refresh can show another client’s settings; review the next plan before applying again. This outcome does not assert that the release was Superseded.
 
+## Autoscaling
+
+Set `web.autoscaling` to scale the pod count between `min_pods` and `max_pods`, each 1 to 10, on average CPU use. `cpu_percent` is the average CPU use, as a percentage of the CPU request, that autoscaling aims for; it defaults to 70. Autoscaling uses CPU only.
+
+```terraform
+web = {
+  image       = data.kupe_app_image.web.reference
+  port        = 8080
+  autoscaling = { min_pods = 2, max_pods = 6 }
+}
+```
+
+Changing `min_pods`, `max_pods` or `cpu_percent` deploys the app. Scaling between them does not, and the live pod count is not an attribute, so it never shows in a plan. While autoscaling is set, `replicas` is kept but not used, and changing it alone does not deploy. Remove the block and apply to stop autoscaling; the app then runs `replicas` pods.
+
+Pods are spread across nodes where the cluster allows, so draining a node takes as few of them as possible. There is no pod disruption budget.
+
 ## Vault references
 
 Each `secrets` entry points to a tenant Vault path. Write its values in the console Vault page. Environment variables reference its declared name and key. Secret values are never provider attributes. The API refuses removal of a secret entry while `web.env` still references it.

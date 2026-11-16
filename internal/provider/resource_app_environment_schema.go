@@ -70,13 +70,19 @@ var appDatabaseStatusTypes = map[string]attr.Type{"name": types.StringType, "pha
 var appHTTPTypes = map[string]attr.Type{"path": types.StringType}
 var appProbeTypes = map[string]attr.Type{"tcp": types.ObjectType{AttrTypes: map[string]attr.Type{}}, "http": types.ObjectType{AttrTypes: appHTTPTypes}}
 var appHealthTypes = map[string]attr.Type{"readiness": types.ObjectType{AttrTypes: appProbeTypes}, "liveness": types.ObjectType{AttrTypes: appProbeTypes}}
+var appAutoscalingTypes = map[string]attr.Type{"min_pods": types.Int64Type, "max_pods": types.Int64Type, "cpu_percent": types.Int64Type}
 var appWebTypes = map[string]attr.Type{
 	"image": types.StringType, "port": types.Int64Type, "replicas": types.Int64Type,
 	"resources": types.ObjectType{AttrTypes: appResourcesTypes},
 	"command":   types.ListType{ElemType: types.StringType}, "args": types.ListType{ElemType: types.StringType},
 	"env":           types.ListType{ElemType: types.ObjectType{AttrTypes: appEnvTypes}},
 	"health_checks": types.ObjectType{AttrTypes: appHealthTypes},
+	"autoscaling":   types.ObjectType{AttrTypes: appAutoscalingTypes},
 }
+
+// appDefaultCPUPercent is the autoscaling CPU target when cpu_percent is not
+// set; the API and the CRD default to the same value.
+const appDefaultCPUPercent = 70
 
 func appDefaultQuantities(cpu, memory string) types.Object {
 	return types.ObjectValueMust(appQuantityTypes, map[string]attr.Value{"cpu": types.StringValue(cpu), "memory": types.StringValue(memory)})
@@ -151,7 +157,7 @@ func appWebAttribute() schema.SingleNestedAttribute {
 	return schema.SingleNestedAttribute{Required: true, Description: "Complete runtime configuration. Images must be pinned by digest.", Attributes: map[string]schema.Attribute{
 		"image":     schema.StringAttribute{Required: true, Validators: []validator.String{appImageDigest{}}, Description: "Image including a registry host and sha256 digest."},
 		"port":      schema.Int64Attribute{Required: true, Validators: []validator.Int64{int64validator.Between(1, 65535)}, Description: "Container port."},
-		"replicas":  schema.Int64Attribute{Optional: true, Computed: true, Default: int64default.StaticInt64(1), Validators: []validator.Int64{int64validator.Between(1, 10)}, Description: "Replica count, 1 to 10."},
+		"replicas":  schema.Int64Attribute{Optional: true, Computed: true, Default: int64default.StaticInt64(1), Validators: []validator.Int64{int64validator.Between(1, 10)}, Description: "Number of pods, 1 to 10. Not used while autoscaling is set."},
 		"resources": schema.SingleNestedAttribute{Optional: true, Computed: true, Default: objectdefault.StaticValue(resources), Description: "Requests and limits.", Attributes: map[string]schema.Attribute{"requests": quantity("250m", "256Mi"), "limits": quantity("1", "512Mi")}},
 		"command":   stringsList("Entrypoint, at most 32 strings of 1024 bytes each."),
 		"args":      stringsList("Arguments, at most 32 strings of 1024 bytes each."),
@@ -165,6 +171,11 @@ func appWebAttribute() schema.SingleNestedAttribute {
 		}}},
 		"health_checks": schema.SingleNestedAttribute{Optional: true, Computed: true, Default: objectdefault.StaticValue(health), Description: "Readiness and optional liveness probes.", Attributes: map[string]schema.Attribute{
 			"readiness": appProbeAttribute(true), "liveness": appProbeAttribute(false),
+		}},
+		"autoscaling": schema.SingleNestedAttribute{Optional: true, Description: "Scale the pod count between min_pods and max_pods on average CPU use. Changing these values deploys; scaling between them does not. Remove the block to run replicas pods.", Attributes: map[string]schema.Attribute{
+			"min_pods":    schema.Int64Attribute{Required: true, Validators: []validator.Int64{int64validator.Between(1, 10)}, Description: "Fewest pods, 1 to 10."},
+			"max_pods":    schema.Int64Attribute{Required: true, Validators: []validator.Int64{int64validator.Between(1, 10)}, Description: "Most pods, 1 to 10."},
+			"cpu_percent": schema.Int64Attribute{Optional: true, Computed: true, Default: int64default.StaticInt64(appDefaultCPUPercent), Validators: []validator.Int64{int64validator.Between(10, 100)}, Description: "Average CPU use, as a percentage of the CPU request, that autoscaling aims for."},
 		}},
 	}}
 }

@@ -70,15 +70,28 @@ type AppResources struct {
 
 // AppWeb is sent in full on PATCH. In particular Env must encode [] when
 // cleared: omitting it from a merge patch would retain the previous list.
+// Autoscaling has no omitempty for the same reason: a removed block is sent
+// as null, which the API reads as "stop autoscaling".
 type AppWeb struct {
-	Image        string          `json:"image"`
-	Port         int32           `json:"port"`
-	Replicas     int32           `json:"replicas"`
+	Image    string `json:"image"`
+	Port     int32  `json:"port"`
+	Replicas int32  `json:"replicas"`
+	// While Autoscaling is set the API keeps Replicas but does not use it,
+	// and a release records MinPods as its replicas.
+	Autoscaling  *AppAutoscaling `json:"autoscaling"`
 	Resources    AppResources    `json:"resources"`
 	Command      []string        `json:"command"`
 	Args         []string        `json:"args"`
 	Env          []AppEnvVar     `json:"env"`
 	HealthChecks AppHealthChecks `json:"healthChecks"`
+}
+
+// AppAutoscaling scales the web pods between MinPods and MaxPods on average
+// CPU use, CPUPercent of the CPU request.
+type AppAutoscaling struct {
+	MinPods    int32 `json:"minPods"`
+	MaxPods    int32 `json:"maxPods"`
+	CPUPercent int32 `json:"cpuPercent"`
 }
 
 type AppEnvVar struct {

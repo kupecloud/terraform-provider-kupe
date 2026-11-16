@@ -180,7 +180,7 @@ func (m *mockKupeAPI) serveAppEnvironment(w http.ResponseWriter, r *http.Request
 			env.DeletionProtection = *patch.DeletionProtection
 		}
 		env.Generation++
-		if !reflect.DeepEqual(priorWeb, env.Web) || !reflect.DeepEqual(priorSecrets, mockReleaseSecrets(env.Web, env.Secrets)) || !reflect.DeepEqual(priorDatabases, env.Databases) {
+		if !reflect.DeepEqual(mockReleaseWeb(priorWeb), mockReleaseWeb(env.Web)) || !reflect.DeepEqual(priorSecrets, mockReleaseSecrets(env.Web, env.Secrets)) || !reflect.DeepEqual(priorDatabases, env.Databases) {
 			m.appMockRelease(key, env)
 		} else {
 			env.Status.ObservedGeneration = env.Generation
@@ -222,14 +222,7 @@ func (m *mockKupeAPI) appMockRelease(key string, env *client.AppEnvironment) {
 	if phase == "" {
 		phase = "Succeeded"
 	}
-	data, err := json.Marshal(env.Web)
-	if err != nil {
-		panic(err)
-	}
-	var web client.AppWeb
-	if err := json.Unmarshal(data, &web); err != nil {
-		panic(err)
-	}
+	web := mockReleaseWeb(env.Web)
 	release := client.AppRelease{Name: name, Number: number, DeploymentRevision: env.DeploymentRevision, Trigger: "Deploy", Runtime: client.AppReleaseRuntime{AppWeb: web, Secrets: []client.AppReleaseSecret{}}, Status: client.AppReleaseStatus{Phase: phase, Reason: "TestOutcome"}}
 	release.Runtime.Secrets = mockReleaseSecrets(env.Web, env.Secrets)
 	// The runtime is a map keyed by name, so it is not in configured order.
@@ -264,6 +257,27 @@ func (m *mockKupeAPI) appMockRelease(key string, env *client.AppEnvironment) {
 		env.Status.ActiveRelease = previous
 	}
 	m.appReleases[key] = append([]client.AppRelease{release}, m.appReleases[key]...)
+}
+
+// mockReleaseWeb is a deep copy of web as the operator records it in a
+// release: under autoscaling, replicas is minPods and a missing cpuPercent is
+// the default.
+func mockReleaseWeb(source *client.AppWeb) client.AppWeb {
+	data, err := json.Marshal(source)
+	if err != nil {
+		panic(err)
+	}
+	var web client.AppWeb
+	if err := json.Unmarshal(data, &web); err != nil {
+		panic(err)
+	}
+	if web.Autoscaling != nil {
+		if web.Autoscaling.CPUPercent == 0 {
+			web.Autoscaling.CPUPercent = appDefaultCPUPercent
+		}
+		web.Replicas = web.Autoscaling.MinPods
+	}
+	return web
 }
 
 // mockReleaseSecrets returns the secrets a release records: only those the
