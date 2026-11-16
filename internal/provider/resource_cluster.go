@@ -262,8 +262,8 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				},
 			},
 			"high_availability": schema.BoolAttribute{
-				Description: "Enable a 3-replica HA control plane with HA etcd (chart-managed external etcd StatefulSet), " +
-					"hard anti-affinity, and encrypted-at-rest etcd via a per-cluster AES-CBC key. " +
+				Description: "Enable a 3-replica HA control plane with HA etcd (chart-managed external etcd StatefulSet) " +
+					"and hard anti-affinity. " +
 					"Adds an hourly charge (see `data.kupe_plan` for the rate). When unset, a new cluster is created " +
 					"without HA and an existing or imported cluster keeps its current setting, so removing the " +
 					"attribute from configuration does not turn HA off.\n\n" +
