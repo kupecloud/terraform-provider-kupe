@@ -29,6 +29,9 @@ type mockAppEnvironmentState struct {
 	appEnvironmentDeleteLag        int
 	appEnvironmentDeleting         map[string]int
 	appEnvironmentHistoryHook      func(*client.AppEnvironment)
+	// appDatabasePhase is each connection's status phase after a release;
+	// empty means Ready.
+	appDatabasePhase string
 }
 
 func newMockAppEnvironmentState() mockAppEnvironmentState {
@@ -234,7 +237,11 @@ func (m *mockKupeAPI) appMockRelease(key string, env *client.AppEnvironment) {
 	sort.Slice(release.Runtime.Databases, func(i, j int) bool { return release.Runtime.Databases[i].Name > release.Runtime.Databases[j].Name })
 	env.Status.Databases = []client.AppDatabaseStatus{}
 	for _, conn := range env.Databases {
-		env.Status.Databases = append(env.Status.Databases, client.AppDatabaseStatus{Name: conn.Name, Env: conn.Env, Phase: "Ready", RuntimeSecret: conn.Name + "-app", MigrationSecret: conn.Name + "-migrate"})
+		databasePhase := m.appDatabasePhase
+		if databasePhase == "" {
+			databasePhase = "Ready"
+		}
+		env.Status.Databases = append(env.Status.Databases, client.AppDatabaseStatus{Name: conn.Name, Env: conn.Env, Phase: databasePhase, RuntimeSecret: conn.Name + "-app", MigrationSecret: conn.Name + "-migrate"})
 	}
 	ref := &client.AppReleaseRef{Name: name}
 	env.Status.RequestedRelease = ref

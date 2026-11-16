@@ -122,3 +122,52 @@ func typesTimeoutsNull(t *testing.T, sch resource.SchemaResponse) timeouts.Value
 	}
 	return value
 }
+
+// Another writer replaces the connections after the PATCH was accepted. The
+// wait reports it and keeps the accepted connections in state, never the
+// foreign ones, so the next plan shows the drift.
+func TestAppEnvironmentWaitKeepsAcceptedDatabasesAfterForeignChange(t *testing.T) {
+	shrinkPollInterval(t)
+	mock := newMockKupeAPI()
+	defer mock.close()
+	model := appTestEnvironmentModel()
+	model.Databases = appTestDatabases(appTestDatabase("main", "orders-db", "", "DATABASE_URL"))
+	web, secrets, databases, domains, d := appEnvironmentSettings(context.Background(), &model)
+	if d.HasError() {
+		t.Fatal(d)
+	}
+	env := &client.AppEnvironment{App: "shop", Environment: "production", Name: "shop-production", Cluster: "europe", UID: "original", Generation: 1, DeploymentRevision: 1, DeletionProtection: true, Web: web, Secrets: secrets, Databases: databases, Domains: domains, Status: &client.AppEnvironmentStatus{Namespace: "app-shop-production"}}
+	mock.apps["shop"] = map[string]any{"name": "shop"}
+	mock.appEnvironments["shop/production"] = env
+	mock.appEnvironmentOutcome = "Deploying"
+	mock.appMockRelease("shop/production", env)
+	accepted := *env
+	foreign := []client.AppDatabase{{Name: "main", Database: "orders-db", Env: "FOREIGN_URL"}, {Name: "extra", Database: "users-db", Env: "USERS_URL"}}
+	mock.appEnvironmentOnGet = []func(*client.AppEnvironment, *[]client.AppRelease){func(e *client.AppEnvironment, _ *[]client.AppRelease) {
+		e.Databases = foreign
+		e.Generation++
+		e.Status.ObservedGeneration = e.Generation
+	}}
+	r := NewAppEnvironmentResource().(*AppEnvironmentResource)
+	r.client = client.New(mock.url(), "acme", "test-token")
+	sch := testResourceSchema(t, r)
+	state := tfsdk.State{Schema: sch.Schema}
+	mapAppEnvironmentToState(&accepted, mockAppEnvironmentETag(&accepted), &model)
+	model.Timeouts = typesTimeoutsNull(t, sch)
+	if d := state.Set(context.Background(), &model); d.HasError() {
+		t.Fatal(d)
+	}
+	var diags diag.Diagnostics
+	r.waitAppEnvironment(context.Background(), 100*time.Millisecond, "update", &accepted, &model, true, &state, &diags)
+	if !diags.HasError() || !strings.Contains(diags.Errors()[0].Detail(), appReleaseUnidentified) {
+		t.Fatalf("foreign change was not reported: %v", diags)
+	}
+	want := appDatabasesToList(databases)
+	var recorded AppEnvironmentResourceModel
+	if d := state.Get(context.Background(), &recorded); d.HasError() {
+		t.Fatal(d)
+	}
+	if !model.Databases.Equal(want) || !recorded.Databases.Equal(want) {
+		t.Fatalf("state databases = %v, want the accepted %v", recorded.Databases, want)
+	}
+}
