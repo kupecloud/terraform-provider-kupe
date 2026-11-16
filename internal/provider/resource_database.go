@@ -2,8 +2,10 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
@@ -48,6 +50,30 @@ const databaseEngine = "postgres"
 // and diagnostics use the same words so the promise is stated once.
 const databaseDeleteNotice = "Deleting a database removes it and its automatic backups immediately, and they cannot be restored. " +
 	"Manual backups stay until you delete them."
+
+// connectedEnvironmentsLead starts the sentences kupe-api adds to a database's
+// deletion_protected refusal when App environments are connected to it
+// (kupe-api internal/server/handler_database.go, databaseDeleteCheck):
+// "It is connected to these App environments: shop/prod, blog/staging.
+// Deleting it leaves them without this database until you remove or replace
+// the connection."
+const connectedEnvironmentsLead = "It is connected to these App environments: "
+
+// connectedEnvironmentsSentences returns the API refusal's sentences naming
+// the connected App environments, or "" when it names none. Only those are
+// kept: the rest of the API message names the API field (deletionProtection),
+// which the provider's own detail states in Terraform terms.
+func connectedEnvironmentsSentences(err error) string {
+	var apiErr *client.APIError
+	if !errors.As(err, &apiErr) {
+		return ""
+	}
+	i := strings.Index(apiErr.Message, connectedEnvironmentsLead)
+	if i < 0 {
+		return ""
+	}
+	return strings.TrimSpace(apiErr.Message[i:])
+}
 
 // restoredReplaceNotice ends the deletion-protection refusal of a restored
 // database, whose delete is most often a replacement a changed `source`
@@ -237,9 +263,12 @@ var databaseKind = serviceKind[DatabaseResourceModel, client.Database]{
 		if !client.IsDeletionProtected(err) {
 			return "", "", false
 		}
-		detail := fmt.Sprintf("Database %q was not deleted because deletion protection is enabled. To delete it, set "+
-			"`deletion_protection = false` on the resource, run `terraform apply`, then destroy it again. %s",
-			m.Name.ValueString(), databaseDeleteNotice)
+		detail := fmt.Sprintf("Database %q was not deleted because deletion protection is enabled. ", m.Name.ValueString())
+		if connected := connectedEnvironmentsSentences(err); connected != "" {
+			detail += connected + " "
+		}
+		detail += "To delete it, set `deletion_protection = false` on the resource, run `terraform apply`, then " +
+			"destroy it again. " + databaseDeleteNotice
 		// A restored database's delete is often a replacement planned by a
 		// changed `source` (M-1): say how to keep the database instead.
 		if isSet(m.Source) {

@@ -46,7 +46,7 @@ Default privileges apply to future objects created by the named owner. Repeat th
 
 {{ tffile "examples/resources/kupe_database/protected.tf" }}
 
-To delete a protected database, set `deletion_protection = false` (and remove `prevent_destroy`), run `terraform apply`, then destroy it.
+To delete a protected database, set `deletion_protection = false` (and remove `prevent_destroy`), run `terraform apply`, then destroy it. When App environments are connected to the database, the refused delete names them: deleting the database leaves them without it until you remove or replace the connection.
 
 ### Backups
 
