@@ -172,10 +172,10 @@ func appWebAttribute() schema.SingleNestedAttribute {
 		"health_checks": schema.SingleNestedAttribute{Optional: true, Computed: true, Default: objectdefault.StaticValue(health), Description: "Readiness and optional liveness probes.", Attributes: map[string]schema.Attribute{
 			"readiness": appProbeAttribute(true), "liveness": appProbeAttribute(false),
 		}},
-		"autoscaling": schema.SingleNestedAttribute{Optional: true, Description: "Scale the pod count between min_pods and max_pods on average CPU use. Changing these values deploys; scaling between them does not. Remove the block to run replicas pods.", Attributes: map[string]schema.Attribute{
-			"min_pods":    schema.Int64Attribute{Required: true, Validators: []validator.Int64{int64validator.Between(1, 10)}, Description: "Fewest pods, 1 to 10."},
-			"max_pods":    schema.Int64Attribute{Required: true, Validators: []validator.Int64{int64validator.Between(1, 10)}, Description: "Most pods, 1 to 10."},
-			"cpu_percent": schema.Int64Attribute{Optional: true, Computed: true, Default: int64default.StaticInt64(appDefaultCPUPercent), Validators: []validator.Int64{int64validator.Between(10, 100)}, Description: "Average CPU use, as a percentage of the CPU request, that autoscaling aims for."},
+		"autoscaling": schema.SingleNestedAttribute{Optional: true, Description: "Scales the pod count between `min_pods` and `max_pods` on average CPU use. Changing these settings deploys; scaling within the range does not. Remove the block to go back to `replicas`.", Attributes: map[string]schema.Attribute{
+			"min_pods":    schema.Int64Attribute{Required: true, Validators: []validator.Int64{int64validator.Between(1, 10)}, Description: "Lowest pod count, 1 to 10."},
+			"max_pods":    schema.Int64Attribute{Required: true, Validators: []validator.Int64{int64validator.Between(1, 10)}, Description: "Highest pod count, 1 to 10, and at least `min_pods`."},
+			"cpu_percent": schema.Int64Attribute{Optional: true, Computed: true, Default: int64default.StaticInt64(appDefaultCPUPercent), Validators: []validator.Int64{int64validator.Between(10, 100)}, Description: "Target average CPU use as a percentage of each pod's CPU request, 10 to 100. Defaults to 70."},
 		}},
 	}}
 }

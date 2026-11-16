@@ -35,7 +35,7 @@ If another client changes the environment before its release can be identified, 
 
 ## Autoscaling
 
-Set `web.autoscaling` to scale the pod count between `min_pods` and `max_pods`, each 1 to 10, on average CPU use. `cpu_percent` is the average CPU use, as a percentage of the CPU request, that autoscaling aims for; it defaults to 70. Autoscaling uses CPU only.
+Set `web.autoscaling` to let the pod count follow CPU use, between `min_pods` and `max_pods` (each 1 to 10). Autoscaling adds or removes pods to keep average CPU use near `cpu_percent` of each pod's CPU request, 70 by default. Memory use is not considered.
 
 ```terraform
 web = {
@@ -45,9 +45,9 @@ web = {
 }
 ```
 
-Changing `min_pods`, `max_pods` or `cpu_percent` deploys the app. Scaling between them does not, and the live pod count is not an attribute, so it never shows in a plan. While autoscaling is set, `replicas` is kept but not used, and changing it alone does not deploy. Remove the block and apply to stop autoscaling; the app then runs `replicas` pods.
+Changing `min_pods`, `max_pods` or `cpu_percent` starts a deployment. Scaling up and down does not, and the current pod count is not an attribute, so it never shows up in a plan. While autoscaling is set, `replicas` keeps its value but is not used, and changing it on its own does not deploy. To stop autoscaling, remove the block and apply: the app goes back to running `replicas` pods.
 
-Pods are spread across nodes where the cluster allows, so draining a node takes as few of them as possible. There is no pod disruption budget.
+Pods are spread across nodes where the cluster allows, so draining one node stops as few of them as possible. There is no PodDisruptionBudget, so a drain can stop every pod on that node at once.
 
 ## Vault references
 
