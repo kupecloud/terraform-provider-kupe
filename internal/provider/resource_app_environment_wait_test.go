@@ -20,45 +20,52 @@ import (
 // state. Acceptance tests separately verify CLI taint and next-plan semantics.
 func TestAppEnvironmentWaitReleaseIdentityAndFailures(t *testing.T) {
 	shrinkPollInterval(t)
+	// Cases that reach a terminal outcome get a timeout far above any load
+	// delay, so they end on the outcome and never on the clock. Only the case
+	// that asserts the timeout itself uses a short one; it can only end by
+	// expiry, so load cannot change its result.
+	const settleTimeout = time.Minute
+	const expireTimeout = 100 * time.Millisecond
 	for _, tc := range []struct {
 		name, phase, op string
 		mutate          func(*mockKupeAPI, *client.AppEnvironment)
 		want            string
 		warning         bool
+		expires         bool
 	}{
-		{"failed create warns", "Failed", "create", nil, "Requested release", true},
-		{"failed update errors", "Failed", "update", nil, "Requested release", false},
+		{"failed create warns", "Failed", "create", nil, "Requested release", true, false},
+		{"failed update errors", "Failed", "update", nil, "Requested release", false, false},
 		{"recovered request remains failed", "Failed", "update", func(m *mockKupeAPI, e *client.AppEnvironment) {
 			releases := m.appReleases["shop/production"]
 			releases[0].Status.Recovery = &client.AppReleaseRecovery{Phase: "Succeeded", Release: &client.AppReleaseRef{Name: "previous"}}
 			m.appReleases["shop/production"] = releases
 			e.Status.ActiveRelease = &client.AppReleaseRef{Name: "previous"}
-		}, "now serving", false},
+		}, "now serving", false, false},
 		{"prepin generation is unverified", "Succeeded", "update", func(m *mockKupeAPI, e *client.AppEnvironment) {
 			m.appEnvironmentOnGet = []func(*client.AppEnvironment, *[]client.AppRelease){func(e *client.AppEnvironment, _ *[]client.AppRelease) {
 				e.Generation += 2
 				e.Status.ObservedGeneration = e.Generation
 			}}
-		}, appReleaseUnidentified, false},
+		}, appReleaseUnidentified, false, false},
 		{"pinned superseded is terminal", "Deploying", "update", func(m *mockKupeAPI, e *client.AppEnvironment) {
 			m.appEnvironmentOnGet = []func(*client.AppEnvironment, *[]client.AppRelease){func(e *client.AppEnvironment, _ *[]client.AppRelease) {}, func(e *client.AppEnvironment, releases *[]client.AppRelease) {
 				(*releases)[0].Status.Phase = "Superseded"
 				e.Generation++
 				e.Status.RequestedRelease = &client.AppReleaseRef{Name: "new-request"}
 			}}
-		}, "current requested release is", false},
+		}, "current requested release is", false, false},
 		{"old observed generation never succeeds", "Succeeded", "update", func(m *mockKupeAPI, e *client.AppEnvironment) {
 			m.appEnvironmentOnGet = []func(*client.AppEnvironment, *[]client.AppRelease){func(e *client.AppEnvironment, _ *[]client.AppRelease) { e.Status.ObservedGeneration = 0 }}
-		}, "timeout ended", false},
+		}, "timeout ended", false, true},
 		{"degraded succeeded workload fails after grace", "Succeeded", "update", func(m *mockKupeAPI, e *client.AppEnvironment) {
 			old := appDegradedGrace
 			appDegradedGrace = 0
 			t.Cleanup(func() { appDegradedGrace = old })
 			e.Status.Phase = "Degraded"
-		}, "remained Degraded", false},
+		}, "remained Degraded", false, false},
 		{"identity changes after history", "Succeeded", "update", func(m *mockKupeAPI, e *client.AppEnvironment) {
 			m.appEnvironmentHistoryHook = func(e *client.AppEnvironment) { e.UID = "replacement" }
-		}, "old release does not verify", false},
+		}, "old release does not verify", false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mock := newMockKupeAPI()
@@ -89,7 +96,11 @@ func TestAppEnvironmentWaitReleaseIdentityAndFailures(t *testing.T) {
 				t.Fatal(d)
 			}
 			var diags diag.Diagnostics
-			r.waitAppEnvironment(context.Background(), 100*time.Millisecond, tc.op, &accepted, &model, true, &state, &diags)
+			timeout := settleTimeout
+			if tc.expires {
+				timeout = expireTimeout
+			}
+			r.waitAppEnvironment(context.Background(), timeout, tc.op, &accepted, &model, true, &state, &diags)
 			if tc.warning && (diags.HasError() || len(diags.Warnings()) == 0) {
 				t.Fatalf("want warning only: %v", diags)
 			}
@@ -158,7 +169,7 @@ func TestAppEnvironmentWaitKeepsAcceptedDatabasesAfterForeignChange(t *testing.T
 		t.Fatal(d)
 	}
 	var diags diag.Diagnostics
-	r.waitAppEnvironment(context.Background(), 100*time.Millisecond, "update", &accepted, &model, true, &state, &diags)
+	r.waitAppEnvironment(context.Background(), time.Minute, "update", &accepted, &model, true, &state, &diags)
 	if !diags.HasError() || !strings.Contains(diags.Errors()[0].Detail(), appReleaseUnidentified) {
 		t.Fatalf("foreign change was not reported: %v", diags)
 	}
