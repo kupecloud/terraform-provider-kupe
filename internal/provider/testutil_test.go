@@ -66,6 +66,9 @@ type mockKupeAPI struct {
 	// databaseRequests records each database POST and PATCH body the routes
 	// decoded.
 	databaseRequests []mockRequest
+	// databaseConnections names, per database, the App environments the
+	// deletion_protected refusal lists, worded as kupe-api words it.
+	databaseConnections map[string][]string
 	// databaseDeleteConflicts is how many upcoming database DELETEs are
 	// refused with a plain 409, like a concurrent change does.
 	databaseDeleteConflicts int
@@ -1117,8 +1120,12 @@ func (m *mockKupeAPI) deleteDatabase(w http.ResponseWriter, name string) {
 		return
 	}
 	if db["deletionProtection"] == true {
-		mockError(w, http.StatusConflict, client.CodeDeletionProtected,
-			fmt.Sprintf("database %q has deletionProtection enabled: set it to false before deleting", name))
+		message := fmt.Sprintf("database %q has deletionProtection enabled: set it to false before deleting", name)
+		if connected := m.databaseConnections[name]; len(connected) > 0 {
+			message = fmt.Sprintf("%s. It is connected to these App environments: %s. Deleting it leaves them without "+
+				"this database until you remove or replace the connection.", message, strings.Join(connected, ", "))
+		}
+		mockError(w, http.StatusConflict, client.CodeDeletionProtected, message)
 		return
 	}
 	// Its bindings go with it; its manual backups stay (D-9).

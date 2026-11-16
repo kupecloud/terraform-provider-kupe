@@ -255,6 +255,69 @@ func TestAccDatabaseResource_ProtectedRestoreReplaceRefused(t *testing.T) {
 	})
 }
 
+// TestDatabaseDeleteRefusedConnections: a refusal that names connected App
+// environments passes them on; one that names none keeps the detail as it
+// was before the API named them.
+func TestDatabaseDeleteRefusedConnections(t *testing.T) {
+	plain := DatabaseResourceModel{databaseModel: databaseModel{Name: types.StringValue("orders-db"),
+		Source: types.ObjectNull(databaseSourceAttrTypes)}}
+	refusal := func(message string) error {
+		return fmt.Errorf("delete database: %w",
+			&client.APIError{StatusCode: http.StatusConflict, Code: client.CodeDeletionProtected, Message: message})
+	}
+	unchanged := "Database \"orders-db\" was not deleted because deletion protection is enabled. To delete it, set " +
+		"`deletion_protection = false` on the resource, run `terraform apply`, then destroy it again. " + sharedDeleteNotice
+	connected := "It is connected to these App environments: shop/prod, blog/staging. Deleting it leaves them " +
+		"without this database until you remove or replace the connection."
+	tests := []struct {
+		name    string
+		message string
+		want    string
+	}{
+		{name: "no connections", message: `database "orders-db" has deletionProtection enabled: set it to false before deleting`, want: unchanged},
+		{name: "no message", message: "", want: unchanged},
+		{
+			name:    "connected environments",
+			message: `database "orders-db" has deletionProtection enabled: set it to false before deleting. ` + connected,
+			want: "Database \"orders-db\" was not deleted because deletion protection is enabled. " + connected +
+				" To delete it, set `deletion_protection = false` on the resource, run `terraform apply`, then destroy " +
+				"it again. " + sharedDeleteNotice,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			summary, detail, ok := databaseKind.deleteRefused(&plain, refusal(tt.message))
+			if !ok || summary != "database has deletion protection enabled" {
+				t.Fatalf("deleteRefused() = %q, %v", summary, ok)
+			}
+			if detail != tt.want {
+				t.Errorf("detail = %q\nwant     %q", detail, tt.want)
+			}
+		})
+	}
+}
+
+// TestAccDatabaseResource_DeleteRefusedNamesConnections: `terraform destroy`
+// of a protected database shows the App environments the API names.
+func TestAccDatabaseResource_DeleteRefusedNamesConnections(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+	mock.databaseConnections = map[string][]string{"orders-db": {"shop/prod", "blog/staging"}}
+	refused := "(?s)deletion protection is enabled.*" +
+		wrappedText("It is connected to these App environments: shop/prod, blog/staging.") +
+		".*`deletion_protection\\s+=\\s+false`"
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		CheckDestroy:             testAccCheckNoDatabases(mock),
+		Steps: []resource.TestStep{
+			{Config: testAccDatabaseConfig(mock.url(), testDatabase{})},
+			{Config: testAccProviderConfig(mock.url()), ExpectError: regexp.MustCompile(refused)},
+			{Config: testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false)})},
+		},
+	})
+}
+
 // TestDatabaseDeleteRefusedDetail: only a restored database's refusal says
 // to remove `source`.
 func TestDatabaseDeleteRefusedDetail(t *testing.T) {

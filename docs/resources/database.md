@@ -109,7 +109,7 @@ resource "kupe_database" "billing" {
 }
 ```
 
-To delete a protected database, set `deletion_protection = false` (and remove `prevent_destroy`), run `terraform apply`, then destroy it.
+To delete a protected database, set `deletion_protection = false` (and remove `prevent_destroy`), run `terraform apply`, then destroy it. When App environments are connected to the database, the refused delete names them: deleting the database leaves them without it until you remove or replace the connection.
 
 ### Backups
 
