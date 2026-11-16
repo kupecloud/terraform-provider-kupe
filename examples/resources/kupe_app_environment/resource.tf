@@ -16,6 +16,10 @@ resource "kupe_app_environment" "this" {
     port  = 8080
     env = [{ name = "LOG_LEVEL", value = "info" }]
     health_checks = { readiness = { http = { path = "/healthz" } } }
+
+    # Scale between 2 and 6 pods on average CPU use instead of running
+    # replicas pods. cpu_percent defaults to 70.
+    # autoscaling = { min_pods = 2, max_pods = 6, cpu_percent = 70 }
   }
 
   # Write values at this path in the console Vault page before referencing

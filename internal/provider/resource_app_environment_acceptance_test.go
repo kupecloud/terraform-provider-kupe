@@ -690,6 +690,8 @@ data "kupe_app_image" "web" { image = %q }
 
 const appTestTwoConnections = `databases = [{ name = "main", database = "orders-db" }, { name = "reports", database = "orders-db", logical_database = "analytics", env = "REPORTS_URL" }]`
 
+// appEnvironmentRequestBodies returns the bodies of the environment requests
+// with method: the create POST, or the PATCHes of one environment.
 func appEnvironmentRequestBodies(mock *mockKupeAPI, method string) []map[string]any {
 	mock.mu.Lock()
 	defer mock.mu.Unlock()
@@ -818,5 +820,114 @@ func TestAccAppEnvironmentSettingsOnlyApplyKeepsPlannedDatabaseStatus(t *testing
 	defer mock.mu.Unlock()
 	if got := len(mock.appReleases["shop/production"]); got != 1 {
 		t.Fatalf("domain-only apply made %d releases, want 1", got)
+	}
+}
+
+func TestAccAppEnvironmentAutoscalingLifecycle(t *testing.T) {
+	shrinkPollInterval(t)
+	mock := newMockKupeAPI()
+	defer mock.close()
+	// A short timeout makes a release the provider fails to match fail the
+	// step instead of waiting out the default.
+	withWeb := func(web string) string {
+		base := testAccAppEnvironmentConfig(mock.url(), "a", "timeouts = { create = \"5s\", update = \"5s\" }")
+		return strings.Replace(base, "port = 8080", "port = 8080\n    "+web, 1)
+	}
+	releases := func() int {
+		mock.mu.Lock()
+		defer mock.mu.Unlock()
+		return len(mock.appReleases["shop/production"])
+	}
+	expectReleases := func(want int) func(*terraform.State) error {
+		return func(*terraform.State) error {
+			if got := releases(); got != want {
+				return fmt.Errorf("releases = %d, want %d", got, want)
+			}
+			return nil
+		}
+	}
+	created := withWeb("autoscaling = { min_pods = 2, max_pods = 6 }")
+	wider := withWeb("autoscaling = { min_pods = 2, max_pods = 8 }")
+	replicasOnly := withWeb("replicas = 3\n    autoscaling = { min_pods = 2, max_pods = 8 }")
+	removed := withWeb("replicas = 3")
+	acc.UnitTest(t, acc.TestCase{ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(), Steps: []acc.TestStep{
+		{Config: created, Check: acc.ComposeTestCheckFunc(
+			acc.TestCheckResourceAttr(appEnvironmentAddr, "web.autoscaling.min_pods", "2"),
+			acc.TestCheckResourceAttr(appEnvironmentAddr, "web.autoscaling.max_pods", "6"),
+			acc.TestCheckResourceAttr(appEnvironmentAddr, "web.autoscaling.cpu_percent", "70"),
+			acc.TestCheckResourceAttr(appEnvironmentAddr, "web.replicas", "1"),
+			acc.TestCheckResourceAttr(appEnvironmentAddr, "phase", "Running"),
+			expectReleases(1),
+		)},
+		{Config: created, PlanOnly: true},
+		{ResourceName: appEnvironmentAddr, ImportState: true, ImportStateId: "shop/production", ImportStateVerify: true, ImportStateVerifyIdentifierAttribute: "name"},
+		{Config: wider, ConfigPlanChecks: acc.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+			plancheck.ExpectResourceAction(appEnvironmentAddr, plancheck.ResourceActionUpdate),
+			plancheck.ExpectUnknownValue(appEnvironmentAddr, tfjsonpath.New("requested_release")),
+		}}, Check: acc.ComposeTestCheckFunc(
+			acc.TestCheckResourceAttr(appEnvironmentAddr, "web.autoscaling.max_pods", "8"),
+			acc.TestCheckResourceAttr(appEnvironmentAddr, "requested_release", "shop-production-2"),
+			expectReleases(2),
+		)},
+		// Under autoscaling a release records min_pods as its replicas, so
+		// replicas alone is a settings update: no release, status kept.
+		{Config: replicasOnly, ConfigPlanChecks: acc.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+			plancheck.ExpectResourceAction(appEnvironmentAddr, plancheck.ResourceActionUpdate),
+			plancheck.ExpectKnownValue(appEnvironmentAddr, tfjsonpath.New("requested_release"), knownvalue.StringExact("shop-production-2")),
+		}}, Check: acc.ComposeTestCheckFunc(acc.TestCheckResourceAttr(appEnvironmentAddr, "web.replicas", "3"), expectReleases(2))},
+		{Config: removed, ConfigPlanChecks: acc.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+			plancheck.ExpectUnknownValue(appEnvironmentAddr, tfjsonpath.New("requested_release")),
+		}}, Check: acc.ComposeTestCheckFunc(acc.TestCheckNoResourceAttr(appEnvironmentAddr, "web.autoscaling"), expectReleases(3))},
+		{Config: removed, PlanOnly: true},
+	}})
+	posts := appEnvironmentRequestBodies(mock, http.MethodPost)
+	if len(posts) != 1 {
+		t.Fatalf("create requests = %d, want 1", len(posts))
+	}
+	want := map[string]any{"minPods": float64(2), "maxPods": float64(6), "cpuPercent": float64(70)}
+	if got := posts[0]["web"].(map[string]any)["autoscaling"]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("create sent web.autoscaling %#v, want %#v", got, want)
+	}
+	patches := appEnvironmentRequestBodies(mock, http.MethodPatch)
+	if len(patches) != 3 {
+		t.Fatalf("PATCH requests = %d, want max_pods, replicas and the removal", len(patches))
+	}
+	if got := patches[0]["web"].(map[string]any)["autoscaling"].(map[string]any)["maxPods"]; got != float64(8) {
+		t.Fatalf("max_pods change sent maxPods %v", got)
+	}
+	last := patches[2]["web"].(map[string]any)
+	if got, ok := last["autoscaling"]; !ok || got != nil {
+		t.Fatalf(`removing the block sent web %#v, want "autoscaling":null`, last)
+	}
+}
+
+func TestAccAppEnvironmentAutoscalingPodRangeFailsAtValidate(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+	config := strings.Replace(testAccAppEnvironmentConfig(mock.url(), "a", ""), "port = 8080", "port = 8080\n    autoscaling = { min_pods = 6, max_pods = 2 }", 1)
+	acc.UnitTest(t, acc.TestCase{ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(), Steps: []acc.TestStep{
+		{Config: config, PlanOnly: true, ExpectError: regexp.MustCompile(`(?s)Invalid pod range.*min_pods must be at most max_pods\.`)},
+	}})
+	if got := appEnvironmentRequestCount(mock, http.MethodPost, "/environments"); got != 0 {
+		t.Fatalf("an invalid pod range sent %d create requests", got)
+	}
+}
+
+// An API response without autoscaling (kupe-api before APP2-14) refreshes to
+// null, so an unchanged configuration plans no change.
+// TestAppEnvironmentStateWithoutAutoscalingDecodes covers a state written by
+// a provider before the attribute.
+func TestAccAppEnvironmentAPIWithoutAutoscalingPlansNoChange(t *testing.T) {
+	shrinkPollInterval(t)
+	mock := newMockKupeAPI()
+	defer mock.close()
+	config := testAccAppEnvironmentConfig(mock.url(), "a", "")
+	acc.UnitTest(t, acc.TestCase{ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(), Steps: []acc.TestStep{
+		{Config: config, Check: acc.TestCheckNoResourceAttr(appEnvironmentAddr, "web.autoscaling")},
+		{Config: config, PlanOnly: true},
+	}})
+	body := appEnvironmentRequestBodies(mock, http.MethodPost)[0]["web"].(map[string]any)
+	if got, ok := body["autoscaling"]; !ok || got != nil {
+		t.Fatalf(`create without autoscaling sent web %#v, want "autoscaling":null`, body)
 	}
 }

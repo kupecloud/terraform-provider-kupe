@@ -2,7 +2,9 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"math/big"
 	"reflect"
 	"sort"
 	"strings"
@@ -12,12 +14,14 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 
 	"github.com/kupecloud/terraform-provider-kupe/internal/client"
@@ -521,4 +525,209 @@ func TestAppEnvironmentReplaceAttributesMatchSchema(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("RequiresReplace attributes = %v, appEnvironmentReplaceAttributes = %v", got, want)
 	}
+}
+
+func appTestAutoscalingModel(replicas, minPods, maxPods int32) AppEnvironmentResourceModel {
+	m := appTestEnvironmentModel()
+	web, _, _, _, diags := appEnvironmentSettings(context.Background(), &m)
+	if diags.HasError() {
+		panic(fmt.Sprint(diags))
+	}
+	web.Replicas = replicas
+	if minPods > 0 {
+		web.Autoscaling = &client.AppAutoscaling{MinPods: minPods, MaxPods: maxPods, CPUPercent: 70}
+	}
+	m.Web = appWebToObject(web)
+	return m
+}
+
+// The block reaches the API as autoscaling, and its removal as an explicit
+// null that the API's merge patch reads as "stop autoscaling".
+func TestAppEnvironmentAutoscalingWire(t *testing.T) {
+	ctx := context.Background()
+	scaled := appTestAutoscalingModel(1, 2, 6)
+	web, _, _, _, diags := appEnvironmentSettings(ctx, &scaled)
+	if diags.HasError() {
+		t.Fatal(diags)
+	}
+	if want := (client.AppAutoscaling{MinPods: 2, MaxPods: 6, CPUPercent: 70}); web.Autoscaling == nil || *web.Autoscaling != want {
+		t.Fatalf("autoscaling = %+v, want %+v", web.Autoscaling, want)
+	}
+	plain := appTestAutoscalingModel(1, 0, 0)
+	patch, changed, diags := appEnvironmentPatch(ctx, &plain, &scaled)
+	if diags.HasError() || !changed || patch.Web == nil || patch.Web.Autoscaling != nil {
+		t.Fatalf("removal patch = %+v, changed %v, %v", patch.Web, changed, diags)
+	}
+	data, err := json.Marshal(patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"autoscaling":null`) {
+		t.Fatalf(`removal patch %s does not send "autoscaling":null`, data)
+	}
+}
+
+func TestAppEnvironmentAutoscalingState(t *testing.T) {
+	if got := appWebToObject(&client.AppWeb{}).Attributes()["autoscaling"]; !got.IsNull() {
+		t.Fatalf("a response without autoscaling maps to %v, want null", got)
+	}
+	got := appWebToObject(&client.AppWeb{Autoscaling: &client.AppAutoscaling{MinPods: 2, MaxPods: 6}}).Attributes()["autoscaling"].(types.Object).Attributes()
+	if got["min_pods"].(types.Int64).ValueInt64() != 2 || got["max_pods"].(types.Int64).ValueInt64() != 6 || got["cpu_percent"].(types.Int64).ValueInt64() != appDefaultCPUPercent {
+		t.Fatalf("autoscaling without cpuPercent maps to %v, want the default target", got)
+	}
+}
+
+// A release records min_pods as its replicas under autoscaling, so only a
+// change to what a release records deploys.
+func TestAppEnvironmentAutoscalingDeployingChange(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		prior, plan   AppEnvironmentResourceModel
+		wantDeploying bool
+	}{
+		{"replicas under autoscaling", appTestAutoscalingModel(1, 2, 6), appTestAutoscalingModel(3, 2, 6), false},
+		{"replicas without autoscaling", appTestAutoscalingModel(1, 0, 0), appTestAutoscalingModel(3, 0, 0), true},
+		{"max_pods", appTestAutoscalingModel(1, 2, 6), appTestAutoscalingModel(1, 2, 8), true},
+		{"min_pods", appTestAutoscalingModel(1, 2, 6), appTestAutoscalingModel(1, 3, 6), true},
+		{"block added", appTestAutoscalingModel(2, 0, 0), appTestAutoscalingModel(2, 2, 6), true},
+		{"block removed", appTestAutoscalingModel(2, 2, 6), appTestAutoscalingModel(2, 0, 0), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := appEnvironmentDeployingChange(&tc.plan, &tc.prior); got != tc.wantDeploying {
+				t.Fatalf("deploying = %v, want %v", got, tc.wantDeploying)
+			}
+		})
+	}
+	unknown := appTestAutoscalingModel(1, 2, 6)
+	attrs := unknown.Web.Attributes()
+	scaling := attrs["autoscaling"].(types.Object).Attributes()
+	scaling["min_pods"] = types.Int64Unknown()
+	attrs["autoscaling"] = types.ObjectValueMust(appAutoscalingTypes, scaling)
+	unknown.Web = types.ObjectValueMust(appWebTypes, attrs)
+	prior := appTestAutoscalingModel(1, 2, 6)
+	if !appEnvironmentDeployingChange(&unknown, &prior) {
+		t.Fatal("an unknown min_pods was not treated as deploying")
+	}
+}
+
+func TestAppReleaseMatchesAutoscalingReplicas(t *testing.T) {
+	m := appTestAutoscalingModel(1, 2, 6)
+	web, _, _, _, diags := appEnvironmentSettings(context.Background(), &m)
+	if diags.HasError() {
+		t.Fatal(diags)
+	}
+	env := &client.AppEnvironment{DeploymentRevision: 1, Web: web}
+	release := &client.AppRelease{DeploymentRevision: 1, Runtime: client.AppReleaseRuntime{AppWeb: *web}}
+	release.Runtime.Replicas = 2
+	release.Runtime.Autoscaling = &client.AppAutoscaling{MinPods: 2, MaxPods: 6, CPUPercent: 70}
+	if !appReleaseMatches(env, release) {
+		t.Fatal("a release recording min_pods as replicas did not match")
+	}
+	release.Runtime.Autoscaling = &client.AppAutoscaling{MinPods: 2, MaxPods: 5, CPUPercent: 70}
+	if appReleaseMatches(env, release) {
+		t.Fatal("a release with other autoscaling settings matched")
+	}
+	release.Runtime.Autoscaling = nil
+	if appReleaseMatches(env, release) {
+		t.Fatal("a release without autoscaling matched an autoscaling environment")
+	}
+}
+
+// A state written before autoscaling existed has no web.autoscaling key; it
+// decodes with the block null, so it plans no change against a configuration
+// without the block.
+func TestAppEnvironmentStateWithoutAutoscalingDecodes(t *testing.T) {
+	ctx := context.Background()
+	r := NewAppEnvironmentResource().(*AppEnvironmentResource)
+	sch := testResourceSchema(t, r)
+	m := appTestEnvironmentModel()
+	webRaw, err := m.Web.ToTerraformValue(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := testPlanValue(t, sch, map[string]tftypes.Value{"web": webRaw})
+	state := map[string]any{}
+	if err := json.Unmarshal(testTerraformJSON(t, stored), &state); err != nil {
+		t.Fatal(err)
+	}
+	delete(state["web"].(map[string]any), "autoscaling")
+	data, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := providerserver.NewProtocol6WithError(New("test")())()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := server.UpgradeResourceState(ctx, &tfprotov6.UpgradeResourceStateRequest{TypeName: "kupe_app_environment", RawState: &tfprotov6.RawState{JSON: data}})
+	if err != nil || len(resp.Diagnostics) > 0 {
+		t.Fatalf("upgrade state: %v %v", err, resp.Diagnostics)
+	}
+	upgraded, err := resp.UpgradedState.Unmarshal(sch.Schema.Type().TerraformType(ctx))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded AppEnvironmentResourceModel
+	if diags := (tfsdk.State{Schema: sch.Schema, Raw: upgraded}).Get(ctx, &decoded); diags.HasError() {
+		t.Fatal(diags)
+	}
+	if !decoded.Web.Equal(m.Web) {
+		t.Fatalf("web = %v, want %v with autoscaling null", decoded.Web, m.Web)
+	}
+}
+
+// testTerraformJSON encodes a known value as Terraform's JSON state encoding.
+func testTerraformJSON(t *testing.T, value tftypes.Value) []byte {
+	t.Helper()
+	var encode func(tftypes.Value) any
+	encode = func(v tftypes.Value) any {
+		if v.IsNull() || !v.IsKnown() {
+			return nil
+		}
+		switch typ := v.Type(); {
+		case typ.Is(tftypes.Object{}):
+			var attrs map[string]tftypes.Value
+			if err := v.As(&attrs); err != nil {
+				t.Fatal(err)
+			}
+			out := map[string]any{}
+			for name, attr := range attrs {
+				out[name] = encode(attr)
+			}
+			return out
+		case typ.Is(tftypes.List{}), typ.Is(tftypes.Set{}):
+			var items []tftypes.Value
+			if err := v.As(&items); err != nil {
+				t.Fatal(err)
+			}
+			out := []any{}
+			for _, item := range items {
+				out = append(out, encode(item))
+			}
+			return out
+		case typ.Is(tftypes.Number):
+			var number big.Float
+			if err := v.As(&number); err != nil {
+				t.Fatal(err)
+			}
+			return json.Number(number.Text('f', -1))
+		case typ.Is(tftypes.Bool):
+			var b bool
+			if err := v.As(&b); err != nil {
+				t.Fatal(err)
+			}
+			return b
+		default:
+			var text string
+			if err := v.As(&text); err != nil {
+				t.Fatal(err)
+			}
+			return text
+		}
+	}
+	data, err := json.Marshal(encode(value))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }
