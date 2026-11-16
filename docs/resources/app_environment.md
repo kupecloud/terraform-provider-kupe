@@ -31,8 +31,8 @@ resource "kupe_app_environment" "this" {
     env = [{ name = "LOG_LEVEL", value = "info" }]
     health_checks = { readiness = { http = { path = "/healthz" } } }
 
-    # Scale between 2 and 6 pods on average CPU use instead of running
-    # replicas pods. cpu_percent defaults to 70.
+    # Uncomment to scale between 2 and 6 pods on CPU use instead of running
+    # a fixed number of replicas. cpu_percent defaults to 70.
     # autoscaling = { min_pods = 2, max_pods = 6, cpu_percent = 70 }
   }
 
@@ -100,7 +100,7 @@ If another client changes the environment before its release can be identified, 
 
 ## Autoscaling
 
-Set `web.autoscaling` to scale the pod count between `min_pods` and `max_pods`, each 1 to 10, on average CPU use. `cpu_percent` is the average CPU use, as a percentage of the CPU request, that autoscaling aims for; it defaults to 70. Autoscaling uses CPU only.
+Set `web.autoscaling` to let the pod count follow CPU use, between `min_pods` and `max_pods` (each 1 to 10). Autoscaling adds or removes pods to keep average CPU use near `cpu_percent` of each pod's CPU request, 70 by default. Memory use is not considered.
 
 ```terraform
 web = {
@@ -110,9 +110,9 @@ web = {
 }
 ```
 
-Changing `min_pods`, `max_pods` or `cpu_percent` deploys the app. Scaling between them does not, and the live pod count is not an attribute, so it never shows in a plan. While autoscaling is set, `replicas` is kept but not used, and changing it alone does not deploy. Remove the block and apply to stop autoscaling; the app then runs `replicas` pods.
+Changing `min_pods`, `max_pods` or `cpu_percent` starts a deployment. Scaling up and down does not, and the current pod count is not an attribute, so it never shows up in a plan. While autoscaling is set, `replicas` keeps its value but is not used, and changing it on its own does not deploy. To stop autoscaling, remove the block and apply: the app goes back to running `replicas` pods.
 
-Pods are spread across nodes where the cluster allows, so draining a node takes as few of them as possible. There is no pod disruption budget.
+Pods are spread across nodes where the cluster allows, so draining one node stops as few of them as possible. There is no PodDisruptionBudget, so a drain can stop every pod on that node at once.
 
 ## Vault references
 
@@ -218,7 +218,7 @@ Required:
 Optional:
 
 - `args` (List of String) Arguments, at most 32 strings of 1024 bytes each.
-- `autoscaling` (Attributes) Scale the pod count between min_pods and max_pods on average CPU use. Changing these values deploys; scaling between them does not. Remove the block to run replicas pods. (see [below for nested schema](#nestedatt--web--autoscaling))
+- `autoscaling` (Attributes) Scales the pod count between `min_pods` and `max_pods` on average CPU use. Changing these settings deploys; scaling within the range does not. Remove the block to go back to `replicas`. (see [below for nested schema](#nestedatt--web--autoscaling))
 - `command` (List of String) Entrypoint, at most 32 strings of 1024 bytes each.
 - `env` (Attributes List) Ordered environment variables. Choose value or secret_key_ref per entry. (see [below for nested schema](#nestedatt--web--env))
 - `health_checks` (Attributes) Readiness and optional liveness probes. (see [below for nested schema](#nestedatt--web--health_checks))
@@ -230,12 +230,12 @@ Optional:
 
 Required:
 
-- `max_pods` (Number) Most pods, 1 to 10.
-- `min_pods` (Number) Fewest pods, 1 to 10.
+- `max_pods` (Number) Highest pod count, 1 to 10, and at least `min_pods`.
+- `min_pods` (Number) Lowest pod count, 1 to 10.
 
 Optional:
 
-- `cpu_percent` (Number) Average CPU use, as a percentage of the CPU request, that autoscaling aims for.
+- `cpu_percent` (Number) Target average CPU use as a percentage of each pod's CPU request, 10 to 100. Defaults to 70.
 
 
 <a id="nestedatt--web--env"></a>
