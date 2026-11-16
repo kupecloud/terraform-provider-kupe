@@ -64,11 +64,11 @@ func TestAppEnvironmentWaitReleaseIdentityAndFailures(t *testing.T) {
 			mock := newMockKupeAPI()
 			defer mock.close()
 			model := appTestEnvironmentModel()
-			web, secrets, domains, d := appEnvironmentSettings(context.Background(), &model)
+			web, secrets, databases, domains, d := appEnvironmentSettings(context.Background(), &model)
 			if d.HasError() {
 				t.Fatal(d)
 			}
-			env := &client.AppEnvironment{App: "shop", Environment: "production", Name: "shop-production", Cluster: "europe", UID: "original", Generation: 1, DeploymentRevision: 1, DeletionProtection: true, Web: web, Secrets: secrets, Domains: domains, Status: &client.AppEnvironmentStatus{Namespace: "app-shop-production"}}
+			env := &client.AppEnvironment{App: "shop", Environment: "production", Name: "shop-production", Cluster: "europe", UID: "original", Generation: 1, DeploymentRevision: 1, DeletionProtection: true, Web: web, Secrets: secrets, Databases: databases, Domains: domains, Status: &client.AppEnvironmentStatus{Namespace: "app-shop-production"}}
 			mock.apps["shop"] = map[string]any{"name": "shop"}
 			mock.appEnvironments["shop/production"] = env
 			mock.appEnvironmentOutcome = tc.phase

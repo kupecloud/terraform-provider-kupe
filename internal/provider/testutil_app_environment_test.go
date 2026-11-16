@@ -73,7 +73,7 @@ func (m *mockKupeAPI) serveAppEnvironment(w http.ResponseWriter, r *http.Request
 			mockError(w, http.StatusConflict, "", "environment already exists")
 			return
 		}
-		env := &client.AppEnvironment{App: app, Environment: request.Environment, Cluster: request.Cluster, UID: "env-" + m.nextRV(), Name: app + "-" + request.Environment, Generation: 1, DeploymentRevision: 1, Web: request.Web, Secrets: request.Secrets, Domains: request.Domains, DeletionProtection: request.DeletionProtection == nil || *request.DeletionProtection, Status: &client.AppEnvironmentStatus{Phase: "Provisioning", Namespace: "app-" + app + "-" + request.Environment, Address: "https://" + app + "-" + request.Environment + ".example.com"}}
+		env := &client.AppEnvironment{App: app, Environment: request.Environment, Cluster: request.Cluster, UID: "env-" + m.nextRV(), Name: app + "-" + request.Environment, Generation: 1, DeploymentRevision: 1, Web: request.Web, Secrets: request.Secrets, Databases: mockDefaultAppDatabases(request.Databases), Domains: request.Domains, DeletionProtection: request.DeletionProtection == nil || *request.DeletionProtection, Status: &client.AppEnvironmentStatus{Phase: "Provisioning", Namespace: "app-" + app + "-" + request.Environment, Address: "https://" + app + "-" + request.Environment + ".example.com"}}
 		m.appEnvironments[key] = env
 		m.appMockRelease(key, env)
 		m.appEnvironmentOnGet = m.appEnvironmentAfterWrite
@@ -152,7 +152,7 @@ func (m *mockKupeAPI) serveAppEnvironment(w http.ResponseWriter, r *http.Request
 			mockError(w, http.StatusBadRequest, "", "deploymentRevision cannot be patched")
 			return
 		}
-		priorWeb, priorSecrets := env.Web, mockReleaseSecrets(env.Web, env.Secrets)
+		priorWeb, priorSecrets, priorDatabases := env.Web, mockReleaseSecrets(env.Web, env.Secrets), env.Databases
 		data, err := json.Marshal(body)
 		if err != nil {
 			panic(err)
@@ -167,6 +167,9 @@ func (m *mockKupeAPI) serveAppEnvironment(w http.ResponseWriter, r *http.Request
 		if patch.Secrets != nil {
 			env.Secrets = *patch.Secrets
 		}
+		if patch.Databases != nil {
+			env.Databases = mockDefaultAppDatabases(*patch.Databases)
+		}
 		if patch.Domains != nil {
 			env.Domains = *patch.Domains
 		}
@@ -174,7 +177,7 @@ func (m *mockKupeAPI) serveAppEnvironment(w http.ResponseWriter, r *http.Request
 			env.DeletionProtection = *patch.DeletionProtection
 		}
 		env.Generation++
-		if !reflect.DeepEqual(priorWeb, env.Web) || !reflect.DeepEqual(priorSecrets, mockReleaseSecrets(env.Web, env.Secrets)) {
+		if !reflect.DeepEqual(priorWeb, env.Web) || !reflect.DeepEqual(priorSecrets, mockReleaseSecrets(env.Web, env.Secrets)) || !reflect.DeepEqual(priorDatabases, env.Databases) {
 			m.appMockRelease(key, env)
 		} else {
 			env.Status.ObservedGeneration = env.Generation
@@ -226,6 +229,13 @@ func (m *mockKupeAPI) appMockRelease(key string, env *client.AppEnvironment) {
 	}
 	release := client.AppRelease{Name: name, Number: number, DeploymentRevision: env.DeploymentRevision, Trigger: "Deploy", Runtime: client.AppReleaseRuntime{AppWeb: web, Secrets: []client.AppReleaseSecret{}}, Status: client.AppReleaseStatus{Phase: phase, Reason: "TestOutcome"}}
 	release.Runtime.Secrets = mockReleaseSecrets(env.Web, env.Secrets)
+	// The runtime is a map keyed by name, so it is not in configured order.
+	release.Runtime.Databases = append([]client.AppDatabase{}, env.Databases...)
+	sort.Slice(release.Runtime.Databases, func(i, j int) bool { return release.Runtime.Databases[i].Name > release.Runtime.Databases[j].Name })
+	env.Status.Databases = []client.AppDatabaseStatus{}
+	for _, conn := range env.Databases {
+		env.Status.Databases = append(env.Status.Databases, client.AppDatabaseStatus{Name: conn.Name, Env: conn.Env, Phase: "Ready", RuntimeSecret: conn.Name + "-app", MigrationSecret: conn.Name + "-migrate"})
+	}
 	ref := &client.AppReleaseRef{Name: name}
 	env.Status.RequestedRelease = ref
 	env.Status.Deployment = &client.AppDeployment{Release: ref, Phase: phase, Reason: release.Status.Reason}
@@ -273,5 +283,18 @@ func mockReleaseSecrets(web *client.AppWeb, secrets []client.AppSecret) []client
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// mockDefaultAppDatabases gives a connection without env DATABASE_URL, as the
+// API does, and stores an absent list as none.
+func mockDefaultAppDatabases(databases []client.AppDatabase) []client.AppDatabase {
+	out := []client.AppDatabase{}
+	for _, conn := range databases {
+		if conn.Env == "" {
+			conn.Env = defaultAppDatabaseEnv
+		}
+		out = append(out, conn)
+	}
 	return out
 }

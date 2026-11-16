@@ -50,6 +50,7 @@ type AppEnvironment struct {
 	DeploymentRevision int64                 `json:"deploymentRevision"`
 	Web                *AppWeb               `json:"web"`
 	Secrets            []AppSecret           `json:"secrets"`
+	Databases          []AppDatabase         `json:"databases"`
 	Domains            []string              `json:"domains"`
 	Generation         int64                 `json:"generation"`
 	ResourceVersion    string                `json:"resourceVersion"`
@@ -114,6 +115,27 @@ type AppSecret struct {
 	Path string `json:"path"`
 }
 
+// AppDatabase is one database connection. The API replaces the whole list on
+// PATCH and keys it by Name; Database and LogicalDatabase cannot change for an
+// existing Name. Env defaults to DATABASE_URL.
+type AppDatabase struct {
+	Name            string `json:"name"`
+	Database        string `json:"database"`
+	LogicalDatabase string `json:"logicalDatabase,omitempty"`
+	Env             string `json:"env"`
+}
+
+// AppDatabaseStatus is one connection's observed state. The Secret names are
+// decoded for completeness but never become provider attributes.
+type AppDatabaseStatus struct {
+	Name            string `json:"name"`
+	Env             string `json:"env"`
+	Phase           string `json:"phase"`
+	Message         string `json:"message"`
+	RuntimeSecret   string `json:"runtimeSecret"`
+	MigrationSecret string `json:"migrationSecret"`
+}
+
 type AppReleaseRef struct {
 	Name string `json:"name"`
 }
@@ -129,35 +151,38 @@ type AppRecovery struct {
 }
 
 type AppEnvironmentStatus struct {
-	Phase                 string         `json:"phase"`
-	ObservedGeneration    int64          `json:"observedGeneration"`
-	Conditions            []Condition    `json:"conditions"`
-	Namespace             string         `json:"namespace"`
-	Address               string         `json:"address"`
-	RequestedRelease      *AppReleaseRef `json:"requestedRelease"`
-	ActiveRelease         *AppReleaseRef `json:"activeRelease"`
-	LastSuccessfulRelease *AppReleaseRef `json:"lastSuccessfulRelease"`
-	Deployment            *AppDeployment `json:"deployment"`
-	Recovery              *AppRecovery   `json:"recovery"`
+	Phase                 string              `json:"phase"`
+	ObservedGeneration    int64               `json:"observedGeneration"`
+	Conditions            []Condition         `json:"conditions"`
+	Namespace             string              `json:"namespace"`
+	Address               string              `json:"address"`
+	RequestedRelease      *AppReleaseRef      `json:"requestedRelease"`
+	ActiveRelease         *AppReleaseRef      `json:"activeRelease"`
+	LastSuccessfulRelease *AppReleaseRef      `json:"lastSuccessfulRelease"`
+	Deployment            *AppDeployment      `json:"deployment"`
+	Recovery              *AppRecovery        `json:"recovery"`
+	Databases             []AppDatabaseStatus `json:"databases"`
 }
 
 type CreateAppEnvironmentRequest struct {
-	Environment        string      `json:"environment"`
-	Cluster            string      `json:"cluster"`
-	DeletionProtection *bool       `json:"deletionProtection,omitempty"`
-	Web                *AppWeb     `json:"web"`
-	Secrets            []AppSecret `json:"secrets"`
-	Domains            []string    `json:"domains"`
+	Environment        string        `json:"environment"`
+	Cluster            string        `json:"cluster"`
+	DeletionProtection *bool         `json:"deletionProtection,omitempty"`
+	Web                *AppWeb       `json:"web"`
+	Secrets            []AppSecret   `json:"secrets"`
+	Databases          []AppDatabase `json:"databases,omitempty"`
+	Domains            []string      `json:"domains"`
 }
 
 // PatchAppEnvironmentRequest replaces each list with the complete plan.
 // DeploymentRevision is deliberately absent: only the retry route changes it.
 // Pointers distinguish omitted lists from an explicit empty replacement.
 type PatchAppEnvironmentRequest struct {
-	Web                *AppWeb      `json:"web,omitempty"`
-	Secrets            *[]AppSecret `json:"secrets,omitempty"`
-	Domains            *[]string    `json:"domains,omitempty"`
-	DeletionProtection *bool        `json:"deletionProtection,omitempty"`
+	Web                *AppWeb        `json:"web,omitempty"`
+	Secrets            *[]AppSecret   `json:"secrets,omitempty"`
+	Databases          *[]AppDatabase `json:"databases,omitempty"`
+	Domains            *[]string      `json:"domains,omitempty"`
+	DeletionProtection *bool          `json:"deletionProtection,omitempty"`
 }
 
 type AppRetryResponse struct {
@@ -278,7 +303,8 @@ type AppRelease struct {
 
 type AppReleaseRuntime struct {
 	AppWeb
-	Secrets []AppReleaseSecret `json:"secrets"`
+	Secrets   []AppReleaseSecret `json:"secrets"`
+	Databases []AppDatabase      `json:"databases"`
 }
 
 type AppReleaseSecret struct {

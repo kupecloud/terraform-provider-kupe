@@ -53,6 +53,7 @@ func (r *AppEnvironmentResource) ValidateConfig(ctx context.Context, req resourc
 			resp.Diagnostics.AddAttributeError(path.Root("secrets").AtListIndex(i).AtName("path"), "Invalid Vault path", "Use a Vault path beginning with a letter or digit and ending with a letter or digit and containing only letters, digits, '/', '_', '.' and '-'; '..' is not allowed.")
 		}
 	}
+	validateAppDatabases(&config, &resp.Diagnostics)
 	for _, item := range config.Domains.Elements() {
 		if item.IsUnknown() {
 			continue
@@ -143,6 +144,68 @@ func (r *AppEnvironmentResource) ValidateConfig(ctx context.Context, req resourc
 			if aOK && bOK && b.Cmp(a) < 0 {
 				resp.Diagnostics.AddAttributeError(path.Root("web").AtName("resources").AtName("limits").AtName(key), "Limit below request", "Resource limits must be at least requests.")
 			}
+		}
+	}
+}
+
+// validateAppDatabases checks the connections against each other and web.env,
+// in the API's order. A null env is the DATABASE_URL default the plan gets.
+// Unknown values are skipped; the API stays authoritative.
+func validateAppDatabases(config *AppEnvironmentResourceModel, diags *diag.Diagnostics) {
+	if config.Databases.IsNull() || config.Databases.IsUnknown() {
+		return
+	}
+	rejectNullAppListEntries(config.Databases, path.Root("databases"), diags)
+	webEnv, webEnvKnown := map[string]bool{}, false
+	if !config.Web.IsNull() && !config.Web.IsUnknown() {
+		if env := config.Web.Attributes()["env"].(types.List); !env.IsNull() && !env.IsUnknown() {
+			webEnvKnown = true
+			for _, item := range env.Elements() {
+				if item.IsNull() || item.IsUnknown() {
+					continue
+				}
+				if name := item.(types.Object).Attributes()["name"].(types.String); !name.IsUnknown() && !name.IsNull() {
+					webEnv[name.ValueString()] = true
+				}
+			}
+		}
+	}
+	names, envs, targets := map[string]bool{}, map[string]bool{}, map[[2]string]bool{}
+	for i, item := range config.Databases.Elements() {
+		if item.IsNull() || item.IsUnknown() {
+			continue
+		}
+		attrs := item.(types.Object).Attributes()
+		name, database, logical, env := attrs["name"].(types.String), attrs["database"].(types.String), attrs["logical_database"].(types.String), attrs["env"].(types.String)
+		base := path.Root("databases").AtListIndex(i)
+		if !name.IsUnknown() {
+			if names[name.ValueString()] {
+				diags.AddAttributeError(base.AtName("name"), "Duplicate connection", "Connection names must be unique.")
+			}
+			names[name.ValueString()] = true
+			if !config.App.IsUnknown() && !config.Name.IsUnknown() && len("app-"+config.App.ValueString()+"-"+config.Name.ValueString()+"-"+name.ValueString()+"-migrate") > 63 {
+				diags.AddAttributeError(base.AtName("name"), "Connection name too long", "The app, environment and connection name together must fit in the 63-character name of the connection's database binding.")
+			}
+		}
+		if !env.IsUnknown() {
+			variable := env.ValueString()
+			if env.IsNull() {
+				variable = defaultAppDatabaseEnv
+			}
+			if webEnvKnown && webEnv[variable] {
+				diags.AddAttributeError(base.AtName("env"), "Variable already set", "This env name is already set in web.env. Choose another name for the connection.")
+			}
+			if envs[variable] {
+				diags.AddAttributeError(base.AtName("env"), "Duplicate variable", "Each connection needs its own env variable name.")
+			}
+			envs[variable] = true
+		}
+		if !database.IsUnknown() && !logical.IsUnknown() {
+			target := [2]string{database.ValueString(), logical.ValueString()}
+			if targets[target] {
+				diags.AddAttributeError(base.AtName("database"), "Duplicate database", "Each database can be connected once per environment.")
+			}
+			targets[target] = true
 		}
 	}
 }
