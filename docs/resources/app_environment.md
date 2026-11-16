@@ -2,12 +2,12 @@
 page_title: "kupe_app_environment Resource - kupe"
 subcategory: ""
 description: |-
-  Manages one Kupe app environment. Applying deploying settings requests a release. A failed first deployment remains in state without taint; a failed update records the accepted settings and reports an error. Increase deployment_revision by one to retry. Destroying the environment deletes its namespace and everything in it; the cluster is kept. Turn deletion protection off and apply before destroying. Do not independently target this namespace with a kupe_secret or binding.
+  Manages one Kupe app environment. Applying deploying settings requests a release. A failed first deployment remains in state without taint; a failed update records the accepted settings and reports an error. Increase deployment_revision by one to retry. Destroying the environment deletes its namespace and everything in it; the cluster is kept. Turn deletion protection off and apply before destroying. Connect databases with the databases attribute. A kupe_secret or kupe_database_binding you create yourself in this namespace blocks destroying the environment until you remove it.
 ---
 
 # kupe_app_environment (Resource)
 
-Manages one Kupe app environment. Applying deploying settings requests a release. A failed first deployment remains in state without taint; a failed update records the accepted settings and reports an error. Increase deployment_revision by one to retry. Destroying the environment deletes its namespace and everything in it; the cluster is kept. Turn deletion protection off and apply before destroying. Do not independently target this namespace with a kupe_secret or binding.
+Manages one Kupe app environment. Applying deploying settings requests a release. A failed first deployment remains in state without taint; a failed update records the accepted settings and reports an error. Increase deployment_revision by one to retry. Destroying the environment deletes its namespace and everything in it; the cluster is kept. Turn deletion protection off and apply before destroying. Connect databases with the databases attribute. A kupe_secret or kupe_database_binding you create yourself in this namespace blocks destroying the environment until you remove it.
 
 ## Example usage
 
@@ -86,7 +86,7 @@ Pin a version tag in production. If a moving tag such as `latest` points to a ne
 
 ## Deploying and retrying
 
-An apply that changes `web`, a referenced secret path or `deployment_revision` requests a deployment and waits for its requested release. Domain and protection changes wait for the observed settings without starting a release. The default timeouts are create 30 minutes, update 20 minutes and delete 20 minutes.
+An apply that changes `web`, a referenced secret path, `databases` or `deployment_revision` requests a deployment and waits for its requested release. Domain and protection changes wait for the observed settings without starting a release. The default timeouts are create 30 minutes, update 20 minutes and delete 20 minutes.
 
 A failed first deploy, or one that times out while deploying, gives a warning. Terraform retains the resource without taint, so an unchanged apply plans no change. A failed update reports an error and retains the accepted configuration; an unchanged apply does not resubmit it.
 
@@ -98,7 +98,55 @@ If another client changes the environment before its release can be identified, 
 
 Each `secrets` entry points to a tenant Vault path. Write its values in the console Vault page. Environment variables reference its declared name and key. Secret values are never provider attributes.
 
-Do not also target the environment's namespace with an independent `kupe_secret` or service binding. Remove independent deliveries before deleting the environment. The API refuses removal of a secret entry while `web.env` still references it.
+Connect a database with the databases attribute rather than a separate kupe_database_binding. The environment creates and removes its own access, and destroying the environment or removing a connection keeps the database and its backups. A kupe_secret or kupe_database_binding you create yourself in this namespace blocks destroying the environment until you remove it. The API refuses removal of a secret entry while `web.env` still references it.
+
+## Databases
+
+```terraform
+resource "kupe_database" "orders" {
+  name    = "orders-db"
+  version = "18"
+
+  postgres = {
+    databases = [{ name = "orders_db" }, { name = "analytics" }]
+  }
+
+  resources = {
+    cpu     = "500m"
+    memory  = "1Gi"
+    storage = "10Gi"
+  }
+}
+
+resource "kupe_app" "orders" {
+  name = "orders"
+}
+
+resource "kupe_app_environment" "orders" {
+  app     = kupe_app.orders.name
+  name    = "production"
+  cluster = "europe"
+
+  web = {
+    image = "ghcr.io/kupecloud/hello-kupe@sha256:be393b04d81f3a3e63d57be12dce11e823b1af75ea3997eecbc2d19a3b434f93"
+    port  = 8080
+  }
+
+  databases = [
+    # The URL of the first PostgreSQL database arrives in DATABASE_URL.
+    { name = "main", database = kupe_database.orders.name },
+    { name = "reports", database = kupe_database.orders.name, logical_database = "analytics", env = "REPORTS_URL" },
+  ]
+}
+```
+
+Create the database with kupe_database, then connect it here; Terraform orders the two because the connection references the database's name. Each connection puts the database's URL in the variable named by `env`, `DATABASE_URL` by default. `logical_database` selects a PostgreSQL database you added to the database; omit it to use the first.
+
+The first deploy waits until the database is ready. If a new large database takes longer than the 30-minute create timeout, raise `timeouts.create`.
+
+The connection's database cannot change in place: remove the connection and apply, then add it again.
+
+Migrations use the database's owner password. Removing a connection does not revoke it; rotating it changes it for the whole database; and every app connected to the same database shares it. Rotate it with the database's credential rotation if you need to.
 
 ## Deletion
 
@@ -116,6 +164,7 @@ Destroying an environment deletes its namespace and everything in it. The cluste
 
 ### Optional
 
+- `databases` (Attributes List) Databases the web workload connects to, at most 5. Each connection puts the database's URL in an environment variable. Removing a connection keeps the database and its backups. (see [below for nested schema](#nestedatt--databases))
 - `deletion_protection` (Boolean) Set to false and apply before destroying the environment.
 - `deployment_revision` (Number) Increase by one to retry the current deployment. An unchanged apply never retries.
 - `domains` (Set of String) Complete set of exact lowercase custom hostnames. Domain changes do not deploy.
@@ -126,6 +175,7 @@ Destroying an environment deletes its namespace and everything in it. The cluste
 
 - `active_release` (String) Release currently serving.
 - `address` (String) Generated HTTPS address.
+- `database_status` (Attributes List) Observed state of each database connection. (see [below for nested schema](#nestedatt--database_status))
 - `deployment_phase` (String) Outcome of the requested release, independently of recovery.
 - `deployment_reason` (String) Reason for the requested release's outcome.
 - `etag` (String) Resource version used for optimistic locking during updates.
@@ -254,6 +304,20 @@ Optional:
 
 
 
+<a id="nestedatt--databases"></a>
+### Nested Schema for `databases`
+
+Required:
+
+- `database` (String) Name of the database to connect. Reference `kupe_database.<name>.name`. Cannot change once the connection exists.
+- `name` (String) Connection name: an RFC 1123 label of at most 55 characters.
+
+Optional:
+
+- `env` (String) Environment variable that carries the connection URL. Defaults to `DATABASE_URL`.
+- `logical_database` (String) PostgreSQL database to connect, one you added to the database. Omit it to use the first database. Cannot change once the connection exists.
+
+
 <a id="nestedatt--secrets"></a>
 ### Nested Schema for `secrets`
 
@@ -271,6 +335,16 @@ Optional:
 - `create` (String) A string that can be [parsed as a duration](https://pkg.go.dev/time#ParseDuration) consisting of numbers and unit suffixes, such as "30s" or "2h45m". Valid time units are "s" (seconds), "m" (minutes), "h" (hours).
 - `delete` (String) A string that can be [parsed as a duration](https://pkg.go.dev/time#ParseDuration) consisting of numbers and unit suffixes, such as "30s" or "2h45m". Valid time units are "s" (seconds), "m" (minutes), "h" (hours). Setting a timeout for a Delete operation is only applicable if changes are saved into state before the destroy operation occurs.
 - `update` (String) A string that can be [parsed as a duration](https://pkg.go.dev/time#ParseDuration) consisting of numbers and unit suffixes, such as "30s" or "2h45m". Valid time units are "s" (seconds), "m" (minutes), "h" (hours).
+
+
+<a id="nestedatt--database_status"></a>
+### Nested Schema for `database_status`
+
+Read-Only:
+
+- `message` (String) Why the connection is not ready yet, if it isn't.
+- `name` (String) Connection name.
+- `phase` (String) Connection phase.
 
 ## Import
 

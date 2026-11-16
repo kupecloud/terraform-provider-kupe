@@ -110,7 +110,7 @@ func (r *AppEnvironmentResource) Create(ctx context.Context, req resource.Create
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	web, secrets, domains, diags := appEnvironmentSettings(ctx, &plan)
+	web, secrets, databases, domains, diags := appEnvironmentSettings(ctx, &plan)
 	resp.Diagnostics.Append(diags...)
 	timeout, diags := plan.Timeouts.Create(ctx, appEnvironmentKind.defaults.create)
 	resp.Diagnostics.Append(diags...)
@@ -120,7 +120,7 @@ func (r *AppEnvironmentResource) Create(ctx context.Context, req resource.Create
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	protected := plan.DeletionProtection.ValueBool()
-	env, etag, err := r.client.CreateAppEnvironment(ctx, plan.App.ValueString(), client.CreateAppEnvironmentRequest{Environment: plan.Name.ValueString(), Cluster: plan.Cluster.ValueString(), Web: web, Secrets: secrets, Domains: domains, DeletionProtection: &protected})
+	env, etag, err := r.client.CreateAppEnvironment(ctx, plan.App.ValueString(), client.CreateAppEnvironmentRequest{Environment: plan.Name.ValueString(), Cluster: plan.Cluster.ValueString(), Web: web, Secrets: secrets, Databases: databases, Domains: domains, DeletionProtection: &protected})
 	if err != nil {
 		resp.Diagnostics.AddError("failed to create app environment", apiErrorDetail(err))
 		return
@@ -287,7 +287,7 @@ func appEnvironmentSettingsChanged(prior *AppEnvironmentResourceModel, current *
 		equal bool
 	}{
 		{"app", prior.App.Equal(mapped.App)}, {"name", prior.Name.Equal(mapped.Name)}, {"cluster", prior.Cluster.Equal(mapped.Cluster)},
-		{"web", prior.Web.Equal(mapped.Web)}, {"secrets", prior.Secrets.Equal(mapped.Secrets)}, {"domains", prior.Domains.Equal(mapped.Domains)},
+		{"web", prior.Web.Equal(mapped.Web)}, {"secrets", prior.Secrets.Equal(mapped.Secrets)}, {"databases", prior.Databases.Equal(mapped.Databases)}, {"domains", prior.Domains.Equal(mapped.Domains)},
 		{"deletion_protection", prior.DeletionProtection.Equal(mapped.DeletionProtection)}, {"deployment_revision", prior.DeploymentRevision.Equal(mapped.DeploymentRevision)},
 	} {
 		if !item.equal {
@@ -314,7 +314,7 @@ func (r *AppEnvironmentResource) waitAppEnvironment(ctx context.Context, timeout
 		// Status observations never silently adopt another writer's config.
 		mapAppEnvironmentToState(current, etag, m)
 		m.App, m.Name, m.Cluster = acceptedModel.App, acceptedModel.Name, acceptedModel.Cluster
-		m.Web, m.Secrets, m.Domains = acceptedModel.Web, acceptedModel.Secrets, acceptedModel.Domains
+		m.Web, m.Secrets, m.Databases, m.Domains = acceptedModel.Web, acceptedModel.Secrets, acceptedModel.Databases, acceptedModel.Domains
 		m.DeletionProtection, m.DeploymentRevision = acceptedModel.DeletionProtection, acceptedModel.DeploymentRevision
 		if !deploying {
 			preserveAppPlannedStatus(m, &acceptedModel)
@@ -510,6 +510,25 @@ func appReleaseMatches(accepted *client.AppEnvironment, release *client.AppRelea
 			return false
 		}
 	}
+	return appReleaseDatabasesMatch(accepted.Databases, release.Runtime.Databases)
+}
+
+// appReleaseDatabasesMatch compares connections by name: the release runtime
+// is a map keyed by name, so its order is not the configured order.
+func appReleaseDatabasesMatch(accepted, runtime []client.AppDatabase) bool {
+	if len(accepted) != len(runtime) {
+		return false
+	}
+	byName := make(map[string]client.AppDatabase, len(accepted))
+	for _, conn := range accepted {
+		byName[conn.Name] = conn
+	}
+	for _, conn := range runtime {
+		want, ok := byName[conn.Name]
+		if !ok || want.Database != conn.Database || want.LogicalDatabase != conn.LogicalDatabase || want.Env != conn.Env {
+			return false
+		}
+	}
 	return true
 }
 
@@ -539,6 +558,9 @@ func preserveAppPlannedStatus(m, planned *AppEnvironmentResourceModel) {
 	}
 	if !planned.RecoveryRelease.IsUnknown() {
 		m.RecoveryRelease = planned.RecoveryRelease
+	}
+	if !planned.DatabaseStatus.IsUnknown() {
+		m.DatabaseStatus = planned.DatabaseStatus
 	}
 }
 

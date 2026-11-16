@@ -35,26 +35,38 @@ type appSecretModel struct {
 	Path types.String `tfsdk:"path"`
 }
 
+type appDatabaseModel struct {
+	Name            types.String `tfsdk:"name"`
+	Database        types.String `tfsdk:"database"`
+	LogicalDatabase types.String `tfsdk:"logical_database"`
+	Env             types.String `tfsdk:"env"`
+}
+
+// defaultAppDatabaseEnv is the variable a connection's URL is delivered in
+// when the connection names none; the API and the CRD default to the same.
+const defaultAppDatabaseEnv = "DATABASE_URL"
+
 // appEnvironmentSettings converts a fully known apply plan. Unknown values
 // remain framework diagnostics, never zero-valued API writes.
-func appEnvironmentSettings(ctx context.Context, m *AppEnvironmentResourceModel) (*client.AppWeb, []client.AppSecret, []string, diag.Diagnostics) {
+func appEnvironmentSettings(ctx context.Context, m *AppEnvironmentResourceModel) (*client.AppWeb, []client.AppSecret, []client.AppDatabase, []string, diag.Diagnostics) {
 	var diags diag.Diagnostics
 	rejectNullAppListEntries(m.Secrets, path.Root("secrets"), &diags)
+	rejectNullAppListEntries(m.Databases, path.Root("databases"), &diags)
 	var web appWebModel
 	diags.Append(m.Web.As(ctx, &web, basetypes.ObjectAsOptions{})...)
 	if diags.HasError() {
-		return nil, nil, nil, diags
+		return nil, nil, nil, nil, diags
 	}
 	rejectNullAppListEntries(web.Env, path.Root("web").AtName("env"), &diags)
 	if diags.HasError() {
-		return nil, nil, nil, diags
+		return nil, nil, nil, nil, diags
 	}
 	// #nosec G115 -- The schema validates port in 1..65535 and replicas in 1..10 before apply.
 	out := &client.AppWeb{Image: web.Image.ValueString(), Port: int32(web.Port.ValueInt64()), Replicas: int32(web.Replicas.ValueInt64()), Command: []string{}, Args: []string{}, Env: []client.AppEnvVar{}}
 	diags.Append(web.Command.ElementsAs(ctx, &out.Command, false)...)
 	diags.Append(web.Args.ElementsAs(ctx, &out.Args, false)...)
 	if diags.HasError() {
-		return nil, nil, nil, diags
+		return nil, nil, nil, nil, diags
 	}
 	resources := web.Resources.Attributes()
 	out.Resources.Requests = appQuantitiesFromObject(resources["requests"].(types.Object))
@@ -62,7 +74,7 @@ func appEnvironmentSettings(ctx context.Context, m *AppEnvironmentResourceModel)
 	var env []appEnvModel
 	diags.Append(web.Env.ElementsAs(ctx, &env, false)...)
 	if diags.HasError() {
-		return nil, nil, nil, diags
+		return nil, nil, nil, nil, diags
 	}
 	for _, entry := range env {
 		value := client.AppEnvVar{Name: entry.Name.ValueString()}
@@ -81,16 +93,55 @@ func appEnvironmentSettings(ctx context.Context, m *AppEnvironmentResourceModel)
 	var secrets []appSecretModel
 	diags.Append(m.Secrets.ElementsAs(ctx, &secrets, false)...)
 	if diags.HasError() {
-		return nil, nil, nil, diags
+		return nil, nil, nil, nil, diags
 	}
 	secretRefs := make([]client.AppSecret, 0, len(secrets))
 	for _, secret := range secrets {
 		secretRefs = append(secretRefs, client.AppSecret{Name: secret.Name.ValueString(), Path: secret.Path.ValueString()})
 	}
+	var databases []appDatabaseModel
+	diags.Append(m.Databases.ElementsAs(ctx, &databases, false)...)
+	if diags.HasError() {
+		return nil, nil, nil, nil, diags
+	}
+	connections := make([]client.AppDatabase, 0, len(databases))
+	for _, conn := range databases {
+		env := conn.Env.ValueString()
+		if env == "" {
+			env = defaultAppDatabaseEnv
+		}
+		connections = append(connections, client.AppDatabase{Name: conn.Name.ValueString(), Database: conn.Database.ValueString(), LogicalDatabase: conn.LogicalDatabase.ValueString(), Env: env})
+	}
 	domains := []string{}
 	diags.Append(m.Domains.ElementsAs(ctx, &domains, false)...)
 	sort.Strings(domains)
-	return out, secretRefs, domains, diags
+	return out, secretRefs, connections, domains, diags
+}
+
+// appDatabasesToList mirrors the response's connections. An absent list (an
+// API that predates connections) is the empty list the schema defaults to.
+func appDatabasesToList(databases []client.AppDatabase) types.List {
+	out := make([]attr.Value, 0, len(databases))
+	for _, conn := range databases {
+		env := conn.Env
+		if env == "" {
+			env = defaultAppDatabaseEnv
+		}
+		out = append(out, types.ObjectValueMust(appDatabaseTypes, map[string]attr.Value{"name": types.StringValue(conn.Name), "database": types.StringValue(conn.Database), "logical_database": stringOrNull(conn.LogicalDatabase), "env": types.StringValue(env)}))
+	}
+	return types.ListValueMust(types.ObjectType{AttrTypes: appDatabaseTypes}, out)
+}
+
+// appDatabaseStatusToList keeps only name, phase and message: Secret names
+// and credentials are never attributes (BIND-25).
+func appDatabaseStatusToList(status *client.AppEnvironmentStatus) types.List {
+	out := []attr.Value{}
+	if status != nil {
+		for _, conn := range status.Databases {
+			out = append(out, types.ObjectValueMust(appDatabaseStatusTypes, map[string]attr.Value{"name": types.StringValue(conn.Name), "phase": types.StringValue(conn.Phase), "message": types.StringValue(conn.Message)}))
+		}
+	}
+	return types.ListValueMust(types.ObjectType{AttrTypes: appDatabaseStatusTypes}, out)
 }
 
 func appQuantitiesFromObject(object types.Object) client.AppQuantities {
@@ -166,6 +217,8 @@ func mapAppEnvironmentToState(env *client.AppEnvironment, etag string, m *AppEnv
 		secrets = append(secrets, types.ObjectValueMust(appSecretTypes, map[string]attr.Value{"name": types.StringValue(secret.Name), "path": types.StringValue(secret.Path)}))
 	}
 	m.Secrets = types.ListValueMust(types.ObjectType{AttrTypes: appSecretTypes}, secrets)
+	m.Databases = appDatabasesToList(env.Databases)
+	m.DatabaseStatus = appDatabaseStatusToList(env.Status)
 	domains := make([]attr.Value, 0, len(env.Domains))
 	for _, domain := range env.Domains {
 		domains = append(domains, types.StringValue(domain))
@@ -201,23 +254,24 @@ func appReleaseName(ref *client.AppReleaseRef) types.String {
 // Even a protection-only patch carries all lists, so list removals never become
 // omissions during a combined update. This does not change deploymentRevision.
 func appEnvironmentPatch(ctx context.Context, plan, prior *AppEnvironmentResourceModel) (client.PatchAppEnvironmentRequest, bool, diag.Diagnostics) {
-	web, secrets, domains, diags := appEnvironmentSettings(ctx, plan)
-	changed := !plan.Web.Equal(prior.Web) || !plan.Secrets.Equal(prior.Secrets) || !plan.Domains.Equal(prior.Domains) || !plan.DeletionProtection.Equal(prior.DeletionProtection)
+	web, secrets, databases, domains, diags := appEnvironmentSettings(ctx, plan)
+	changed := !plan.Web.Equal(prior.Web) || !plan.Secrets.Equal(prior.Secrets) || !plan.Databases.Equal(prior.Databases) || !plan.Domains.Equal(prior.Domains) || !plan.DeletionProtection.Equal(prior.DeletionProtection)
 	if diags.HasError() || !changed {
 		return client.PatchAppEnvironmentRequest{}, false, diags
 	}
 	protected := plan.DeletionProtection.ValueBool()
-	if plan.Web.Equal(prior.Web) && plan.Secrets.Equal(prior.Secrets) && plan.Domains.Equal(prior.Domains) {
+	if plan.Web.Equal(prior.Web) && plan.Secrets.Equal(prior.Secrets) && plan.Databases.Equal(prior.Databases) && plan.Domains.Equal(prior.Domains) {
 		// The API serves protection-only cleanup while Apps are off.
 		return client.PatchAppEnvironmentRequest{DeletionProtection: &protected}, true, diags
 	}
-	return client.PatchAppEnvironmentRequest{Web: web, Secrets: &secrets, Domains: &domains, DeletionProtection: &protected}, true, diags
+	return client.PatchAppEnvironmentRequest{Web: web, Secrets: &secrets, Databases: &databases, Domains: &domains, DeletionProtection: &protected}, true, diags
 }
 
 // Only secret entries referenced by web.env contribute to a release. Changing
-// an unused Vault path is a settings update, just like a domain change.
+// an unused Vault path is a settings update, just like a domain change. Any
+// database connection change, env included, deploys.
 func appEnvironmentDeployingChange(plan, prior *AppEnvironmentResourceModel) bool {
-	if !plan.Web.Equal(prior.Web) || !plan.DeploymentRevision.Equal(prior.DeploymentRevision) {
+	if !plan.Web.Equal(prior.Web) || !plan.DeploymentRevision.Equal(prior.DeploymentRevision) || !plan.Databases.Equal(prior.Databases) {
 		return true
 	}
 	if plan.Secrets.Equal(prior.Secrets) {

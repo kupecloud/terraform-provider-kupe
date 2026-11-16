@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
@@ -9,6 +10,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework-validators/setvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -16,6 +18,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listdefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setdefault"
@@ -40,6 +43,8 @@ type AppEnvironmentResourceModel struct {
 	DeploymentRevision    types.Int64    `tfsdk:"deployment_revision"`
 	Web                   types.Object   `tfsdk:"web"`
 	Secrets               types.List     `tfsdk:"secrets"`
+	Databases             types.List     `tfsdk:"databases"`
+	DatabaseStatus        types.List     `tfsdk:"database_status"`
 	Domains               types.Set      `tfsdk:"domains"`
 	Namespace             types.String   `tfsdk:"namespace"`
 	Address               types.String   `tfsdk:"address"`
@@ -60,6 +65,8 @@ var appResourcesTypes = map[string]attr.Type{"requests": types.ObjectType{AttrTy
 var appKeyRefTypes = map[string]attr.Type{"secret": types.StringType, "key": types.StringType}
 var appEnvTypes = map[string]attr.Type{"name": types.StringType, "value": types.StringType, "secret_key_ref": types.ObjectType{AttrTypes: appKeyRefTypes}}
 var appSecretTypes = map[string]attr.Type{"name": types.StringType, "path": types.StringType}
+var appDatabaseTypes = map[string]attr.Type{"name": types.StringType, "database": types.StringType, "logical_database": types.StringType, "env": types.StringType}
+var appDatabaseStatusTypes = map[string]attr.Type{"name": types.StringType, "phase": types.StringType, "message": types.StringType}
 var appHTTPTypes = map[string]attr.Type{"path": types.StringType}
 var appProbeTypes = map[string]attr.Type{"tcp": types.ObjectType{AttrTypes: map[string]attr.Type{}}, "http": types.ObjectType{AttrTypes: appHTTPTypes}}
 var appHealthTypes = map[string]attr.Type{"readiness": types.ObjectType{AttrTypes: appProbeTypes}, "liveness": types.ObjectType{AttrTypes: appProbeTypes}}
@@ -95,6 +102,12 @@ func (r *AppEnvironmentResource) Schema(ctx context.Context, _ resource.SchemaRe
 			"name": schema.StringAttribute{Required: true, Validators: []validator.String{stringvalidator.LengthAtMost(63), stringvalidator.RegexMatches(namespacePattern, "must be an RFC 1123 label")}, Description: "Name used by secret_key_ref."},
 			"path": schema.StringAttribute{Required: true, Description: "Tenant Vault path.", Validators: []validator.String{stringvalidator.LengthBetween(1, 512)}},
 		}}},
+		"databases": appDatabasesAttribute(),
+		"database_status": schema.ListNestedAttribute{Computed: true, Description: "Observed state of each database connection.", PlanModifiers: []planmodifier.List{listplanmodifier.UseStateForUnknown()}, NestedObject: schema.NestedAttributeObject{Attributes: map[string]schema.Attribute{
+			"name":    schema.StringAttribute{Computed: true, Description: "Connection name."},
+			"phase":   schema.StringAttribute{Computed: true, Description: "Connection phase."},
+			"message": schema.StringAttribute{Computed: true, Description: "Why the connection is not ready yet, if it isn't."},
+		}}},
 		"domains":  schema.SetAttribute{Optional: true, Computed: true, ElementType: types.StringType, Default: setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})), Description: "Complete set of exact lowercase custom hostnames. Domain changes do not deploy.", Validators: []validator.Set{setvalidator.SizeAtMost(5)}},
 		"etag":     etagAttribute(),
 		"timeouts": timeouts.Attributes(ctx, timeouts.Opts{Create: true, Update: true, Delete: true}),
@@ -108,7 +121,19 @@ func (r *AppEnvironmentResource) Schema(ctx context.Context, _ resource.SchemaRe
 	} {
 		attrs[key] = schema.StringAttribute{Computed: true, Description: description, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}}
 	}
-	resp.Schema = schema.Schema{Description: "Manages one Kupe app environment. Applying deploying settings requests a release. A failed first deployment remains in state without taint; a failed update records the accepted settings and reports an error. Increase deployment_revision by one to retry. Destroying the environment deletes its namespace and everything in it; the cluster is kept. Turn deletion protection off and apply before destroying. Do not independently target this namespace with a kupe_secret or binding.", Attributes: attrs}
+	resp.Schema = schema.Schema{Description: "Manages one Kupe app environment. Applying deploying settings requests a release. A failed first deployment remains in state without taint; a failed update records the accepted settings and reports an error. Increase deployment_revision by one to retry. Destroying the environment deletes its namespace and everything in it; the cluster is kept. Turn deletion protection off and apply before destroying. Connect databases with the databases attribute. A kupe_secret or kupe_database_binding you create yourself in this namespace blocks destroying the environment until you remove it.", Attributes: attrs}
+}
+
+// appDatabasesAttribute is the environment's complete list of database
+// connections. A list, like secrets, keeps element paths stable in
+// diagnostics; the API keys entries by name so order does not matter to it.
+func appDatabasesAttribute() schema.ListNestedAttribute {
+	return schema.ListNestedAttribute{Optional: true, Computed: true, Default: listdefault.StaticValue(types.ListValueMust(types.ObjectType{AttrTypes: appDatabaseTypes}, []attr.Value{})), Description: "Databases the web workload connects to, at most 5. Each connection puts the database's URL in an environment variable. Removing a connection keeps the database and its backups.", Validators: []validator.List{listvalidator.SizeAtMost(5)}, NestedObject: schema.NestedAttributeObject{Attributes: map[string]schema.Attribute{
+		"name":             schema.StringAttribute{Required: true, Validators: []validator.String{stringvalidator.LengthAtMost(55), stringvalidator.RegexMatches(namespacePattern, "must be an RFC 1123 label")}, Description: "Connection name: an RFC 1123 label of at most 55 characters."},
+		"database":         schema.StringAttribute{Required: true, Validators: databaseRefValidators(), Description: "Name of the database to connect. Reference `kupe_database.<name>.name`. Cannot change once the connection exists."},
+		"logical_database": schema.StringAttribute{Optional: true, Validators: logicalNameValidators(53), Description: "PostgreSQL database to connect, one you added to the database. Omit it to use the first database. Cannot change once the connection exists."},
+		"env":              schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(defaultAppDatabaseEnv), Validators: []validator.String{stringvalidator.LengthBetween(1, 253), stringvalidator.RegexMatches(appEnvNamePattern, "must be a valid environment variable name")}, Description: "Environment variable that carries the connection URL. Defaults to `DATABASE_URL`."},
+	}}}
 }
 
 func appWebAttribute() schema.SingleNestedAttribute {
@@ -168,6 +193,21 @@ func (r *AppEnvironmentResource) ModifyPlan(ctx context.Context, req resource.Mo
 		}
 		return
 	}
+	// A replacement (app, name or cluster changed) creates new connections,
+	// so only an in-place update keeps each connection's database.
+	replaced := false
+	for _, name := range []string{"app", "name", "cluster"} {
+		var plannedValue, priorValue types.String
+		resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root(name), &plannedValue)...)
+		resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root(name), &priorValue)...)
+		replaced = replaced || !plannedValue.Equal(priorValue)
+	}
+	if !replaced {
+		var plannedDatabases, priorDatabases types.List
+		resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("databases"), &plannedDatabases)...)
+		resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("databases"), &priorDatabases)...)
+		appDatabasesImmutable(plannedDatabases, priorDatabases, &resp.Diagnostics)
+	}
 	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("deployment_revision"), &prior)...)
 	if resp.Diagnostics.HasError() || planned.IsUnknown() || planned.IsNull() || prior.IsUnknown() || prior.IsNull() {
 		return
@@ -179,8 +219,49 @@ func (r *AppEnvironmentResource) ModifyPlan(ctx context.Context, req resource.Mo
 		for _, name := range []string{"phase", "deployment_phase", "deployment_reason", "requested_release", "active_release", "last_successful_release", "recovery_phase", "recovery_release"} {
 			resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root(name), types.StringUnknown())...)
 		}
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("database_status"), types.ListUnknown(types.ObjectType{AttrTypes: appDatabaseStatusTypes}))...)
 	}
 	if planned.ValueInt64() != prior.ValueInt64() && planned.ValueInt64() != prior.ValueInt64()+1 {
 		resp.Diagnostics.AddAttributeError(path.Root("deployment_revision"), "Invalid deployment revision", "deployment_revision can only be increased by one per apply")
+	}
+}
+
+// appDatabasesImmutable refuses a planned connection whose name is in state
+// with another database or logical database. Replacing the environment
+// instead would delete its namespace, so this is a plan error, never a
+// replacement. Unknown values are left to the API.
+func appDatabasesImmutable(planned, prior types.List, diags *diag.Diagnostics) {
+	if planned.IsNull() || planned.IsUnknown() || prior.IsNull() || prior.IsUnknown() {
+		return
+	}
+	type target struct{ database, logical string }
+	existing := map[string]target{}
+	for _, item := range prior.Elements() {
+		object, ok := item.(types.Object)
+		if !ok || object.IsNull() || object.IsUnknown() {
+			continue
+		}
+		attrs := object.Attributes()
+		existing[attrs["name"].(types.String).ValueString()] = target{attrs["database"].(types.String).ValueString(), attrs["logical_database"].(types.String).ValueString()}
+	}
+	for i, item := range planned.Elements() {
+		object, ok := item.(types.Object)
+		if !ok || object.IsNull() || object.IsUnknown() {
+			continue
+		}
+		attrs := object.Attributes()
+		name, database, logical := attrs["name"].(types.String), attrs["database"].(types.String), attrs["logical_database"].(types.String)
+		if name.IsUnknown() || database.IsUnknown() || logical.IsUnknown() {
+			continue
+		}
+		old, found := existing[name.ValueString()]
+		if !found || (old.database == database.ValueString() && old.logical == logical.ValueString()) {
+			continue
+		}
+		used := old.database
+		if old.logical != "" {
+			used += "/" + old.logical
+		}
+		diags.AddAttributeError(path.Root("databases").AtListIndex(i), "Connection database cannot change", fmt.Sprintf("Connection %q already uses database %q. Remove the connection and apply, then add it again with the new database.", name.ValueString(), used))
 	}
 }

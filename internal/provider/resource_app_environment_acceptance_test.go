@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 
 	acc "github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
@@ -682,6 +683,106 @@ data "kupe_app_image" "web" { image = %q }
 				return fmt.Errorf("unchanged apply used a cached image resolution")
 			}
 			return assertSingleImagePatch(state)
+		}},
+	}})
+}
+
+const appTestTwoConnections = `databases = [{ name = "main", database = "orders-db" }, { name = "reports", database = "orders-db", logical_database = "analytics", env = "REPORTS_URL" }]`
+
+func appEnvironmentRequestBodies(mock *mockKupeAPI, method string) []map[string]any {
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	var out []map[string]any
+	for _, request := range mock.appEnvironmentRequests {
+		if request.method == method && strings.HasSuffix(request.path, "/environments") == (method == http.MethodPost) {
+			out = append(out, request.body)
+		}
+	}
+	return out
+}
+
+func TestAccAppEnvironmentDatabaseConnectionsLifecycle(t *testing.T) {
+	shrinkPollInterval(t)
+	mock := newMockKupeAPI()
+	defer mock.close()
+	withDatabases := func(databases string) string {
+		return testAccAppEnvironmentConfig(mock.url(), "a", databases)
+	}
+	created := withDatabases(appTestTwoConnections)
+	envOnly := withDatabases(`databases = [{ name = "main", database = "orders-db", env = "ORDERS_URL" }, { name = "reports", database = "orders-db", logical_database = "analytics", env = "REPORTS_URL" }]`)
+	moved := withDatabases(`databases = [{ name = "main", database = "users-db", env = "ORDERS_URL" }, { name = "reports", database = "orders-db", logical_database = "analytics", env = "REPORTS_URL" }]`)
+	var patchesBefore int
+	acc.UnitTest(t, acc.TestCase{ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(), Steps: []acc.TestStep{
+		{Config: created, Check: acc.ComposeTestCheckFunc(
+			acc.TestCheckResourceAttr(appEnvironmentAddr, "databases.#", "2"),
+			acc.TestCheckResourceAttr(appEnvironmentAddr, "databases.0.env", "DATABASE_URL"),
+			acc.TestCheckNoResourceAttr(appEnvironmentAddr, "databases.0.logical_database"),
+			acc.TestCheckResourceAttr(appEnvironmentAddr, "databases.1.logical_database", "analytics"),
+			acc.TestCheckResourceAttr(appEnvironmentAddr, "database_status.#", "2"),
+			acc.TestCheckResourceAttr(appEnvironmentAddr, "database_status.0.name", "main"),
+			acc.TestCheckResourceAttr(appEnvironmentAddr, "database_status.0.phase", "Ready"),
+			acc.TestCheckResourceAttr(appEnvironmentAddr, "phase", "Running"),
+		)},
+		{Config: created, PlanOnly: true},
+		{ResourceName: appEnvironmentAddr, ImportState: true, ImportStateId: "shop/production", ImportStateVerify: true, ImportStateVerifyIdentifierAttribute: "name"},
+		{Config: envOnly, ConfigPlanChecks: acc.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+			plancheck.ExpectResourceAction(appEnvironmentAddr, plancheck.ResourceActionUpdate),
+			plancheck.ExpectUnknownValue(appEnvironmentAddr, tfjsonpath.New("database_status")),
+		}}, Check: acc.TestCheckResourceAttr(appEnvironmentAddr, "databases.0.env", "ORDERS_URL")},
+		{Config: moved, PreConfig: func() { patchesBefore = appEnvironmentRequestCount(mock, http.MethodPatch, "/production") }, PlanOnly: true,
+			ExpectError: regexp.MustCompile(`(?s)Connection database cannot change.*` + wrappedText(`Connection "main" already uses database "orders-db". Remove the connection and apply, then add it again with the new database.`))},
+		{Config: withDatabases(""), PreConfig: func() {
+			if got := appEnvironmentRequestCount(mock, http.MethodPatch, "/production"); got != patchesBefore {
+				t.Errorf("refused database change sent %d PATCH requests", got-patchesBefore)
+			}
+		}, Check: acc.ComposeTestCheckFunc(acc.TestCheckResourceAttr(appEnvironmentAddr, "databases.#", "0"), acc.TestCheckResourceAttr(appEnvironmentAddr, "database_status.#", "0"))},
+		{Config: withDatabases(""), PlanOnly: true},
+	}})
+	posts := appEnvironmentRequestBodies(mock, http.MethodPost)
+	if len(posts) != 1 {
+		t.Fatalf("create requests = %d, want 1", len(posts))
+	}
+	want := []any{
+		map[string]any{"name": "main", "database": "orders-db", "env": "DATABASE_URL"},
+		map[string]any{"name": "reports", "database": "orders-db", "logicalDatabase": "analytics", "env": "REPORTS_URL"},
+	}
+	if !reflect.DeepEqual(posts[0]["databases"], want) {
+		t.Fatalf("create sent databases %#v, want %#v", posts[0]["databases"], want)
+	}
+	patches := appEnvironmentRequestBodies(mock, http.MethodPatch)
+	if len(patches) != 2 {
+		t.Fatalf("PATCH requests = %d, want the env change and the removal", len(patches))
+	}
+	if got := patches[0]["databases"].([]any)[0].(map[string]any)["env"]; got != "ORDERS_URL" {
+		t.Fatalf("env change sent env %v", got)
+	}
+	if got, ok := patches[1]["databases"].([]any); !ok || len(got) != 0 {
+		t.Fatalf(`removing every connection sent databases %#v, want "databases":[]`, patches[1]["databases"])
+	}
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	// Create, the env change and the removal each deploy; the mock keeps the
+	// history after destroy.
+	if got := len(mock.appReleases["shop/production"]); got != 3 {
+		t.Fatalf("releases = %d, want 3: every databases change deploys", got)
+	}
+}
+
+// A state written before connections existed, or an API that predates them,
+// has no databases. Refresh maps both to the empty default, so an unchanged
+// configuration plans no change.
+func TestAccAppEnvironmentWithoutDatabasesPlansNoChange(t *testing.T) {
+	shrinkPollInterval(t)
+	mock := newMockKupeAPI()
+	defer mock.close()
+	config := testAccAppEnvironmentConfig(mock.url(), "a", "")
+	acc.UnitTest(t, acc.TestCase{ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(), Steps: []acc.TestStep{
+		{Config: config},
+		{Config: config, PlanOnly: true, PreConfig: func() {
+			mock.mu.Lock()
+			defer mock.mu.Unlock()
+			env := mock.appEnvironments["shop/production"]
+			env.Databases, env.Status.Databases = nil, nil
 		}},
 	}})
 }
