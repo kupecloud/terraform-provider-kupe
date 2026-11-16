@@ -3,6 +3,8 @@ package provider
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -11,6 +13,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -437,8 +441,8 @@ func TestAppEnvironmentStateMapsDatabasesAndOmitsSecretNames(t *testing.T) {
 	if !m.DatabaseStatus.Equal(wantStatus) {
 		t.Fatalf("database_status = %v, want %v", m.DatabaseStatus, wantStatus)
 	}
-	// An API without connections, and a state written before them, map to
-	// the empty lists the schema defaults to, so the next plan is empty.
+	// A response without connections maps to the empty lists the schema
+	// defaults to.
 	mapAppEnvironmentToState(&client.AppEnvironment{}, "", &m)
 	if m.Databases.IsNull() || len(m.Databases.Elements()) != 0 || m.DatabaseStatus.IsNull() || len(m.DatabaseStatus.Elements()) != 0 {
 		t.Fatalf("absent connections mapped to %v / %v, want empty lists", m.Databases, m.DatabaseStatus)
@@ -466,5 +470,55 @@ func TestAppReleaseMatchesDatabasesByName(t *testing.T) {
 	release.Runtime.Databases = []client.AppDatabase{main, moved}
 	if appReleaseMatches(env, release) {
 		t.Fatal("a release with the old env matched")
+	}
+}
+
+// The immutability check skips replacements by comparing
+// appEnvironmentReplaceAttributes; a new RequiresReplace attribute must be
+// added there too.
+func TestAppEnvironmentReplaceAttributesMatchSchema(t *testing.T) {
+	ctx := context.Background()
+	sch := testResourceSchema(t, NewAppEnvironmentResource())
+	replace := stringplanmodifier.RequiresReplace().Description(ctx)
+	var got []string
+	for name, attribute := range sch.Schema.Attributes {
+		var descriptions []string
+		switch a := attribute.(type) {
+		case schema.StringAttribute:
+			for _, m := range a.PlanModifiers {
+				descriptions = append(descriptions, m.Description(ctx))
+			}
+		case schema.Int64Attribute:
+			for _, m := range a.PlanModifiers {
+				descriptions = append(descriptions, m.Description(ctx))
+			}
+		case schema.BoolAttribute:
+			for _, m := range a.PlanModifiers {
+				descriptions = append(descriptions, m.Description(ctx))
+			}
+		case schema.ListNestedAttribute:
+			for _, m := range a.PlanModifiers {
+				descriptions = append(descriptions, m.Description(ctx))
+			}
+		case schema.SetAttribute:
+			for _, m := range a.PlanModifiers {
+				descriptions = append(descriptions, m.Description(ctx))
+			}
+		case schema.SingleNestedAttribute:
+			for _, m := range a.PlanModifiers {
+				descriptions = append(descriptions, m.Description(ctx))
+			}
+		}
+		for _, description := range descriptions {
+			if description == replace {
+				got = append(got, name)
+			}
+		}
+	}
+	sort.Strings(got)
+	want := append([]string{}, appEnvironmentReplaceAttributes...)
+	sort.Strings(want)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("RequiresReplace attributes = %v, appEnvironmentReplaceAttributes = %v", got, want)
 	}
 }

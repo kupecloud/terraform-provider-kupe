@@ -181,6 +181,12 @@ func appProbeAttribute(readiness bool) schema.SingleNestedAttribute {
 	return attribute
 }
 
+// appEnvironmentReplaceAttributes are the attributes whose change replaces
+// the environment. The framework hands resource ModifyPlan an empty
+// RequiresReplace, so the attribute plan modifiers' paths cannot be read
+// there; a test fails when this list and the schema disagree.
+var appEnvironmentReplaceAttributes = []string{"app", "name", "cluster"}
+
 func (r *AppEnvironmentResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
 	if req.Plan.Raw.IsNull() {
 		return
@@ -193,10 +199,10 @@ func (r *AppEnvironmentResource) ModifyPlan(ctx context.Context, req resource.Mo
 		}
 		return
 	}
-	// A replacement (app, name or cluster changed) creates new connections,
-	// so only an in-place update keeps each connection's database.
+	// A replacement creates new connections, so only an in-place update keeps
+	// each connection's database.
 	replaced := false
-	for _, name := range []string{"app", "name", "cluster"} {
+	for _, name := range appEnvironmentReplaceAttributes {
 		var plannedValue, priorValue types.String
 		resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root(name), &plannedValue)...)
 		resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root(name), &priorValue)...)
