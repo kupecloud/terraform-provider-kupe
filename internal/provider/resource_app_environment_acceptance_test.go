@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 
@@ -768,10 +769,12 @@ func TestAccAppEnvironmentDatabaseConnectionsLifecycle(t *testing.T) {
 	}
 }
 
-// A state written before connections existed, or an API that predates them,
-// has no databases. Refresh maps both to the empty default, so an unchanged
-// configuration plans no change.
-func TestAccAppEnvironmentWithoutDatabasesPlansNoChange(t *testing.T) {
+// An API response without databases (kupe-api before APP2-5) refreshes to
+// the empty default, so an unchanged configuration plans no change. This
+// does not start from a state written by an older provider: that needs the
+// older binary. TestAppEnvironmentStateMapsDatabasesAndOmitsSecretNames
+// covers only the mapping such a refresh goes through.
+func TestAccAppEnvironmentAPIWithoutDatabasesPlansNoChange(t *testing.T) {
 	shrinkPollInterval(t)
 	mock := newMockKupeAPI()
 	defer mock.close()
@@ -785,4 +788,35 @@ func TestAccAppEnvironmentWithoutDatabasesPlansNoChange(t *testing.T) {
 			env.Databases, env.Status.Databases = nil, nil
 		}},
 	}})
+}
+
+// A settings-only apply keeps the planned database_status even when a
+// connection becomes Ready during its wait; the next refresh reports it.
+func TestAccAppEnvironmentSettingsOnlyApplyKeepsPlannedDatabaseStatus(t *testing.T) {
+	shrinkPollInterval(t)
+	mock := newMockKupeAPI()
+	defer mock.close()
+	mock.appDatabasePhase = "Pending"
+	connection := `databases = [{ name = "main", database = "orders-db" }]`
+	withDomain := connection + "\ndomains = [\"shop.example.com\"]"
+	acc.UnitTest(t, acc.TestCase{ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(), Steps: []acc.TestStep{
+		{Config: testAccAppEnvironmentConfig(mock.url(), "a", connection), Check: acc.TestCheckResourceAttr(appEnvironmentAddr, "database_status.0.phase", "Pending")},
+		{Config: testAccAppEnvironmentConfig(mock.url(), "a", withDomain), PreConfig: func() {
+			mock.mu.Lock()
+			defer mock.mu.Unlock()
+			mock.appEnvironmentAfterWrite = []func(*client.AppEnvironment, *[]client.AppRelease){func(env *client.AppEnvironment, _ *[]client.AppRelease) {
+				env.Status.Databases[0].Phase = "Ready"
+			}}
+		}, ConfigPlanChecks: acc.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+			plancheck.ExpectResourceAction(appEnvironmentAddr, plancheck.ResourceActionUpdate),
+			plancheck.ExpectKnownValue(appEnvironmentAddr, tfjsonpath.New("database_status").AtSliceIndex(0).AtMapKey("phase"), knownvalue.StringExact("Pending")),
+		}}, Check: acc.TestCheckResourceAttr(appEnvironmentAddr, "database_status.0.phase", "Pending")},
+		{RefreshState: true, Check: acc.TestCheckResourceAttr(appEnvironmentAddr, "database_status.0.phase", "Ready")},
+		{Config: testAccAppEnvironmentConfig(mock.url(), "a", withDomain), PlanOnly: true},
+	}})
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if got := len(mock.appReleases["shop/production"]); got != 1 {
+		t.Fatalf("domain-only apply made %d releases, want 1", got)
+	}
 }
