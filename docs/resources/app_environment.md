@@ -96,9 +96,9 @@ If another client changes the environment before its release can be identified, 
 
 ## Vault references
 
-Each `secrets` entry points to a tenant Vault path. Write its values in the console Vault page. Environment variables reference its declared name and key. Secret values are never provider attributes.
+Each `secrets` entry points to a tenant Vault path. Write its values in the console Vault page. Environment variables reference its declared name and key. Secret values are never provider attributes. The API refuses removal of a secret entry while `web.env` still references it.
 
-Connect a database with the databases attribute rather than a separate kupe_database_binding. The environment creates and removes its own access, and destroying the environment or removing a connection keeps the database and its backups. A kupe_secret or kupe_database_binding you create yourself in this namespace blocks destroying the environment until you remove it. The API refuses removal of a secret entry while `web.env` still references it.
+Connect a database with the databases attribute rather than a separate kupe_database_binding. The environment creates and removes its own access, and destroying the environment or removing a connection keeps the database and its backups. A kupe_secret or kupe_database_binding you create yourself in this namespace blocks destroying the environment until you remove it.
 
 ## Databases
 
