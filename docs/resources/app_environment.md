@@ -2,12 +2,12 @@
 page_title: "kupe_app_environment Resource - kupe"
 subcategory: ""
 description: |-
-  Manages one Kupe app environment. Applying deploying settings requests a release. A failed first deployment remains in state without taint; a failed update records the accepted settings and reports an error. Increase deployment_revision by one to retry. Destroying the environment deletes its namespace and everything in it; the cluster is kept. Turn deletion protection off and apply before destroying. Connect databases with the databases attribute. A kupe_secret or kupe_database_binding you create yourself in this namespace blocks destroying the environment until you remove it.
+  Manages one Kupe app environment. Applying deploying settings requests a release. A failed first deployment remains in state without taint; a failed update records the accepted settings and reports an error. Increase deployment_revision by one to retry. Destroying the environment deletes its namespace and everything in it; the cluster is kept. Turn deletion protection off and apply before destroying. Connect databases in the databases list. A kupe_secret or kupe_database_binding you add to the namespace yourself blocks destroying the environment until you remove it.
 ---
 
 # kupe_app_environment (Resource)
 
-Manages one Kupe app environment. Applying deploying settings requests a release. A failed first deployment remains in state without taint; a failed update records the accepted settings and reports an error. Increase deployment_revision by one to retry. Destroying the environment deletes its namespace and everything in it; the cluster is kept. Turn deletion protection off and apply before destroying. Connect databases with the databases attribute. A kupe_secret or kupe_database_binding you create yourself in this namespace blocks destroying the environment until you remove it.
+Manages one Kupe app environment. Applying deploying settings requests a release. A failed first deployment remains in state without taint; a failed update records the accepted settings and reports an error. Increase deployment_revision by one to retry. Destroying the environment deletes its namespace and everything in it; the cluster is kept. Turn deletion protection off and apply before destroying. Connect databases in the `databases` list. A `kupe_secret` or `kupe_database_binding` you add to the namespace yourself blocks destroying the environment until you remove it.
 
 ## Example usage
 
@@ -98,8 +98,6 @@ If another client changes the environment before its release can be identified, 
 
 Each `secrets` entry points to a tenant Vault path. Write its values in the console Vault page. Environment variables reference its declared name and key. Secret values are never provider attributes. The API refuses removal of a secret entry while `web.env` still references it.
 
-Connect a database with the databases attribute rather than a separate kupe_database_binding. The environment creates and removes its own access, and destroying the environment or removing a connection keeps the database and its backups. A kupe_secret or kupe_database_binding you create yourself in this namespace blocks destroying the environment until you remove it.
-
 ## Databases
 
 ```terraform
@@ -133,24 +131,27 @@ resource "kupe_app_environment" "orders" {
   }
 
   databases = [
-    # The URL of the first PostgreSQL database arrives in DATABASE_URL.
+    # Connects to orders_db, the first entry, and sets DATABASE_URL.
     { name = "main", database = kupe_database.orders.name },
+    # Connects to analytics and sets REPORTS_URL.
     { name = "reports", database = kupe_database.orders.name, logical_database = "analytics", env = "REPORTS_URL" },
   ]
 }
 ```
 
-Create the database with kupe_database, then connect it here; Terraform orders the two because the connection references the database's name. Each connection puts the database's URL in the variable named by `env`, `DATABASE_URL` by default. `logical_database` selects a PostgreSQL database you added to the database; omit it to use the first.
+Create the database with `kupe_database` and list it in `databases`. Because the connection references `kupe_database.orders.name`, Terraform creates the database first. You don't need a `kupe_database_binding`: the environment sets up its own access to each database. Removing a connection removes that access and keeps the database and its backups.
 
-The first deploy waits until the database is ready. If a new large database takes longer than the 30-minute create timeout, raise `timeouts.create`.
+Each connection puts the database's URL in an environment variable, `DATABASE_URL` unless you set `env`. Set `logical_database` to connect to another entry in the database's `postgres.databases`; without it, the connection uses the first entry.
 
-The connection's database cannot change in place: remove the connection and apply, then add it again.
+The first deploy waits until the database is ready. A large new database can take longer than the 30-minute create timeout, so raise `timeouts.create` if you need to.
 
-Migrations use the database's owner password. Removing a connection does not revoke it; rotating it changes it for the whole database; and every app connected to the same database shares it. Rotate it with the database's credential rotation if you need to.
+A connection's `database` and `logical_database` cannot change. To point a connection at another database, remove it and apply, then add it again.
+
+Each connection also gets a credential for schema changes, which uses the database's `owner` password. Every app connected to the database shares that password, and removing a connection does not revoke it. To change it, rotate the `owner` role from the database's settings in the console or with `kupe database rotate-credentials <database> --role owner`. The new password applies to everything that uses the `owner` role.
 
 ## Deletion
 
-Destroying an environment deletes its namespace and everything in it. The cluster and Vault entries are kept. Set `deletion_protection = false` and apply first, then destroy it. Delete waits until the environment is gone; if cleanup exceeds the delete timeout, Terraform removes it from state with a warning while the platform continues cleanup.
+Destroying an environment deletes its namespace and everything in it. The cluster, the Vault entries and any connected databases and their backups are kept. A `kupe_secret` or `kupe_database_binding` you add to the namespace yourself blocks the destroy until you remove it. Set `deletion_protection = false` and apply first, then destroy it. Delete waits until the environment is gone; if cleanup exceeds the delete timeout, Terraform removes it from state with a warning while the platform continues cleanup.
 
 <!-- schema generated by tfplugindocs -->
 ## Schema
@@ -175,7 +176,7 @@ Destroying an environment deletes its namespace and everything in it. The cluste
 
 - `active_release` (String) Release currently serving.
 - `address` (String) Generated HTTPS address.
-- `database_status` (Attributes List) Observed state of each database connection. (see [below for nested schema](#nestedatt--database_status))
+- `database_status` (Attributes List) Status of each database connection. (see [below for nested schema](#nestedatt--database_status))
 - `deployment_phase` (String) Outcome of the requested release, independently of recovery.
 - `deployment_reason` (String) Reason for the requested release's outcome.
 - `etag` (String) Resource version used for optimistic locking during updates.
@@ -309,13 +310,13 @@ Optional:
 
 Required:
 
-- `database` (String) Name of the database to connect. Reference `kupe_database.<name>.name`. Cannot change once the connection exists.
+- `database` (String) Name of the database to connect, such as `kupe_database.orders.name`. It cannot change after the connection is created.
 - `name` (String) Connection name: an RFC 1123 label of at most 55 characters.
 
 Optional:
 
-- `env` (String) Environment variable that carries the connection URL. Defaults to `DATABASE_URL`.
-- `logical_database` (String) PostgreSQL database to connect, one you added to the database. Omit it to use the first database. Cannot change once the connection exists.
+- `env` (String) Environment variable that holds the connection URL. Defaults to `DATABASE_URL`.
+- `logical_database` (String) Entry in the database's `postgres.databases` to connect to. Without it, the connection uses the first entry. It cannot change after the connection is created.
 
 
 <a id="nestedatt--secrets"></a>
@@ -342,9 +343,9 @@ Optional:
 
 Read-Only:
 
-- `message` (String) Why the connection is not ready yet, if it isn't.
+- `message` (String) Detail about setting up or removing the connection, when the platform reports any.
 - `name` (String) Connection name.
-- `phase` (String) Connection phase.
+- `phase` (String) Connection phase: `Pending`, `Ready`, `Failed` or `Removing`.
 
 ## Import
 

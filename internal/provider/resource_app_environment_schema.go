@@ -103,10 +103,10 @@ func (r *AppEnvironmentResource) Schema(ctx context.Context, _ resource.SchemaRe
 			"path": schema.StringAttribute{Required: true, Description: "Tenant Vault path.", Validators: []validator.String{stringvalidator.LengthBetween(1, 512)}},
 		}}},
 		"databases": appDatabasesAttribute(),
-		"database_status": schema.ListNestedAttribute{Computed: true, Description: "Observed state of each database connection.", PlanModifiers: []planmodifier.List{listplanmodifier.UseStateForUnknown()}, NestedObject: schema.NestedAttributeObject{Attributes: map[string]schema.Attribute{
+		"database_status": schema.ListNestedAttribute{Computed: true, Description: "Status of each database connection.", PlanModifiers: []planmodifier.List{listplanmodifier.UseStateForUnknown()}, NestedObject: schema.NestedAttributeObject{Attributes: map[string]schema.Attribute{
 			"name":    schema.StringAttribute{Computed: true, Description: "Connection name."},
-			"phase":   schema.StringAttribute{Computed: true, Description: "Connection phase."},
-			"message": schema.StringAttribute{Computed: true, Description: "Why the connection is not ready yet, if it isn't."},
+			"phase":   schema.StringAttribute{Computed: true, Description: "Connection phase: `Pending`, `Ready`, `Failed` or `Removing`."},
+			"message": schema.StringAttribute{Computed: true, Description: "Detail about setting up or removing the connection, when the platform reports any."},
 		}}},
 		"domains":  schema.SetAttribute{Optional: true, Computed: true, ElementType: types.StringType, Default: setdefault.StaticValue(types.SetValueMust(types.StringType, []attr.Value{})), Description: "Complete set of exact lowercase custom hostnames. Domain changes do not deploy.", Validators: []validator.Set{setvalidator.SizeAtMost(5)}},
 		"etag":     etagAttribute(),
@@ -121,7 +121,7 @@ func (r *AppEnvironmentResource) Schema(ctx context.Context, _ resource.SchemaRe
 	} {
 		attrs[key] = schema.StringAttribute{Computed: true, Description: description, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}}
 	}
-	resp.Schema = schema.Schema{Description: "Manages one Kupe app environment. Applying deploying settings requests a release. A failed first deployment remains in state without taint; a failed update records the accepted settings and reports an error. Increase deployment_revision by one to retry. Destroying the environment deletes its namespace and everything in it; the cluster is kept. Turn deletion protection off and apply before destroying. Connect databases with the databases attribute. A kupe_secret or kupe_database_binding you create yourself in this namespace blocks destroying the environment until you remove it.", Attributes: attrs}
+	resp.Schema = schema.Schema{Description: "Manages one Kupe app environment. Applying deploying settings requests a release. A failed first deployment remains in state without taint; a failed update records the accepted settings and reports an error. Increase deployment_revision by one to retry. Destroying the environment deletes its namespace and everything in it; the cluster is kept. Turn deletion protection off and apply before destroying. Connect databases in the `databases` list. A `kupe_secret` or `kupe_database_binding` you add to the namespace yourself blocks destroying the environment until you remove it.", Attributes: attrs}
 }
 
 // appDatabasesAttribute is the environment's complete list of database
@@ -130,9 +130,9 @@ func (r *AppEnvironmentResource) Schema(ctx context.Context, _ resource.SchemaRe
 func appDatabasesAttribute() schema.ListNestedAttribute {
 	return schema.ListNestedAttribute{Optional: true, Computed: true, Default: listdefault.StaticValue(types.ListValueMust(types.ObjectType{AttrTypes: appDatabaseTypes}, []attr.Value{})), Description: "Databases the web workload connects to, at most 5. Each connection puts the database's URL in an environment variable. Removing a connection keeps the database and its backups.", Validators: []validator.List{listvalidator.SizeAtMost(5)}, NestedObject: schema.NestedAttributeObject{Attributes: map[string]schema.Attribute{
 		"name":             schema.StringAttribute{Required: true, Validators: []validator.String{stringvalidator.LengthAtMost(55), stringvalidator.RegexMatches(namespacePattern, "must be an RFC 1123 label")}, Description: "Connection name: an RFC 1123 label of at most 55 characters."},
-		"database":         schema.StringAttribute{Required: true, Validators: databaseRefValidators(), Description: "Name of the database to connect. Reference `kupe_database.<name>.name`. Cannot change once the connection exists."},
-		"logical_database": schema.StringAttribute{Optional: true, Validators: logicalNameValidators(53), Description: "PostgreSQL database to connect, one you added to the database. Omit it to use the first database. Cannot change once the connection exists."},
-		"env":              schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(defaultAppDatabaseEnv), Validators: []validator.String{stringvalidator.LengthBetween(1, 253), stringvalidator.RegexMatches(appEnvNamePattern, "must be a valid environment variable name")}, Description: "Environment variable that carries the connection URL. Defaults to `DATABASE_URL`."},
+		"database":         schema.StringAttribute{Required: true, Validators: databaseRefValidators(), Description: "Name of the database to connect, such as `kupe_database.orders.name`. It cannot change after the connection is created."},
+		"logical_database": schema.StringAttribute{Optional: true, Validators: logicalNameValidators(53), Description: "Entry in the database's `postgres.databases` to connect to. Without it, the connection uses the first entry. It cannot change after the connection is created."},
+		"env":              schema.StringAttribute{Optional: true, Computed: true, Default: stringdefault.StaticString(defaultAppDatabaseEnv), Validators: []validator.String{stringvalidator.LengthBetween(1, 253), stringvalidator.RegexMatches(appEnvNamePattern, "must be a valid environment variable name")}, Description: "Environment variable that holds the connection URL. Defaults to `DATABASE_URL`."},
 	}}}
 }
 
