@@ -3,12 +3,12 @@
 page_title: "kupe_cluster Data Source - kupe"
 subcategory: ""
 description: |-
-  Reads an existing Kupe cluster by name.
+  Reads a Kupe cluster by name.
 ---
 
 # kupe_cluster (Data Source)
 
-Reads an existing Kupe cluster by name.
+Reads a Kupe cluster by name.
 
 ## Example Usage
 
@@ -27,16 +27,16 @@ data "kupe_cluster" "prod" {
 
 ### Read-Only
 
-- `display_name` (String, Deprecated) **Deprecated.** Kupe clusters have no separate display name; this mirrors `name`. Use `name` instead.
+- `display_name` (String, Deprecated) **Deprecated.** Clusters have no separate display name, so this is the same as `name`. Use `name` instead.
 - `endpoint` (String) Cluster API server endpoint.
-- `ha_configured` (Boolean) True once the operator has confirmed both 3/3 apiserver replicas AND 3/3 deployed-etcd replicas are `Ready` for the first time. Etcd readiness is required because the OSS deployed-etcd path runs etcd in its own StatefulSet, so quorum loss blocks writes even with healthy apiserver pods.
-- `ha_enabled_at` (String) Timestamp when `ha_configured` first became true (billing anchor).
-- `ha_etcd_replicas_desired` (Number) Target HA etcd replica count (3 when `high_availability = true`, 0 otherwise).
-- `ha_etcd_replicas_ready` (Number) Count of deployed-etcd replicas currently `Ready`. Exposed separately because the OSS deployed-etcd path runs etcd in its own StatefulSet, so quorum loss blocks writes even when the apiserver replicas are healthy.
-- `ha_phase` (String) Consumer-friendly HA rollup. One of `pending`, `ha-healthy`, `ha-degraded`, `ha-unavailable`. Empty for non-HA clusters.
-- `ha_replicas_desired` (Number) Target HA replica count (3 when `high_availability = true`, 0 otherwise).
-- `ha_replicas_ready` (Number) Count of HA control-plane (apiserver) replicas currently `Ready`.
-- `high_availability` (Boolean) Whether the cluster is configured with HA (3-replica control plane). Reflects the requested setting, not operational state; see `ha_configured`.
-- `phase` (String) Current cluster phase, for example Pending, Provisioning, Running, Upgrading, Degraded or Terminating.
-- `type` (String) Cluster type. Only `shared` is supported today; `dedicated` is rejected with `CLUSTER_DEDICATED_UNSUPPORTED`.
-- `version` (String) Current Kubernetes version for the cluster.
+- `ha_configured` (Boolean) True once all 3 API server replicas and all 3 etcd replicas have been `Ready` for the first time. etcd counts because it runs in its own pods: losing etcd quorum blocks writes even while the API server pods are healthy.
+- `ha_enabled_at` (String) When `ha_configured` first became true. HA is billed from this moment.
+- `ha_etcd_replicas_desired` (Number) Target number of HA etcd replicas: 3 when `high_availability = true`, otherwise 0.
+- `ha_etcd_replicas_ready` (Number) Number of etcd replicas that are `Ready`. Reported separately because etcd runs in its own pods: losing etcd quorum stops the cluster serving writes even while the API server replicas are healthy.
+- `ha_phase` (String) Summary of HA health: `pending`, `ha-healthy`, `ha-degraded` or `ha-unavailable`. Empty for a cluster without HA.
+- `ha_replicas_desired` (Number) Target number of HA API server replicas: 3 when `high_availability = true`, otherwise 0.
+- `ha_replicas_ready` (Number) Number of HA control-plane (API server) replicas that are `Ready`.
+- `high_availability` (Boolean) Whether the cluster is set up for HA, with a 3-replica control plane. This is the requested setting; `ha_configured` says whether HA is working.
+- `phase` (String) Current cluster phase, for example `Pending`, `Provisioning`, `Running`, `Upgrading`, `Degraded` or `Terminating`.
+- `type` (String) Cluster type. Only `shared` is supported; the platform refuses `dedicated` with `CLUSTER_DEDICATED_UNSUPPORTED`.
+- `version` (String) Kubernetes version the cluster runs.

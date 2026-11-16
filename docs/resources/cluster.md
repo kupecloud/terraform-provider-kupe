@@ -3,25 +3,25 @@
 page_title: "kupe_cluster Resource - kupe"
 subcategory: ""
 description: |-
-  Manages a Kupe cluster for a tenant. Create and Update wait for the cluster to reach phase=Running with the change applied. They fail at once if the cluster is being deleted (Terminating), and after 2 minutes if it stays Degraded once the platform has picked up the change; a cluster that was Degraded before the change gets the chance to recover with it. If the timeout fires first, the apply fails; the platform carries on in the background, and a cluster that timed out on Create stays in state, marked tainted. Delete waits for the cluster to finish terminating. Set timeouts with the timeouts attribute, for example timeouts = { create = "30m" } (defaults: create/update 15m, delete 10m).
-  Destroy semantics
-  terraform destroy (or removing this resource from configuration) is non-recoverable. When the cluster is deleted, the Kupe platform will:
-  Permanently remove every workload running inside the cluster, along with its storage.Remove the cluster's public DNS endpoint.
-  The same contract applies whether you delete via Terraform, the kupe CLI, or the Kupe Console.
+  Manages a Kupe cluster. Create and Update wait until the cluster is Running with the change applied. They fail straight away if the cluster is being deleted (Terminating), and after 2 minutes if it stays Degraded once the platform has picked up the change; a cluster that was already Degraded gets the chance to recover with the change. If the timeout runs out first, the apply fails while the platform carries on in the background, and a cluster that timed out on Create stays in state, marked tainted. Delete waits until the cluster is gone. The timeouts default to 15 minutes for create and update and 10 minutes for delete; set longer ones with timeouts, for example timeouts = { create = "30m" }.
+  What destroy deletes
+  Destroying the cluster, or removing it from the configuration, cannot be undone. The platform:
+  deletes every workload in the cluster, with its storage;removes the cluster's public DNS endpoint.
+  The same happens whether you delete the cluster with Terraform, the kupe CLI or the Kupe console.
 ---
 
 # kupe_cluster (Resource)
 
-Manages a Kupe cluster for a tenant. Create and Update wait for the cluster to reach phase=Running with the change applied. They fail at once if the cluster is being deleted (Terminating), and after 2 minutes if it stays Degraded once the platform has picked up the change; a cluster that was Degraded before the change gets the chance to recover with it. If the timeout fires first, the apply fails; the platform carries on in the background, and a cluster that timed out on Create stays in state, marked tainted. Delete waits for the cluster to finish terminating. Set timeouts with the `timeouts` attribute, for example `timeouts = { create = "30m" }` (defaults: create/update 15m, delete 10m).
+Manages a Kupe cluster. Create and Update wait until the cluster is `Running` with the change applied. They fail straight away if the cluster is being deleted (`Terminating`), and after 2 minutes if it stays `Degraded` once the platform has picked up the change; a cluster that was already `Degraded` gets the chance to recover with the change. If the timeout runs out first, the apply fails while the platform carries on in the background, and a cluster that timed out on Create stays in state, marked tainted. Delete waits until the cluster is gone. The timeouts default to 15 minutes for create and update and 10 minutes for delete; set longer ones with `timeouts`, for example `timeouts = { create = "30m" }`.
 
-### Destroy semantics
+### What destroy deletes
 
-`terraform destroy` (or removing this resource from configuration) is **non-recoverable**. When the cluster is deleted, the Kupe platform will:
+Destroying the cluster, or removing it from the configuration, cannot be undone. The platform:
 
-- Permanently remove every workload running inside the cluster, along with its storage.
-- Remove the cluster's public DNS endpoint.
+- deletes every workload in the cluster, with its storage;
+- removes the cluster's public DNS endpoint.
 
-The same contract applies whether you delete via Terraform, the `kupe` CLI, or the Kupe Console.
+The same happens whether you delete the cluster with Terraform, the `kupe` CLI or the Kupe console.
 
 ## Example Usage
 
@@ -37,14 +37,12 @@ resource "kupe_cluster" "prod" {
   }
 }
 
-# HA cluster: 3 replicas, chart-managed external etcd StatefulSet, hard
-# anti-affinity. Adds an hourly charge; see
-# your plan's HA rate.
+# An HA cluster: 3 API server replicas and 3 etcd replicas on different
+# nodes. HA adds an hourly charge; see your plan's HA rate.
 #
-# `high_availability` is create-time-only. Changing this attribute on an
-# existing resource forces Terraform to replace (destroy + create) the
-# cluster. There is no in-place migration. Plan a blue-green swap via
-# GitOps if you need HA on an existing cluster.
+# high_availability can only be set when the cluster is created. Changing it
+# later replaces the cluster (destroy, then create). To move to HA, create a
+# new HA cluster and move your workloads to it.
 resource "kupe_cluster" "prod_eu1" {
   name              = "prod-eu1"
   version           = "1.36"
@@ -57,15 +55,15 @@ resource "kupe_cluster" "prod_eu1" {
   }
 }
 
-# Expose the consumer-friendly rollup so downstream automation can branch
-# on operational state without inspecting individual conditions.
+# ha_phase summarises HA health, so automation can act on it without
+# reading individual conditions.
 output "prod_eu1_ha_phase" {
-  description = "One of pending | ha-healthy | ha-degraded | ha-unavailable"
+  description = "pending, ha-healthy, ha-degraded or ha-unavailable"
   value       = kupe_cluster.prod_eu1.ha_phase
 }
 
 output "prod_eu1_ha_ready" {
-  description = "N of M control-plane replicas currently ready"
+  description = "Ready control-plane replicas, as N of M"
   value       = "${kupe_cluster.prod_eu1.ha_replicas_ready} of ${kupe_cluster.prod_eu1.ha_replicas_desired}"
 }
 ```
@@ -75,41 +73,41 @@ output "prod_eu1_ha_ready" {
 
 ### Required
 
-- `name` (String) Cluster name (immutable after creation). A lowercase DNS label starting with a letter, without `--`. The Kupe platform also limits the tenant and cluster names together to 52 characters and refuses a longer cluster name when it is created.
+- `name` (String) Cluster name: a lowercase DNS label that starts with a letter and has no `--`. The tenant and cluster names together can be at most 52 characters, and the platform refuses a longer name when the cluster is created. Changing it replaces the cluster.
 
 ### Optional
 
-- `display_name` (String, Deprecated) **Deprecated.** Kupe clusters have no separate display name: `name` is the user-facing identifier everywhere (console, CLI, kubeconfig contexts). The value is accepted and ignored by the API and is kept in state exactly as configured; remove it from your configuration. Until provider v1.6.1 this attribute was required and compared against an empty API echo, which tainted every freshly created cluster with "inconsistent result after apply" and replaced it on the next apply.
-- `high_availability` (Boolean) Enable a 3-replica HA control plane with HA etcd (chart-managed external etcd StatefulSet) and hard anti-affinity. Adds an hourly charge (see `data.kupe_plan` for the rate). When unset, a new cluster is created without HA and an existing or imported cluster keeps its current setting, so removing the attribute from configuration does not turn HA off.
+- `display_name` (String, Deprecated) **Deprecated.** Clusters have no separate display name: `name` is shown everywhere, including the console, the CLI and kubeconfig contexts. The API ignores this value, and the provider keeps it in state exactly as configured. Remove it from your configuration. Before provider v1.6.1 this attribute was required, and comparing it with the API's empty echo tainted every new cluster with "inconsistent result after apply" and replaced it on the next apply.
+- `high_availability` (Boolean) Runs a highly available control plane: 3 API server replicas and a separate 3-replica etcd, kept on different nodes by hard anti-affinity. HA adds an hourly charge; `data.kupe_plan` shows the rate. When unset, a new cluster is created without HA and an existing or imported cluster keeps its current setting, so removing the attribute does not turn HA off.
 
-**Create-time-only.** This attribute is effectively immutable: changing it on an existing resource forces Terraform to **replace** the cluster (destroy + create). The operator rejects both directions of the toggle with canonical error codes (`HA_ENABLE_ON_EXISTING_UNSUPPORTED`, `HA_DISABLE_UNSUPPORTED`), so `RequiresReplace` here makes Terraform's plan reflect that reality up front. Use a blue-green swap workflow if you need HA on an existing cluster: create a new HA cluster, redeploy via GitOps, swap traffic, then destroy the old.
-- `resources` (Attributes) Resource limits for the cluster. Updates send a partial PATCH that includes only the fields present in this block: fields you omit are **left unchanged** on the server. To change an individual field, write it explicitly. Removing the entire `resources` block sends an empty `resources` object to the server to request clearing the limits. (see [below for nested schema](#nestedatt--resources))
+**Set at creation only.** Changing it on an existing cluster makes Terraform **replace** the cluster (destroy, then create), because the platform refuses to turn HA on or off in place (`HA_ENABLE_ON_EXISTING_UNSUPPORTED`, `HA_DISABLE_UNSUPPORTED`). To move to HA, create a new HA cluster, redeploy your workloads to it, move the traffic across, then destroy the old one.
+- `resources` (Attributes) CPU, memory and storage limits for the cluster. An update sends only the fields you set here, and the platform keeps the current value of any field you leave out, so write each field you want to change. Removing the whole `resources` block sends an empty `resources` object, which asks the platform to clear the limits. (see [below for nested schema](#nestedatt--resources))
 - `timeouts` (Attributes) (see [below for nested schema](#nestedatt--timeouts))
-- `type` (String, Deprecated) **Deprecated.** Cluster type. Only `shared` is supported today; the operator rejects `dedicated` with the canonical `CLUSTER_DEDICATED_UNSUPPORTED` error code. Leave unset (the provider defaults to `shared`) or omit from your configuration entirely. The attribute remains in the schema so that existing state migrates cleanly; future support for dedicated nodes will likely take a different shape (per-cluster node-pool reference) rather than reviving this enum.
-- `version` (String) Kubernetes version (e.g., 1.35).
+- `type` (String, Deprecated) **Deprecated.** Cluster type. Only `shared` is supported, and it is the default; the platform refuses `dedicated` with the error code `CLUSTER_DEDICATED_UNSUPPORTED`. Remove it from your configuration. The attribute stays in the schema so that existing state still loads.
+- `version` (String) Kubernetes version, for example `1.35`.
 
 ### Read-Only
 
 - `created_at` (String) Timestamp when the cluster was created.
 - `endpoint` (String) Cluster API server endpoint.
 - `etag` (String) Resource version used for optimistic locking during updates.
-- `ha_configured` (Boolean) True once the operator has confirmed both 3/3 apiserver replicas AND 3/3 deployed-etcd replicas are `Ready` for the first time. Etcd readiness is required because the OSS deployed-etcd path runs etcd in its own StatefulSet, so quorum loss with healthy apiserver pods still blocks writes. Distinct from `high_availability` (the requested state): read this attribute when downstream automation needs to wait for HA to be operationally available, not just toggled on.
-- `ha_enabled_at` (String) Timestamp when `ha_configured` first became true. This is the billing anchor: HA hours accrue from this moment. Stamped once, never updated, never cleared.
-- `ha_etcd_replicas_desired` (Number) Target HA etcd replica count (3 when `high_availability = true`, 0 otherwise).
-- `ha_etcd_replicas_ready` (Number) Count of deployed-etcd replicas currently `Ready`. Exposed separately because the OSS deployed-etcd path runs etcd in its own StatefulSet, so etcd quorum loss leaves the cluster unable to serve writes even when the apiserver replicas are healthy.
-- `ha_phase` (String) Consumer-friendly HA rollup. One of `pending`, `ha-healthy`, `ha-degraded`, `ha-unavailable`. Empty for non-HA clusters. Use this in downstream automation to branch on operational state without inspecting individual conditions.
-- `ha_replicas_desired` (Number) Target HA replica count (3 when `high_availability = true`, 0 otherwise).
-- `ha_replicas_ready` (Number) Count of HA control-plane (apiserver) replicas currently `Ready`. Zero for non-HA clusters.
-- `phase` (String) Current cluster phase, for example Pending, Provisioning, Running, Upgrading, Degraded or Terminating.
+- `ha_configured` (Boolean) True once all 3 API server replicas and all 3 etcd replicas have been `Ready` for the first time. etcd counts because it runs in its own pods: losing etcd quorum blocks writes even while the API server pods are healthy. `high_availability` is the setting you asked for; read this attribute when automation needs to wait until HA is working.
+- `ha_enabled_at` (String) When `ha_configured` first became true. HA is billed from this moment. It is set once and never changed or cleared.
+- `ha_etcd_replicas_desired` (Number) Target number of HA etcd replicas: 3 when `high_availability = true`, otherwise 0.
+- `ha_etcd_replicas_ready` (Number) Number of etcd replicas that are `Ready`. Reported separately because etcd runs in its own pods: losing etcd quorum stops the cluster serving writes even while the API server replicas are healthy.
+- `ha_phase` (String) Summary of HA health: `pending`, `ha-healthy`, `ha-degraded` or `ha-unavailable`. Empty for a cluster without HA. Use it in automation instead of reading individual conditions.
+- `ha_replicas_desired` (Number) Target number of HA API server replicas: 3 when `high_availability = true`, otherwise 0.
+- `ha_replicas_ready` (Number) Number of HA control-plane (API server) replicas that are `Ready`. Zero for a cluster without HA.
+- `phase` (String) Current cluster phase, for example `Pending`, `Provisioning`, `Running`, `Upgrading`, `Degraded` or `Terminating`.
 
 <a id="nestedatt--resources"></a>
 ### Nested Schema for `resources`
 
 Optional:
 
-- `cpu` (String) CPU limit (e.g., 4, 500m).
-- `memory` (String) Memory limit (e.g., 16Gi, 512Mi).
-- `storage` (String) Storage limit (e.g., 100Gi).
+- `cpu` (String) CPU limit, for example `4` or `500m`.
+- `memory` (String) Memory limit, for example `16Gi` or `512Mi`.
+- `storage` (String) Storage limit, for example `100Gi`.
 
 
 <a id="nestedatt--timeouts"></a>

@@ -25,9 +25,9 @@ func (d *DatabaseDataSource) Metadata(_ context.Context, req datasource.Metadata
 
 func (d *DatabaseDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Reads an existing Kupe database by name. Credentials are never returned.",
+		Description: "Reads a Kupe database by name. Credentials are never returned.",
 		Attributes: map[string]schema.Attribute{
-			"postgres": schema.SingleNestedAttribute{Computed: true, Description: "PostgreSQL databases, declared roles, extensions and the connection pooler returned by the database.", Attributes: map[string]schema.Attribute{
+			"postgres": schema.SingleNestedAttribute{Computed: true, Description: "The database's PostgreSQL databases, declared roles, extensions and connection pooler.", Attributes: map[string]schema.Attribute{
 				"pooler": schema.SingleNestedAttribute{Computed: true, Description: poolerReadDescription, Attributes: map[string]schema.Attribute{
 					"enabled":   schema.BoolAttribute{Computed: true, Description: "Whether the pooler is turned on."},
 					"pool_mode": schema.StringAttribute{Computed: true, Description: "How server connections are shared: `transaction` or `session`."},
@@ -45,27 +45,27 @@ func (d *DatabaseDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 				Required:    true,
 			},
 			"engine": schema.StringAttribute{
-				Description: "Database engine, e.g. `postgres`.",
+				Description: "Database engine, for example `postgres`.",
 				Computed:    true,
 			},
 			"version": schema.StringAttribute{
-				Description: "Requested engine major version, e.g. `18`.",
+				Description: "Engine major version you asked for, for example `18`.",
 				Computed:    true,
 			},
 			"resources": schema.SingleNestedAttribute{
-				Description: "Per-instance resources.",
+				Description: "Resources of each instance.",
 				Computed:    true,
 				Attributes: map[string]schema.Attribute{
 					"cpu": schema.StringAttribute{
-						Description: "CPU, e.g. `500m`.",
+						Description: "CPU, for example `500m`.",
 						Computed:    true,
 					},
 					"memory": schema.StringAttribute{
-						Description: "Memory, e.g. `1Gi`.",
+						Description: "Memory, for example `1Gi`.",
 						Computed:    true,
 					},
 					"storage": schema.StringAttribute{
-						Description: "Storage, e.g. `10Gi`.",
+						Description: "Storage, for example `10Gi`.",
 						Computed:    true,
 					},
 				},
@@ -75,23 +75,23 @@ func (d *DatabaseDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 				Computed:    true,
 			},
 			"deletion_protection": schema.BoolAttribute{
-				Description: "Whether the Kupe platform refuses to delete the database.",
+				Description: "Whether deletion protection is on, so the platform refuses to delete the database.",
 				Computed:    true,
 			},
 			"backup": schema.SingleNestedAttribute{
-				Description: "Backup settings. Null when the database has never set them: it keeps the defaults, " +
+				Description: "Backup settings. Null when they have never been set, in which case the defaults apply: " +
 					"7 days and `Daily`.",
 				Computed: true,
 				Attributes: map[string]schema.Attribute{
 					"retention": schema.Int64Attribute{
-						Description: "How far back the backups reach, in days. Null when never set: the default, 7, " +
-							"applies.",
+						Description: "How far back the backups reach, in days. Null when never set, in which case the " +
+							"default of 7 applies.",
 						Computed: true,
 					},
 					"schedule": schema.StringAttribute{
 						Description: "How many full backups are kept within the retention period: `Daily` keeps " +
-							"one for every day, `DailyThenWeekly` one for each of the last 7 days and one a week " +
-							"before that.",
+							"one for every day, and `DailyThenWeekly` one for each of the last 7 days and one a " +
+							"week before that.",
 						Computed: true,
 					},
 				},
@@ -109,7 +109,7 @@ func (d *DatabaseDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 						Computed:    true,
 					},
 					"point_in_time": schema.StringAttribute{
-						Description: "The point it was restored to (RFC 3339). Null when it was restored to the " +
+						Description: "The point it was restored to, in RFC 3339 format. Null when it was restored to the " +
 							"latest point or from a backup.",
 						Computed: true,
 					},
@@ -120,7 +120,7 @@ func (d *DatabaseDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 				Computed:    true,
 			},
 			"current_version": schema.StringAttribute{
-				Description: "Full engine version running, e.g. `18.0`.",
+				Description: "Full engine version the database runs, for example `18.0`.",
 				Computed:    true,
 			},
 			"last_backup_at": schema.StringAttribute{

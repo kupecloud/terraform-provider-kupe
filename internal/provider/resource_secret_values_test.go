@@ -261,7 +261,7 @@ func TestAccSecretValuesSavedPlanConflict(t *testing.T) {
 	})
 	acc.UnitTest(t, acc.TestCase{ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(), Steps: []acc.TestStep{
 		{Config: secretValuesConfig(mock.url(), 1, "")},
-		{Config: secretValuesConfig(mock.url(), 2, ""), ConfigPlanChecks: acc.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{secretNoValuesPlan{}, mutateAfterSavedPlan}}, ExpectError: regexp.MustCompile(wrappedText("planned against version 1"))},
+		{Config: secretValuesConfig(mock.url(), 2, ""), ConfigPlanChecks: acc.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{secretNoValuesPlan{}, mutateAfterSavedPlan}}, ExpectError: regexp.MustCompile(wrappedText("changed after the plan read version 1"))},
 		{Config: secretValuesConfig(mock.url(), 2, ""), ConfigPlanChecks: acc.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{secretPlanAction(func(req plancheck.CheckPlanRequest) error { return priorSecretCounter(req, "1") })}},
 			Check: acc.ComposeAggregateTestCheckFunc(checkVaultWrites(mock, 3, `"2"`), acc.TestCheckResourceAttr(secretAddr, "values_wo_version", "2"))},
 	}})
@@ -717,7 +717,7 @@ func TestSecretConfirmedCreateTimeoutWarningAndTerminalError(t *testing.T) {
 				t.Error("confirmed-create timeout lost warning or gave replacement advice")
 			}
 			// The detail does not repeat the summary.
-			const want = "secret delivery still in progress: Values saved as version 1. The confirmed values_wo_version and source_version are recorded in state. Running apply again does not send the values again. Check delivery in the Kupe Console. Set a longer timeout to wait longer for future changes."
+			const want = "secret delivery still in progress: Values saved as version 1. The confirmed values_wo_version and source_version are recorded in state. Running apply again does not send the values again. Check delivery in the Kupe console. Set a longer timeout to wait longer for future changes."
 			if w := warnings(resp.Diagnostics); !terminal && (len(w) != 1 || w[0] != want) {
 				t.Errorf("warning = %q", w)
 			}

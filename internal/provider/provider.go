@@ -49,23 +49,23 @@ func (p *KupeProvider) Metadata(_ context.Context, _ provider.MetadataRequest, r
 
 func (p *KupeProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manage Kupe Cloud tenant resources including apps and their environments, clusters, databases, the container registry, secrets, members, and API keys.",
+		Description: "Manages a Kupe Cloud tenant: apps and their environments, clusters, databases, the container registry, secrets, members, API keys and Alertmanager configuration.",
 		Attributes: map[string]schema.Attribute{
 			"host": schema.StringAttribute{
-				Description: "Kupe API base URL, for example https://api.kupe.cloud. Use HTTPS for normal environments. HTTP is only allowed for local development hosts such as localhost. Can also be set with KUPE_HOST.",
+				Description: "Kupe API URL, for example `https://api.kupe.cloud`. Plain HTTP is accepted only for `localhost` and loopback addresses. Can also be set with `KUPE_HOST`.",
 				Optional:    true,
 			},
 			"tenant": schema.StringAttribute{
-				Description: "Tenant name. Can also be set with KUPE_TENANT.",
+				Description: "Tenant name. Can also be set with `KUPE_TENANT`.",
 				Optional:    true,
 			},
 			"api_key": schema.StringAttribute{
-				Description: "API key for authentication. Mutually exclusive with token. Can also be set with KUPE_API_KEY.",
+				Description: "API key to authenticate with. Cannot be combined with `token`. Can also be set with `KUPE_API_KEY`.",
 				Optional:    true,
 				Sensitive:   true,
 			},
 			"token": schema.StringAttribute{
-				Description: "OIDC bearer token for environments where API OIDC auth is explicitly enabled. Not supported on hosted Kupe Cloud. Mutually exclusive with api_key. Can also be set with KUPE_TOKEN.",
+				Description: "OIDC bearer token, for an API that has OIDC authentication turned on. Kupe Cloud does not accept it; use `api_key`. Cannot be combined with `api_key`. Can also be set with `KUPE_TOKEN`.",
 				Optional:    true,
 				Sensitive:   true,
 			},
@@ -97,11 +97,11 @@ func (p *KupeProvider) Configure(ctx context.Context, req provider.ConfigureRequ
 	token := stringValueOrEnv(config.Token, "KUPE_TOKEN")
 
 	if host == "" {
-		resp.Diagnostics.AddError("missing host", "host must be set in the provider configuration or KUPE_HOST environment variable")
+		resp.Diagnostics.AddError("missing host", "Set host in the provider block or the KUPE_HOST environment variable.")
 		return
 	}
 	if tenant == "" {
-		resp.Diagnostics.AddError("missing tenant", "tenant must be set in the provider configuration or KUPE_TENANT environment variable")
+		resp.Diagnostics.AddError("missing tenant", "Set tenant in the provider block or the KUPE_TENANT environment variable.")
 		return
 	}
 
@@ -190,9 +190,9 @@ func addUnknownConfigErrors(config KupeProviderModel, diags *diag.Diagnostics) {
 			diags.AddAttributeError(
 				a.p,
 				"provider configuration value not yet known",
-				fmt.Sprintf("The %q attribute is unknown at configure time. It cannot be resolved until "+
-					"apply, so the provider cannot be configured during planning. Set it to a static value, "+
-					"or leave it unset to read the corresponding KUPE_* environment variable.", a.name),
+				fmt.Sprintf("%q depends on a value that is only known after apply, so the provider "+
+					"cannot be configured during planning. Set it to a fixed value, or leave it unset to "+
+					"read its KUPE_* environment variable.", a.name),
 			)
 		}
 	}
@@ -209,13 +209,13 @@ func stringValueOrEnv(v types.String, envKey string) string {
 func selectAuthToken(apiKey, token string) (string, error) {
 	switch {
 	case apiKey != "" && token != "":
-		return "", fmt.Errorf("api_key and token are mutually exclusive; set only one authentication method")
+		return "", fmt.Errorf("set either api_key or token, not both")
 	case apiKey != "":
 		return apiKey, nil
 	case token != "":
 		return token, nil
 	default:
-		return "", fmt.Errorf("api_key or token must be set in the provider configuration, or via KUPE_API_KEY / KUPE_TOKEN environment variables")
+		return "", fmt.Errorf("set api_key or token in the provider block, or the KUPE_API_KEY or KUPE_TOKEN environment variable")
 	}
 }
 
@@ -251,10 +251,10 @@ func normalizeHost(raw string) (string, error) {
 	case "https":
 	case "http":
 		if !isLocalDevelopmentHost(hostname) {
-			return "", fmt.Errorf("host must use https unless you are connecting to a local development endpoint")
+			return "", fmt.Errorf("host must use https; plain http is accepted only for localhost and loopback addresses")
 		}
 	default:
-		return "", fmt.Errorf("host must use https, or http for local development")
+		return "", fmt.Errorf("host must use https, or http for localhost and loopback addresses")
 	}
 
 	return parsed.Scheme + "://" + parsed.Host, nil

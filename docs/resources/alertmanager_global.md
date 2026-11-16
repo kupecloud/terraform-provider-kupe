@@ -3,19 +3,19 @@
 page_title: "kupe_alertmanager_global Resource - kupe"
 subcategory: ""
 description: |-
-  Manages the global section of the Alertmanager configuration for a tenant. Singleton: only one of these resources should exist per tenant.
+  Manages the global section of your tenant's Alertmanager configuration. A tenant has one, so declare this resource once.
 ---
 
 # kupe_alertmanager_global (Resource)
 
-Manages the `global` section of the Alertmanager configuration for a tenant. Singleton: only one of these resources should exist per tenant.
+Manages the `global` section of your tenant's Alertmanager configuration. A tenant has one, so declare this resource once.
 
 ## Example Usage
 
 ```terraform
-# Singleton-per-tenant Alertmanager global section. Use this to set SMTP
-# defaults, slack_api_url, resolve_timeout, and other top-level fields shared
-# by every receiver in the tenant.
+# The tenant's Alertmanager global section: SMTP defaults, slack_api_url,
+# resolve_timeout and the other top-level fields every receiver shares.
+# A tenant has one, so declare this resource once.
 #
 # See https://prometheus.io/docs/alerting/latest/configuration/#configuration-file
 # for the complete field list.
@@ -40,12 +40,12 @@ variable "smtp_password" {
 
 ### Required
 
-- `body_json` (String, Sensitive) Alertmanager global section as a JSON document. Use HCL's `jsonencode()` to author. See the upstream Alertmanager docs for the field list. Marked sensitive because global config commonly includes SMTP credentials, OAuth secrets, and webhook tokens; the value is still stored in plaintext in your Terraform state, so back the state with an encrypted remote backend.
+- `body_json` (String, Sensitive) Global section as a JSON document; write it with `jsonencode()`. The fields are listed in the Alertmanager documentation. It is marked sensitive because it usually holds SMTP credentials, OAuth secrets and webhook tokens, but it is still stored in plain text in Terraform state, so keep state in an encrypted remote backend.
 
 ### Read-Only
 
-- `etag` (String) Wrapper ETag from the most recent read or write. Used for optimistic locking.
-- `id` (String) Always equal to the singleton constant `alertmanager-global`. Singleton-per-tenant resource.
+- `etag` (String) ETag from the last read or write, used to detect concurrent changes on update.
+- `id` (String) Always `alertmanager-global`: a tenant has one global section.
 
 ## Import
 

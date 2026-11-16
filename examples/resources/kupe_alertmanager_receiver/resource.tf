@@ -1,10 +1,9 @@
-# A Slack notification receiver. The body_json field accepts the standard
-# Alertmanager receiver schema. See
+# A Slack receiver. body_json takes Alertmanager's receiver schema; see
 # https://prometheus.io/docs/alerting/latest/configuration/#receiver
-# for the full set of supported sub-blocks (slack_configs, email_configs,
-# webhook_configs, pagerduty_configs, msteams_configs, etc.).
+# for every block it supports (slack_configs, email_configs,
+# webhook_configs, pagerduty_configs, msteams_configs and others).
 #
-# Use jsonencode() so HCL handles escaping for you.
+# jsonencode() handles the escaping.
 resource "kupe_alertmanager_receiver" "slack" {
   name = "slack"
   body_json = jsonencode({
@@ -29,9 +28,9 @@ resource "kupe_alertmanager_receiver" "pagerduty" {
   })
 }
 
-# Sensitive inputs come from variables so the state file does not contain
-# secrets. The Mimir gateway never sees the variable contents in plaintext:
-# kupe-api validates the receiver, then forwards it to Mimir's storage layer.
+# The credentials come from sensitive variables, which keeps them out of your
+# configuration files. They are still stored in Terraform state in plain
+# text, as part of body_json.
 variable "slack_webhook_url" {
   type      = string
   sensitive = true

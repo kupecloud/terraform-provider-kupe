@@ -3,12 +3,12 @@
 page_title: "kupe_tenant Data Source - kupe"
 subcategory: ""
 description: |-
-  Reads the current tenant's details.
+  Reads the tenant the provider is configured for.
 ---
 
 # kupe_tenant (Data Source)
 
-Reads the current tenant's details.
+Reads the tenant the provider is configured for.
 
 ## Example Usage
 
@@ -21,9 +21,9 @@ data "kupe_tenant" "current" {}
 
 ### Read-Only
 
-- `contact_email` (String) Primary tenant contact email.
-- `display_name` (String) Human-readable tenant name.
-- `enforce_log_limit` (Boolean) Whether log ingestion overage is blocked at the tenant level.
-- `enforce_metrics_limit` (Boolean) Whether metrics ingestion overage is blocked at the tenant level.
+- `contact_email` (String) Tenant's main contact email address.
+- `display_name` (String) Tenant display name.
+- `enforce_log_limit` (Boolean) Whether the tenant blocks log ingestion over its plan's allowance.
+- `enforce_metrics_limit` (Boolean) Whether the tenant blocks metrics ingestion over its plan's allowance.
 - `name` (String) Tenant name.
-- `plan` (String) Current subscribed plan name.
+- `plan` (String) Name of the tenant's current plan.

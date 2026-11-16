@@ -82,13 +82,13 @@ func (r *SecretResource) readSourceVersion(ctx context.Context, m *SecretResourc
 func vaultFailureDetail(err error) string {
 	switch client.ErrorCode(err) {
 	case client.CodeVaultNotConfigured:
-		return "Secret storage is not configured in this Kupe Cloud environment. State is kept. Contact Kupe Cloud support."
+		return "Vault is not set up in this Kupe Cloud environment. State is kept. Contact Kupe Cloud support."
 	case client.CodeSecretPathReserved:
 		return "This secret path is reserved by the platform. Choose another secret_path."
 	case client.CodeVaultUnavailable:
-		return "Secret storage is temporarily unavailable. Run plan again and retry later."
+		return "Vault is temporarily unavailable. Run plan again and retry in a few minutes."
 	default:
-		return "The secret storage request could not be completed. Check access to this entry and retry; contact Kupe Cloud support if it persists."
+		return "The Vault request could not be completed. Check access to this entry and try again, and contact Kupe Cloud support if it keeps failing."
 	}
 }
 
@@ -126,13 +126,13 @@ func (r *SecretResource) writeValues(ctx context.Context, config tfsdk.Config, p
 	}
 	if client.IsPreconditionFailed(err) {
 		if create {
-			diags.AddError("secret entry already exists", fmt.Sprintf("a secret entry already exists at %s. To manage an existing entry, apply this resource once without values_wo, then add values_wo and values_wo_version", plan.SecretPath.ValueString()))
+			diags.AddError("secret entry already exists", fmt.Sprintf("An entry already exists at %s. To manage it, apply this resource once without values_wo, then add values_wo and values_wo_version.", plan.SecretPath.ValueString()))
 		} else {
 			version := "absent"
 			if ifMatch != nil {
 				version = fmt.Sprintf("%d", *ifMatch)
 			}
-			diags.AddError("secret values changed since the plan", fmt.Sprintf("the values at %s changed since the plan (planned against version %s); run plan again to review", plan.SecretPath.ValueString(), version))
+			diags.AddError("secret values changed since the plan", fmt.Sprintf("The values at %s changed after the plan read version %s. Run plan again to review them.", plan.SecretPath.ValueString(), version))
 		}
 		return nil
 	}
@@ -160,7 +160,7 @@ func (r *SecretResource) deliveryToken(ctx context.Context, name string, written
 
 // savedValuesNext is what a delivery timeout after a confirmed write leaves
 // in state and what to do next.
-const savedValuesNext = "The confirmed values_wo_version and source_version are recorded in state. Running apply again does not send the values again. Check delivery in the Kupe Console. Set a longer timeout to wait longer for future changes."
+const savedValuesNext = "The confirmed values_wo_version and source_version are recorded in state. Running apply again does not send the values again. Check delivery in the Kupe console. Set a longer timeout to wait longer for future changes."
 
 func savedValuesDetail(version int64) string {
 	return fmt.Sprintf("values saved as version %d; delivery is still in progress. ", version) + savedValuesNext

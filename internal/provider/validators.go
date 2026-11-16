@@ -176,7 +176,7 @@ func registryStorageLimitValidators() []validator.String {
 	return []validator.String{
 		stringvalidator.LengthAtMost(maxQuantityLength),
 		stringvalidator.RegexMatches(registryStorageLimitPattern,
-			`must be a number with a binary unit (Mi, Gi or Ti), e.g. "10Gi"`),
+			`must be a number with a binary unit (Mi, Gi or Ti), for example "10Gi"`),
 		stringvalidator.RegexMatches(regexp.MustCompile(`[1-9]`), "must be more than zero"),
 	}
 }
@@ -189,7 +189,7 @@ type configMapKey struct{}
 var configMapKeyPattern = regexp.MustCompile(`^[-._a-zA-Z0-9]+$`)
 
 func (v configMapKey) Description(_ context.Context) string {
-	return "must be 1 to 253 ASCII letters, digits, '-', '_' or '.', excluding '.', '..' and names starting with '..'"
+	return "must be 1 to 253 ASCII letters, digits, '-', '_' or '.', and cannot be '.' or start with '..'"
 }
 
 func (v configMapKey) MarkdownDescription(ctx context.Context) string { return v.Description(ctx) }

@@ -9,14 +9,12 @@ resource "kupe_cluster" "prod" {
   }
 }
 
-# HA cluster: 3 replicas, chart-managed external etcd StatefulSet, hard
-# anti-affinity. Adds an hourly charge; see
-# your plan's HA rate.
+# An HA cluster: 3 API server replicas and 3 etcd replicas on different
+# nodes. HA adds an hourly charge; see your plan's HA rate.
 #
-# `high_availability` is create-time-only. Changing this attribute on an
-# existing resource forces Terraform to replace (destroy + create) the
-# cluster. There is no in-place migration. Plan a blue-green swap via
-# GitOps if you need HA on an existing cluster.
+# high_availability can only be set when the cluster is created. Changing it
+# later replaces the cluster (destroy, then create). To move to HA, create a
+# new HA cluster and move your workloads to it.
 resource "kupe_cluster" "prod_eu1" {
   name              = "prod-eu1"
   version           = "1.36"
@@ -29,14 +27,14 @@ resource "kupe_cluster" "prod_eu1" {
   }
 }
 
-# Expose the consumer-friendly rollup so downstream automation can branch
-# on operational state without inspecting individual conditions.
+# ha_phase summarises HA health, so automation can act on it without
+# reading individual conditions.
 output "prod_eu1_ha_phase" {
-  description = "One of pending | ha-healthy | ha-degraded | ha-unavailable"
+  description = "pending, ha-healthy, ha-degraded or ha-unavailable"
   value       = kupe_cluster.prod_eu1.ha_phase
 }
 
 output "prod_eu1_ha_ready" {
-  description = "N of M control-plane replicas currently ready"
+  description = "Ready control-plane replicas, as N of M"
   value       = "${kupe_cluster.prod_eu1.ha_replicas_ready} of ${kupe_cluster.prod_eu1.ha_replicas_desired}"
 }

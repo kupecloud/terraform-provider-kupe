@@ -600,7 +600,7 @@ func TestRegistryTokenRead_ExpiredWarns(t *testing.T) {
 			}
 			got := warnings(resp.Diagnostics)
 			want := "token " + fmt.Sprintf("%q", created.ID) + " expired at " + created.ExpiresAt +
-				"; it will be replaced on the next apply after the platform removes it."
+				". Once the platform removes it, the next apply creates a new one."
 			if tt.wantWarn != (len(got) == 1 && strings.Contains(got[0], want)) || (!tt.wantWarn && len(got) != 0) {
 				t.Errorf("warnings = %q, want warning %v (%q)", got, tt.wantWarn, want)
 			}

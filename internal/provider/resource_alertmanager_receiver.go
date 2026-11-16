@@ -89,33 +89,31 @@ func (r *AlertmanagerReceiverResource) Metadata(_ context.Context, req resource.
 
 func (r *AlertmanagerReceiverResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages a single Alertmanager receiver in the tenant's Mimir Alertmanager configuration. " +
-			"Receivers are referenced by routes via their name. The body is provided as a JSON document via " +
-			"`jsonencode()` so any receiver type supported by Alertmanager (slack_configs, email_configs, " +
-			"webhook_configs, pagerduty_configs, msteams_configs, etc.) can be used without a provider upgrade.",
+		Description: "Manages one receiver in your tenant's Alertmanager configuration. Routes refer to a " +
+			"receiver by its name. The body is a JSON document written with `jsonencode()`, so any receiver " +
+			"type Alertmanager supports (`slack_configs`, `email_configs`, `webhook_configs`, " +
+			"`pagerduty_configs`, `msteams_configs` and others) works without a provider upgrade.",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
-				Description: "Receiver name. Immutable after creation; rename requires destroy + create.",
+				Description: "Receiver name. Changing it replaces the receiver.",
 				Required:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"body_json": schema.StringAttribute{
-				Description: "Alertmanager receiver body as a JSON document. Use HCL's `jsonencode()` " +
-					"to author the value. The `name` field is set automatically from the resource " +
-					"`name` attribute and any value embedded in the body is overridden. Marked " +
-					"sensitive because receiver bodies routinely embed credentials (Slack webhook " +
-					"URLs, PagerDuty service keys, SMTP passwords); the value is still stored in " +
-					"plaintext in your Terraform state, so back the state with an encrypted remote " +
-					"backend.",
+				Description: "Receiver body as a JSON document; write it with `jsonencode()`. The provider sets " +
+					"its `name` field from the resource's `name`, overriding any value in the body. It is " +
+					"marked sensitive because receiver bodies usually hold credentials, such as Slack webhook " +
+					"URLs, PagerDuty service keys and SMTP passwords, but it is still stored in plain text " +
+					"in Terraform state, so keep state in an encrypted remote backend.",
 				Required:   true,
 				Sensitive:  true,
 				CustomType: JSONStringTypeInstance,
 			},
 			"etag": schema.StringAttribute{
-				Description: "Wrapper ETag from the most recent read or write. Used for optimistic locking " +
-					"on subsequent updates to detect concurrent edits from the Console UI or other API clients.",
+				Description: "ETag from the last read or write. Updates use it to detect changes made in the " +
+					"meantime in the Kupe console or by other API clients.",
 				Computed: true,
 			},
 		},
@@ -186,7 +184,7 @@ func (r *AlertmanagerReceiverResource) Create(ctx context.Context, req resource.
 	if _, _, getErr := r.client.GetAlertmanagerReceiver(ctx, plan.Name.ValueString()); getErr == nil {
 		resp.Diagnostics.AddError(
 			"alertmanager receiver already exists",
-			fmt.Sprintf("a receiver named %q already exists on the server. Import it instead of "+
+			fmt.Sprintf("A receiver named %q already exists. Import it instead of "+
 				"creating it:\n\n  terraform import kupe_alertmanager_receiver.<name> %s",
 				plan.Name.ValueString(), plan.Name.ValueString()),
 		)

@@ -40,17 +40,17 @@ func (r *TenantMemberResource) Metadata(_ context.Context, req resource.Metadata
 
 func (r *TenantMemberResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages tenant membership in Kupe Cloud.",
+		Description: "Manages one member of your Kupe Cloud tenant and their role.",
 		Attributes: map[string]schema.Attribute{
 			"email": schema.StringAttribute{
-				Description: "Member email address (immutable, used as identifier).",
+				Description: "Member's email address, which identifies them. Changing it replaces the member.",
 				Required:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"role": schema.StringAttribute{
-				Description: "Member role. Valid values are admin and readonly.",
+				Description: "Member's role: `admin` or `readonly`. Changes apply in place.",
 				Required:    true,
 				Validators: []validator.String{
 					stringvalidator.OneOf("admin", "readonly"),

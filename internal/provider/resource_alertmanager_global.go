@@ -66,28 +66,27 @@ func (r *AlertmanagerGlobalResource) Metadata(_ context.Context, req resource.Me
 
 func (r *AlertmanagerGlobalResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages the `global` section of the Alertmanager configuration for a tenant. " +
-			"Singleton: only one of these resources should exist per tenant.",
+		Description: "Manages the `global` section of your tenant's Alertmanager configuration. " +
+			"A tenant has one, so declare this resource once.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
-				Description: "Always equal to the singleton constant `alertmanager-global`. Singleton-per-tenant resource.",
+				Description: "Always `alertmanager-global`: a tenant has one global section.",
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"body_json": schema.StringAttribute{
-				Description: "Alertmanager global section as a JSON document. Use HCL's `jsonencode()` " +
-					"to author. See the upstream Alertmanager docs for the field list. Marked " +
-					"sensitive because global config commonly includes SMTP credentials, " +
-					"OAuth secrets, and webhook tokens; the value is still stored in plaintext " +
-					"in your Terraform state, so back the state with an encrypted remote backend.",
+				Description: "Global section as a JSON document; write it with `jsonencode()`. The fields are " +
+					"listed in the Alertmanager documentation. It is marked sensitive because it usually " +
+					"holds SMTP credentials, OAuth secrets and webhook tokens, but it is still stored in " +
+					"plain text in Terraform state, so keep state in an encrypted remote backend.",
 				Required:   true,
 				Sensitive:  true,
 				CustomType: JSONStringTypeInstance,
 			},
 			"etag": schema.StringAttribute{
-				Description: "Wrapper ETag from the most recent read or write. Used for optimistic locking.",
+				Description: "ETag from the last read or write, used to detect concurrent changes on update.",
 				Computed:    true,
 			},
 		},
@@ -146,8 +145,8 @@ func (r *AlertmanagerGlobalResource) Create(ctx context.Context, req resource.Cr
 	if len(existing) > 0 {
 		resp.Diagnostics.AddError(
 			"alertmanager global config already exists",
-			"the tenant already has an Alertmanager global section configured. This is a singleton "+
-				"resource; import the existing section instead of creating it:\n\n"+
+			"Your tenant already has an Alertmanager global section, and it can have only one. "+
+				"Import it instead of creating it:\n\n"+
 				"  terraform import kupe_alertmanager_global.<name> alertmanager-global",
 		)
 		return

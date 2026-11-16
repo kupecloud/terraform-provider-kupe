@@ -15,14 +15,14 @@ description: |-
 
 ## Image resolution
 
-The Kupe API resolves images from the tenant's container registry or a public registry approved by the platform. It checks linux/amd64 support and a numeric non-root user. The provider calls only the Kupe API and sends no registry credentials.
+The Kupe API resolves the image, from your tenant's container registry or a public registry the platform allows. It checks that the image supports linux/amd64 and runs as a numeric non-root user. The provider only talks to the Kupe API and sends no registry credentials.
 
-`reference` preserves the image index digest for a multi-platform image, or the manifest digest for a single-platform image. `platforms` contains the API's bounded summary as `os/architecture` or `os/architecture/variant`; the summary may omit supported platforms. `user` and `exposed_ports` describe linux/amd64.
+For a multi-platform image, `reference` keeps the image index digest; for a single-platform image, the manifest digest. `platforms` is the API's summary, as `os/architecture` or `os/architecture/variant`, and can leave out platforms the image supports. `user` and `exposed_ports` describe the linux/amd64 image.
 
-Each read resolves again. Pin a version tag in production: a moving tag such as `latest` can change the next plan, and applying that plan deploys the new digest. A digest input keeps the image identity fixed.
+Every read resolves the image again. Pin a version tag in production: a moving tag such as `latest` can change the next plan, and applying that plan deploys the new digest. Pass a digest to keep the image fixed.
 
-The `image` diagnostic includes the API's image refusal code and message. A temporary image failure includes a retry hint; when the API supplies a numeric Retry-After, the hint gives the delay in seconds. Apps must be enabled on the platform to resolve an image.
+An error on `image` includes the API's refusal code and message. A temporary failure adds a hint to retry, with the delay in seconds when the API sends a numeric Retry-After. Apps must be enabled on the platform to resolve an image.
 
-When Apps are switched off, this data source fails during planning, including a destroy plan. To plan or destroy, replace `data.kupe_app_image` in your configuration with the image digest reference from Terraform state. Remove the data source block so Terraform no longer tries to resolve the image.
+When Apps are switched off, this data source fails during planning, a destroy plan included. To plan or destroy, replace `data.kupe_app_image` in your configuration with the image digest reference from Terraform state, and remove the data source block so Terraform stops trying to resolve the image.
 
 {{ .SchemaMarkdown | trimspace }}

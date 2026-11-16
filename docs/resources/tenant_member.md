@@ -3,12 +3,12 @@
 page_title: "kupe_tenant_member Resource - kupe"
 subcategory: ""
 description: |-
-  Manages tenant membership in Kupe Cloud.
+  Manages one member of your Kupe Cloud tenant and their role.
 ---
 
 # kupe_tenant_member (Resource)
 
-Manages tenant membership in Kupe Cloud.
+Manages one member of your Kupe Cloud tenant and their role.
 
 ## Example Usage
 
@@ -24,8 +24,8 @@ resource "kupe_tenant_member" "developer" {
 
 ### Required
 
-- `email` (String) Member email address (immutable, used as identifier).
-- `role` (String) Member role. Valid values are admin and readonly.
+- `email` (String) Member's email address, which identifies them. Changing it replaces the member.
+- `role` (String) Member's role: `admin` or `readonly`. Changes apply in place.
 
 ## Import
 

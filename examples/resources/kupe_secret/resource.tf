@@ -1,6 +1,6 @@
 # Use OpenTofu 1.11 or Terraform 1.11.1 or later.
 variable "app_config_values" {
-  description = "Complete values to store and deliver. Supply them securely when planning and applying."
+  description = "Every value to store and deliver. Pass them in at plan and apply time, never in a file."
   type        = map(string)
   sensitive   = true
   ephemeral   = true

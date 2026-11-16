@@ -3,12 +3,12 @@
 page_title: "kupe_api_key Resource - kupe"
 subcategory: ""
 description: |-
-  Manages a Kupe Cloud API key for machine-to-machine authentication.
+  Manages a Kupe Cloud API key, for tools and pipelines that call the API. Every attribute is fixed at creation: changing one replaces the key.
 ---
 
 # kupe_api_key (Resource)
 
-Manages a Kupe Cloud API key for machine-to-machine authentication.
+Manages a Kupe Cloud API key, for tools and pipelines that call the API. Every attribute is fixed at creation: changing one replaces the key.
 
 ## Example Usage
 
@@ -25,19 +25,19 @@ resource "kupe_api_key" "cicd" {
 
 ### Required
 
-- `display_name` (String) Human-readable name for the API key (immutable).
-- `role` (String) API key role. Valid values are admin and readonly. Immutable after creation.
+- `display_name` (String) Name for the API key. Changing it replaces the key.
+- `role` (String) API key's role: `admin` or `readonly`. Changing it replaces the key.
 
 ### Optional
 
-- `expires_at` (String) Expiration time in RFC3339 format. Optional and immutable after creation. If you omit it the server decides whether the key expires; the resolved value is reflected back into state.
+- `expires_at` (String) When the key expires, in RFC 3339 format. Changing it replaces the key. If you omit it, the platform decides whether the key expires, and the provider records the result in state.
 
 ### Read-Only
 
 - `created_at` (String) Timestamp when the key was created.
-- `created_by` (String) Email of the user who created the key.
+- `created_by` (String) Email address of the user who created the key.
 - `id` (String) API key ID.
-- `key` (String, Sensitive) The raw API key. Only available on creation and stored in Terraform state as sensitive. Sensitive redacts UI output but does not prevent the value from being written to state.
+- `key` (String, Sensitive) The API key itself. It is only returned when the key is created. It is marked sensitive, which hides it in plan and apply output, but it is stored in Terraform state in plain text.
 
 ## Import
 

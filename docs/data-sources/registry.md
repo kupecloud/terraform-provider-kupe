@@ -3,12 +3,12 @@
 page_title: "kupe_registry Data Source - kupe"
 subcategory: ""
 description: |-
-  Reads the tenant's Kupe container registry. A tenant has at most one, named registry; reading fails when the tenant has none.
+  Reads your tenant's Kupe container registry. A tenant has at most one, named registry; reading fails when the tenant has none.
 ---
 
 # kupe_registry (Data Source)
 
-Reads the tenant's Kupe container registry. A tenant has at most one, named `registry`; reading fails when the tenant has none.
+Reads your tenant's Kupe container registry. A tenant has at most one, named `registry`; reading fails when the tenant has none.
 
 ## Example Usage
 
@@ -30,10 +30,10 @@ output "registry_storage_used_bytes" {
 ### Read-Only
 
 - `created_at` (String) Timestamp when the registry was created.
-- `deletion_protection` (Boolean) Whether the Kupe platform refuses to delete the registry.
-- `endpoint` (String) Image path prefix to push to and pull from, e.g. `registry.kupe.cloud/acme`.
-- `phase` (String) Current phase: Pending, Provisioning, Running, Degraded or Terminating.
+- `deletion_protection` (Boolean) Whether deletion protection is on, so the platform refuses to delete the registry.
+- `endpoint` (String) Image path prefix to push to and pull from, for example `registry.kupe.cloud/acme`.
+- `phase` (String) Current phase: `Pending`, `Provisioning`, `Running`, `Degraded` or `Terminating`.
 - `repository_count` (Number) Number of repositories in the registry.
-- `storage_limit` (String) The tenant's own storage limit, e.g. `10Gi`. Null when the plan's limit applies.
+- `storage_limit` (String) The registry's own storage limit, for example `10Gi`. Null when the plan's limit applies.
 - `storage_limit_bytes` (Number) The storage limit in force, in bytes. `-1` means unlimited. Null until the platform has applied a limit.
 - `storage_used_bytes` (Number) What the registry stores, in bytes, as last measured by the platform.

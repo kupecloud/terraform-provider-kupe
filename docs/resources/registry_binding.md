@@ -2,15 +2,12 @@
 page_title: "kupe_registry_binding Resource - kupe"
 subcategory: ""
 description: |-
-  Connects a cluster to the tenant's Kupe container registry. Every pod of the cluster can then pull its images: the pull credential stays on the platform and never enters the cluster. Each namespace in push_namespaces also gets a push credential Secret. A cluster has one connection, named after it, and the cluster must exist. Create and Update wait until the connection is Ready with every push namespace delivered, and fail at once if a push namespace is Failed. A connection that fails or times out on create stays in state, marked tainted. Delete waits until the connection is gone. Set timeouts with the timeouts attribute, for example timeouts = { create = "10m" } (defaults: create/update/delete 5m).
-  Pods that were running before the connection was made keep their old settings: restart them to pull from the registry. push_namespaces changes in place. Changing cluster, registry or secret_name replaces the connection: it is deleted and created again, so its pull and push credentials are reissued. Credentials are never returned by the API or stored in Terraform state.
+  Connects a cluster to your tenant's Kupe container registry. Every pod in the cluster can then pull its images, and the pull credential stays on the platform: it never enters the cluster. Each namespace in push_namespaces also gets a Secret with a push credential. A cluster has one connection, named after it, and the cluster must already exist. Pods that were running before the connection was made keep their old settings: restart them to pull from the registry. Changing cluster, registry or secret_name replaces the connection and reissues its credentials. Credentials are never returned by the API or stored in Terraform state.
 ---
 
 # kupe_registry_binding (Resource)
 
-Connects a cluster to the tenant's Kupe container registry. Every pod of the cluster can then pull its images: the pull credential stays on the platform and never enters the cluster. Each namespace in `push_namespaces` also gets a push credential Secret. A cluster has one connection, named after it, and the cluster must exist. Create and Update wait until the connection is Ready with every push namespace delivered, and fail at once if a push namespace is Failed. A connection that fails or times out on create stays in state, marked tainted. Delete waits until the connection is gone. Set timeouts with the `timeouts` attribute, for example `timeouts = { create = "10m" }` (defaults: create/update/delete 5m).
-
-Pods that were running before the connection was made keep their old settings: restart them to pull from the registry. `push_namespaces` changes in place. Changing `cluster`, `registry` or `secret_name` replaces the connection: it is deleted and created again, so its pull and push credentials are reissued. Credentials are never returned by the API or stored in Terraform state.
+Connects a cluster to your tenant's Kupe container registry. Every pod in the cluster can then pull its images, and the pull credential stays on the platform: it never enters the cluster. Each namespace in `push_namespaces` also gets a Secret with a push credential. A cluster has one connection, named after it, and the cluster must already exist. Pods that were running before the connection was made keep their old settings: restart them to pull from the registry. Changing `cluster`, `registry` or `secret_name` replaces the connection and reissues its credentials. Credentials are never returned by the API or stored in Terraform state.
 
 ## Example Usage
 
@@ -33,34 +30,38 @@ resource "kupe_registry_binding" "ci" {
 }
 ```
 
-### Pulling
+### Pull images
 
-Once the connection is Ready, every pod of the cluster can pull `registry.kupe.cloud/<tenant>/<repository>:<tag>` with no `imagePullSecrets`. The pull credential stays on the platform. Create gives a warning as a reminder: pods that were already running pick it up only when they restart.
+Once the connection is `Ready`, every pod in the cluster can pull `registry.kupe.cloud/<tenant>/<repository>:<tag>` without `imagePullSecrets`. The pull credential stays on the platform. Pods that were already running pick up the connection only when they restart, and Create warns you about this.
 
-### Pushing from inside the cluster
+### Push from inside the cluster
 
-Each namespace in `push_namespaces` gets a Secret named `secret_name` (default `kupe-registry-push`) of type `kubernetes.io/dockerconfigjson`. Build tools that read a Docker config file can push with it: mount its `.dockerconfigjson` key as `config.json`. Each namespace receives a Secret named `secret_name` that can pull from and push to every repository in your registry, including replacing existing tags, so list only the namespaces that build images.
+Each namespace in `push_namespaces` gets a Secret named `secret_name` (default `kupe-registry-push`) of type `kubernetes.io/dockerconfigjson`. Build tools that read a Docker config file can push with it: mount its `.dockerconfigjson` key as `config.json`. The Secret can pull from and push to every repository in your registry, including replacing existing tags, so list only the namespaces that build images.
 
-`push_namespaces` changes in place, and the connection's pull credential is untouched: running pods keep pulling. A namespace taken out loses its Secret, and the push credential is replaced, so build jobs in the remaining push namespaces must restart to read the new Secret. Changing `secret_name`, `cluster` or `registry` replaces the connection instead: it is deleted and created again, so its pull and push credentials are reissued.
+Changes to `push_namespaces` apply in place and leave the pull credential alone, so running pods keep pulling. A namespace you take out loses its Secret, and the push credential is replaced: restart build jobs in the remaining push namespaces so they read the new Secret. Changing `secret_name`, `cluster` or `registry` replaces the connection instead: it is deleted and created again, and its pull and push credentials are reissued.
 
-A connection lists at most 10 push namespaces, which the plan checks. The registry's connections list at most 20 between them; the Kupe platform refuses a change that breaks that when it is applied.
+A connection can list at most 10 push namespaces, which the plan checks. All of a registry's connections together can list at most 20; the platform refuses a change that goes over when it is applied.
 
-### When a connection fails
+### Failed connections
 
-A push namespace is `Failed` when it already has a Secret named `secret_name` that the Kupe platform did not create. Create and Update stop at once with an error that names the namespace; every pod of the cluster can still pull. Rename or remove that Secret, or set a different `secret_name`. After a failed Create, Terraform keeps the connection in state, marked tainted, and the next `terraform apply` replaces it.
+A push namespace is `Failed` when it already has a Secret named `secret_name` that the platform did not create. Create and Update stop straight away with an error that names the namespace; every pod in the cluster can still pull. Rename or remove that Secret, or set a different `secret_name`. After a failed Create, Terraform keeps the connection in state, marked tainted, and the next `terraform apply` replaces it.
+
+### Waiting and timeouts
+
+Create and Update wait until the connection is `Ready` with every push namespace's Secret delivered, and fail straight away if a push namespace is `Failed`. A connection that fails or times out on create stays in state, marked tainted. Delete waits until the connection is gone. The timeouts default to 5 minutes; set longer ones with `timeouts`, for example `timeouts = { create = "10m" }`.
 
 <!-- schema generated by tfplugindocs -->
 ## Schema
 
 ### Required
 
-- `cluster` (String) Cluster to connect. It must exist. A different cluster replaces the connection.
+- `cluster` (String) Cluster to connect, which must already exist. Changing it replaces the connection.
 
 ### Optional
 
-- `push_namespaces` (Set of String) Namespaces inside the cluster that receive a push credential Secret named `secret_name`: up to 10, none `kube-*` or `argocd`. Each namespace receives a Secret named `secret_name` that can pull from and push to every repository in your registry, including replacing existing tags. Default none: the cluster can pull only. Changes in place: a namespace added gets the Secret; one taken out loses it, and the push credential is replaced, so build jobs in the remaining push namespaces must restart to read the new Secret. Pulls keep working throughout. The registry's connections can list at most 20 push namespaces between them; the Kupe platform checks that when the change is applied.
+- `push_namespaces` (Set of String) Namespaces in the cluster that get a push credential Secret named `secret_name`: up to 10, and none of them `kube-*` or `argocd`. The Secret can pull from and push to every repository in your registry, including replacing existing tags. Without push namespaces, the cluster can only pull. Changes apply in place: an added namespace gets the Secret, and one you take out loses it and the push credential is replaced, so build jobs in the remaining push namespaces must restart to read the new Secret. Pulls keep working throughout. All of the registry's connections together can list at most 20 push namespaces; the platform checks this when the change is applied.
 - `registry` (String) Registry to connect to. A tenant has one registry, named `registry`: this is the default and the only value accepted.
-- `secret_name` (String) Name of the push credential Secret in each push namespace. Default `kupe-registry-push`; it cannot be `kupe-registry-pull`. It cannot change in place: a different name replaces the cluster connection (it is deleted and created again, so its pull and push credentials are reissued).
+- `secret_name` (String) Name of the push credential Secret in each push namespace. Defaults to `kupe-registry-push` and cannot be `kupe-registry-pull`. Changing it replaces the connection: it is deleted and created again, and its pull and push credentials are reissued.
 - `timeouts` (Attributes) (see [below for nested schema](#nestedatt--timeouts))
 
 ### Read-Only
@@ -70,9 +71,9 @@ A push namespace is `Failed` when it already has a Secret named `secret_name` th
 - `message` (String) What the platform says about the connection.
 - `name` (String) Connection name: always the cluster's name.
 - `namespace_status` (Attributes List) What the connection delivered into each push namespace, sorted by name. A namespace taken out of `push_namespaces` stays listed until its Secret is withdrawn. (see [below for nested schema](#nestedatt--namespace_status))
-- `phase` (String) Current phase: Pending, Ready (every pod can pull and every push namespace is delivered) or Failed (a push namespace could not be delivered).
+- `phase` (String) Current phase: `Pending`, `Ready` (every pod can pull and every push namespace has its Secret) or `Failed` (a push namespace could not get its Secret).
 - `pull_username` (String) Registry username of the cluster's pull credential.
-- `push_username` (String) Registry username of the push credential; empty without push namespaces.
+- `push_username` (String) Registry username of the push credential. Empty without push namespaces.
 
 <a id="nestedatt--timeouts"></a>
 ### Nested Schema for `timeouts`
@@ -91,7 +92,7 @@ Read-Only:
 
 - `message` (String) Why the namespace is not Ready; empty when it is.
 - `name` (String) Namespace inside the cluster.
-- `phase` (String) Pending, Ready or Failed.
+- `phase` (String) `Pending`, `Ready` or `Failed`.
 
 ## Import
 

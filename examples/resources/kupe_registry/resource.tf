@@ -10,6 +10,6 @@ resource "kupe_registry" "this" {
 }
 
 output "registry_endpoint" {
-  description = "Image path prefix, e.g. registry.kupe.cloud/acme."
+  description = "Image path prefix, for example registry.kupe.cloud/acme."
   value       = kupe_registry.this.endpoint
 }

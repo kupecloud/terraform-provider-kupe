@@ -25,8 +25,8 @@ func (d *DatabaseBackupDataSource) Metadata(_ context.Context, req datasource.Me
 
 func (d *DatabaseBackupDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Reads a manual backup of a Kupe database by name, including the backups of databases " +
-			"that were deleted.",
+		Description: "Reads a manual backup of a Kupe database by name. It also finds backups of databases " +
+			"that have been deleted.",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
 				Description: "Backup name to look up.",
@@ -34,7 +34,7 @@ func (d *DatabaseBackupDataSource) Schema(_ context.Context, _ datasource.Schema
 				Validators:  backupNameValidators(),
 			},
 			"database": schema.StringAttribute{
-				Description: "Name of the database the backup was taken of. It may have been deleted since.",
+				Description: "Name of the database the backup was taken of, which may have been deleted since.",
 				Computed:    true,
 			},
 			"phase": schema.StringAttribute{

@@ -3,12 +3,12 @@
 page_title: "kupe_database_backup Data Source - kupe"
 subcategory: ""
 description: |-
-  Reads a manual backup of a Kupe database by name, including the backups of databases that were deleted.
+  Reads a manual backup of a Kupe database by name. It also finds backups of databases that have been deleted.
 ---
 
 # kupe_database_backup (Data Source)
 
-Reads a manual backup of a Kupe database by name, including the backups of databases that were deleted.
+Reads a manual backup of a Kupe database by name. It also finds backups of databases that have been deleted.
 
 ## Example Usage
 
@@ -34,7 +34,7 @@ output "restore_needs_storage" {
 
 - `completed_at` (String) When the backup finished (RFC 3339). Empty until it completes.
 - `created_at` (String) Timestamp when the backup was created.
-- `database` (String) Name of the database the backup was taken of. It may have been deleted since.
+- `database` (String) Name of the database the backup was taken of, which may have been deleted since.
 - `database_deleted` (Boolean) True once the database the backup was taken of is deleted or being deleted. The backup stays until you delete it.
 - `phase` (String) The backup's state: Pending, Running, Completed, Failed or Deleting. `Completed` once it can be restored from.
 - `size_bytes` (Number) Size of the backup in bytes. 0 until measured.
