@@ -146,6 +146,9 @@ func TestAppEnvironmentConfigurationValidatesCrossFieldLimits(t *testing.T) {
 		{"long multibyte argument", func(w *client.AppWeb) { w.Args = []string{strings.Repeat("é", 513)} }, true},
 		{"both probes", func(w *client.AppWeb) { w.HealthChecks.Readiness.HTTP = &client.AppHTTPProbe{Path: "/"} }, true},
 		{"limit below request", func(w *client.AppWeb) { w.Resources.Limits.CPU = "100m" }, true},
+		{"autoscaling pod range", func(w *client.AppWeb) { w.Autoscaling = &client.AppAutoscaling{MinPods: 2, MaxPods: 6, CPUPercent: 70} }, false},
+		{"autoscaling one pod", func(w *client.AppWeb) { w.Autoscaling = &client.AppAutoscaling{MinPods: 3, MaxPods: 3, CPUPercent: 70} }, false},
+		{"autoscaling min above max", func(w *client.AppWeb) { w.Autoscaling = &client.AppAutoscaling{MinPods: 6, MaxPods: 2, CPUPercent: 70} }, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			web, _, _, _, diags := appEnvironmentSettings(ctx, &base)
