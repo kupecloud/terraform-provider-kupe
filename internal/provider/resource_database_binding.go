@@ -148,9 +148,9 @@ var databaseBindingKind = serviceKind[DatabaseBindingResourceModel, client.Datab
 		return changed
 	},
 	stillDeleting: func(m *DatabaseBindingResourceModel) string {
-		return fmt.Sprintf("DELETE was accepted but binding %q is still being removed after the configured delete "+
-			"timeout. Terraform has removed it from state; the Kupe platform finishes removing the Service, "+
-			"Secret and network access in the background.", m.Name.ValueString())
+		return fmt.Sprintf("The platform accepted the delete, but binding %q was still being removed when the delete "+
+			"timeout ran out. Terraform has removed it from state, and the platform finishes removing the "+
+			"Service, Secret and network access in the background.", m.Name.ValueString())
 	},
 }
 
@@ -205,23 +205,21 @@ func (r *DatabaseBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 	// Every argument but `namespaces` replaces the binding when it changes.
 	replace := []planmodifier.String{stringplanmodifier.RequiresReplace()}
 	resp.Schema = schema.Schema{
-		Description: "Binds a Kupe database into namespaces of one cluster for one role. The Kupe platform " +
-			"delivers a Service named after the database and a credentials Secret into each listed namespace and " +
-			"opens the network path; other namespaces see neither. A binding lists 1 to 10 namespaces, and the " +
-			"bindings of one database list at most 20 between them. Create and Update wait for the current generation and every listed " +
-			"namespace to be Ready, and fail at once if one is Failed: it already has a Service or Endpoints object " +
-			"named after the database, or a Secret named `secret_name`, that the platform did not create. A " +
-			"binding that fails or times out on create stays in state, marked tainted. Delete waits until the " +
-			"binding is gone. " +
-			"Set timeouts with the `timeouts` attribute, for example `timeouts = { create = \"10m\" }` (defaults: " +
-			"create/delete 5m, update 10m).\n\n" +
-			"`namespaces` changes in place: a namespace added gets the Service and the Secret, and the namespaces " +
-			"kept work throughout. Enabling dedicated credentials changes in place; turning them off replaces the binding. Changing `credentials.rotation_trigger` requests a dedicated rotation. Other arguments except `timeouts` replace the binding. Removing a " +
-			"namespace, or the binding, removes the Secret there, and the Service and the network path too unless " +
-			"another binding of the same database still lists that namespace. With shared credentials, the password does not change: " +
-			"rotate the role's credentials if the namespace should lose knowledge of it.",
+		Description: "Gives namespaces in one cluster access to a Kupe database, with one role. The platform " +
+			"puts a Service named after the database and a credentials Secret in each listed namespace and opens " +
+			"the network path; other namespaces get neither. A binding lists 1 to 10 namespaces, and all bindings " +
+			"of one database together list at most 20. Create and Update fail straight away if a namespace is " +
+			"`Failed` because it already has a Service or Endpoints object named after the database, or a Secret " +
+			"named `secret_name`, that the platform did not create.\n\n" +
+			"Changes to `namespaces` apply in place: an added namespace gets the Service and the Secret, and the " +
+			"namespaces you keep work throughout. Turning dedicated credentials on is an in-place change, and " +
+			"turning them off replaces the binding. Changing `credentials.rotation_trigger` requests a dedicated " +
+			"rotation. Changing any other argument except `timeouts` replaces the binding. Removing a namespace, " +
+			"or the binding, removes the Secret there, and the Service and network path too unless another " +
+			"binding of the same database still lists that namespace. With shared credentials the password does " +
+			"not change, so rotate the role's credentials if that namespace should no longer know it.",
 		Attributes: map[string]schema.Attribute{
-			"logical_database":  schema.StringAttribute{Optional: true, Computed: true, Description: "PostgreSQL database to bind. Omit it to use the first database, including a restored instance's preserved first name. Changing it replaces the binding. Added databases include their logical name in default Secret names. See `name` for the binding resource name. If a default name is taken, set `name` or `secret_name` explicitly.", Validators: logicalNameValidators(53), PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown(), stringplanmodifier.RequiresReplace()}},
+			"logical_database":  schema.StringAttribute{Optional: true, Computed: true, Description: "PostgreSQL database to bind. Leave it out to bind the first database, which for a restored instance is the first name it kept from its source. Changing it replaces the binding. An added database's name is part of the default Secret name; see `name` for the default binding name. If a default name is taken, set `name` or `secret_name`.", Validators: logicalNameValidators(53), PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown(), stringplanmodifier.RequiresReplace()}},
 			"role_name":         schema.StringAttribute{Optional: true, Description: "Declared role granted by a custom binding. Required for custom and refused for built-in roles. Changing it replaces the binding.", Validators: []validator.String{stringvalidator.LengthBetween(1, 63), stringvalidator.RegexMatches(bindingRoleNamePattern, "must start with a lowercase letter and contain only lowercase letters, numbers or _")}, PlanModifiers: replace},
 			"credentials":       bindingCredentialsSchema(),
 			"observed_rotation": schema.StringAttribute{Computed: true, Description: "Dedicated rotation token applied and delivered to every listed namespace; empty for shared credentials."},
@@ -243,15 +241,15 @@ func (r *DatabaseBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 				PlanModifiers: replace,
 			},
 			"cluster": schema.StringAttribute{
-				Description: "Cluster to bind into. It may not exist yet: the binding becomes Ready once it does, " +
-					"so Create waits up to its timeout and then fails.",
+				Description: "Cluster to bind into. It does not have to exist yet: the binding becomes `Ready` once it " +
+					"does, and until then Create waits up to its timeout and then fails.",
 				Required:      true,
 				Validators:    clusterRefValidators(),
 				PlanModifiers: replace,
 			},
 			"namespaces": schema.SetAttribute{
-				Description: "Namespaces inside the cluster that receive the Service and credentials Secret: 1 to " +
-					"10, none `kube-*` or `argocd`. Changes in place.",
+				Description: "Namespaces in the cluster that get the Service and credentials Secret: 1 to 10, and none " +
+					"of them `kube-*` or `argocd`. Changes apply in place.",
 				ElementType: types.StringType,
 				Required:    true,
 				Validators: []validator.Set{
@@ -281,9 +279,9 @@ func (r *DatabaseBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 				},
 			},
 			"phase": schema.StringAttribute{
-				Description: "Current phase: Pending (waiting for the database, the cluster or a namespace), Ready " +
-					"(every listed namespace is Ready), or Failed (a listed namespace already has a Service, Endpoints " +
-					"object or Secret of the same name that the platform did not create).",
+				Description: "Current phase: `Pending` (waiting for the database, the cluster or a namespace), `Ready` " +
+					"(every listed namespace is `Ready`) or `Failed` (a listed namespace already has a Service, " +
+					"Endpoints object or Secret of the same name that the platform did not create).",
 				Computed: true,
 			},
 			"namespace_status": schema.ListNestedAttribute{
@@ -300,15 +298,15 @@ func (r *DatabaseBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 						"host": schema.StringAttribute{
 							Description: "In-cluster DNS name applications in this namespace connect to. For a " +
 								"`readwrite`, `readonly` or custom binding of a database with the connection pooler on, it " +
-								"is the pooler's, e.g. `orders-db--pooler.orders-api.svc.cluster.local`: the namespace moves " +
+								"is the pooler's, for example `orders-db--pooler.orders-api.svc.cluster.local`: the namespace moves " +
 								"there once the pooler has served and stays there while the pooler is on, and only turning " +
 								"the pooler off moves it back. For an `owner` binding, and before the pooler has served or " +
-								"after it is turned off, it is the database's, e.g. " +
+								"after it is turned off, it is the database's, for example " +
 								"`orders-db.orders-api.svc.cluster.local`. Empty until the Service is delivered.",
 							Computed: true,
 						},
 						"phase": schema.StringAttribute{
-							Description: "Pending, Ready, or Failed (the namespace already has a Service, Endpoints " +
+							Description: "`Pending`, `Ready` or `Failed` (the namespace already has a Service, Endpoints " +
 								"object or Secret of the same name that the platform did not create).",
 							Computed: true,
 						},

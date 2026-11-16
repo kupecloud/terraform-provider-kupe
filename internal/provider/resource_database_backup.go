@@ -36,9 +36,9 @@ const (
 
 // Descriptions the resource and the data source share.
 const (
-	backupPhaseDescription = "The backup's state: Pending, Running, Completed, Failed or Deleting. `Completed` " +
-		"once it can be restored from."
-	backupCompletedAtDescription     = "When the backup finished (RFC 3339). Empty until it completes."
+	backupPhaseDescription = "The backup's state: `Pending`, `Running`, `Completed`, `Failed` or `Deleting`. It is " +
+		"`Completed` once it can be restored from."
+	backupCompletedAtDescription     = "When the backup finished, in RFC 3339 format. Empty until it completes."
 	backupSizeDescription            = "Size of the backup in bytes. 0 until measured."
 	backupSourceVersionDescription   = "PostgreSQL major version of the database when the backup was taken. A database restored from the backup runs this version. Empty until the backup starts."
 	backupSourceStorageDescription   = "Storage the database had when the backup was taken. A database restored from the backup needs at least this much. Empty until the backup starts."
@@ -114,9 +114,9 @@ var databaseBackupKind = serviceKind[DatabaseBackupResourceModel, client.Backup]
 		failedDetail: databaseBackupFailedDetail,
 	},
 	stillDeleting: func(m *DatabaseBackupResourceModel) string {
-		return fmt.Sprintf("DELETE was accepted but backup %q is still being deleted after the configured delete "+
-			"timeout. Terraform has removed it from state; the Kupe platform finishes deleting it in the "+
-			"background, and the name stays reserved until then. Override with `timeouts.delete = \"30m\"`.",
+		return fmt.Sprintf("The platform accepted the delete, but backup %q was still being deleted when the delete "+
+			"timeout ran out. Terraform has removed it from state. The platform finishes deleting it in the "+
+			"background, and the name stays reserved until then. To wait longer, set `timeouts.delete = \"30m\"`.",
 			m.Name.ValueString())
 	},
 }
@@ -168,23 +168,22 @@ func (r *DatabaseBackupResource) Schema(ctx context.Context, _ resource.SchemaRe
 			"`kupe_database`, or creating a `kupe_database_backup`, fails with error code `backups_unavailable`. " +
 			"Keep your own backups for now.\n\n" +
 			"Once backups are available, this resource takes a manual backup of a Kupe database. Create waits " +
-			"until the backup has completed " +
-			"(phase `Completed`) and fails at once if it fails. A backup that fails or times out on create stays " +
-			"in state, marked tainted. Changing `name` or `database` takes a new backup. Set timeouts with the " +
-			"`timeouts` attribute, for example `timeouts = { create = \"90m\" }` (defaults: create 60m, delete " +
-			"15m).\n\n" +
+			"until the backup is `Completed`, and fails straight away if the backup fails. A backup that fails " +
+			"or times out on create stays in state, marked tainted. Changing `name` or `database` takes a new " +
+			"backup. The timeouts default to 60 minutes for create and 15 minutes for delete; set longer ones " +
+			"with `timeouts`, for example `timeouts = { create = \"90m\" }`.\n\n" +
 			"A manual backup is kept until you delete it, even after the database is deleted, and a new database " +
 			"can be restored from it with `source.backup` on `kupe_database`. It is deleted with your account. A " +
-			"database can keep up to 20 manual backups. Reading and deleting a backup works even while the Kupe " +
+			"database can keep up to 20 manual backups. You can read and delete a backup even while the " +
 			"platform has databases or backups switched off.\n\n" +
-			"### Destroy semantics\n\n" +
+			"### What destroy deletes\n\n" +
 			"Destroying this resource deletes the backup: it can no longer be restored from. Destroying the " +
 			"`kupe_database` it was taken of leaves this backup in place. From the `kupe_database` page: " +
 			databaseDeleteNotice,
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
 				Description: "Backup name: lowercase letters, digits and `-`, starting and ending with a letter or " +
-					"digit, at most 63 characters. When unset, the Kupe platform names the backup after the database " +
+					"digit, at most 63 characters. When unset, the platform names the backup after the database " +
 					"and the time, in UTC, for example `orders-db-20261030-141500`. Changing it takes a new backup.",
 				Optional:   true,
 				Computed:   true,

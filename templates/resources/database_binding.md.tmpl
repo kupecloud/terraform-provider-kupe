@@ -13,52 +13,67 @@ description: |-
 
 {{ tffile "examples/resources/kupe_database_binding/resource.tf" }}
 
-### Selecting a PostgreSQL database
+### Select a PostgreSQL database
 
-Set `logical_database = "analytics"` to bind an added PostgreSQL database. Omit it for the first database, including a restored instance's preserved first name. Changing the selection replaces the binding.
+Set `logical_database = "analytics"` to bind a PostgreSQL database you added to the instance. Leave it out to bind the first database, which for a restored instance is the first name it kept from its source. Changing the selection replaces the binding.
 
-The default binding resource name is `{database}-{cluster}-{role}` when the selection is omitted or equals the instance name with hyphens replaced by underscores. Other explicit selections use `{database}-{logical_database}-{cluster}-{role}`. For example, an instance `orders-db` restored with first PostgreSQL name `historical_db` gets `orders-db-prod-readwrite` when selection is omitted, or `orders-db-historical-db-prod-readwrite` when `historical_db` is selected explicitly. This provider resource-name rule is tool-specific. The default Secret name uses the effective first database: `{database}-{role}` for that database, or `{database}-{logical_database}-{role}` for an added database. Both restored examples therefore use Secret `orders-db-readwrite`. Custom bindings use `role_name` in place of `role`; underscores become hyphens. Namespaces never appear in the default name. Existing bindings keep their name when `logical_database` is omitted. If the logical selection is explicitly unknown during planning, the default name becomes known when the selection is known. Omitting the selection, or setting it to `null`, uses the first-database default during planning. Set `name` explicitly if you need a different name.
+#### Default names
 
-A taken binding or Secret name is refused. Set `name` or `secret_name` explicitly to choose another name. The provider does not retry with a generated name. The instance's cap of 20 bound namespaces covers all its PostgreSQL databases.
+When you leave out `name` or `secret_name`, they default to:
 
-Use an owner binding to run grants inside an added database before using its readwrite, readonly or custom bindings. Ready confirms provisioning and Secret preparation; it does not verify tenant SQL grants. See [Logical databases](database.md#logical-databases).
+- binding name: `{database}-{cluster}-{role}` when `logical_database` is left out or matches the instance name with hyphens replaced by underscores, and `{database}-{logical_database}-{cluster}-{role}` for any other selection. The API has no default binding name, so this rule is the provider's own;
+- Secret name: `{database}-{role}` for the instance's first database, or `{database}-{logical_database}-{role}` for an added database.
 
-### Using the credentials Secret
+A custom binding uses `role_name` in place of `role`, with underscores turned into hyphens. Namespaces never appear in a default name.
+
+For example, an instance `orders-db` restored with the first PostgreSQL name `historical_db` gets the binding name `orders-db-prod-readwrite` when `logical_database` is left out, and `orders-db-historical-db-prod-readwrite` when `historical_db` is set explicitly. Both use the Secret `orders-db-readwrite`.
+
+An existing binding keeps its name when `logical_database` is left out. Leaving out the selection, or setting it to `null`, plans the first-database default. If the selection is unknown during planning, the default name is known once the selection is. Set `name` if you want a different name.
+
+If the binding name or the Secret name is already taken, the binding is refused. Set `name` or `secret_name` to choose another. The provider does not retry with a generated name. The instance's limit of 20 bound namespaces counts across all its PostgreSQL databases.
+
+Before you use the readwrite, readonly or custom bindings of an added database, connect through an owner binding and run the grants inside it. `Ready` confirms provisioning and the Secret, but does not check your SQL grants. See [Logical databases](database.md#logical-databases).
+
+### Use the credentials Secret
 
 Inside the cluster, each bound namespace sees a Service named after the database and the Secret named by `secret_name`, with the keys `type`, `provider`, `host`, `port`, `database`, `username`, `password`, `sslmode`, `ca.crt` and `uri`. `type` is `postgresql` and `provider` is `kupe`.
 
 Mount the Secret as a volume at `/bindings/<secret_name>` and set `SERVICE_BINDING_ROOT=/bindings`. `uri` is a `postgresql://` connection string with `sslmode=verify-full` and `sslrootcert=/bindings/<secret_name>/ca.crt`, so it only connects from that mount path. Mounted elsewhere, build the connection from `host`, `port`, `database`, `username`, `password`, `sslmode` and `ca.crt` instead.
 
-The example below is illustrative. It uses the [hashicorp/kubernetes](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs) provider, configured against the bound cluster, to mount the Secret into a Deployment in `orders-api`.
+The example below uses the [hashicorp/kubernetes](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs) provider, configured for the bound cluster, to mount the Secret into a Deployment in `orders-api`.
 
 {{ tffile "examples/resources/kupe_database_binding/kubernetes-secret.tf" }}
 
 Have workloads read the Secret themselves. Reading it with a `kubernetes_secret_v1` data source puts the password in Terraform state.
 
-### Changing the namespaces
+### Change the namespaces
 
-`namespaces` changes in place. Terraform sends the complete new list: a namespace added gets the Service and the Secret, a namespace taken out loses its Secret (and the Service and network path, unless another binding of the database lists it), and the namespaces in both lists keep working throughout. Update waits until the platform has delivered the new list, which includes withdrawing from the namespaces taken out.
+Changes to `namespaces` apply in place, and Terraform sends the complete new list. An added namespace gets the Service and the Secret. A namespace you take out loses its Secret, and also the Service and network path unless another binding of the database lists it. Namespaces in both lists keep working throughout. Update waits until the platform has delivered the new list, including withdrawing from the namespaces taken out.
 
-A binding lists at most 10 namespaces, which the plan checks. The bindings of one database list at most 20 namespaces between them, and a namespace can be in only one binding per cluster and role of a database. The Kupe API refuses a change that breaks either rule when it is applied; a change that only takes namespaces out never breaks them.
+A binding can list at most 10 namespaces, which the plan checks. All bindings of one database together can list at most 20, and a namespace can be in only one binding per cluster and role of a database. The API refuses a change that breaks either rule when it is applied; taking namespaces out never does.
 
 ### Dedicated credentials and rotation
 
-Set `credentials = { dedicated = true }` to give every listed namespace its own login and password. Enabling dedicated credentials updates the binding in place, including when `namespaces` changes in the same apply. Omitting `credentials` means `dedicated = false`. Changing a dedicated binding back to `false`, including by removing the `credentials` block, replaces the binding. Owner bindings use shared credentials. Custom bindings require `role_name` and dedicated credentials.
+Set `credentials = { dedicated = true }` to give every listed namespace its own login and password. Turning dedicated credentials on updates the binding in place, even when `namespaces` changes in the same apply. Leaving out `credentials` means `dedicated = false`. Turning a dedicated binding back to `false`, including by removing the `credentials` block, replaces the binding. Owner bindings use shared credentials. Custom bindings need `role_name` and dedicated credentials.
 
-For an omitted selection or an explicit selection equal to the normalised instance name, a custom role such as `sales_reports` gives default binding name `{database}-{cluster}-sales-reports`. An explicit restored first name that differs includes the logical-name component as described above. The default Secret name for the effective first database is `{database}-sales-reports`.
+When `logical_database` is left out or matches the instance name with hyphens replaced by underscores, a custom role such as `sales_reports` gives the default binding name `{database}-{cluster}-sales-reports`. Any other explicit selection, including a restored first name that differs, adds `logical_database` to the name as described above. The default Secret name for the first database is `{database}-sales-reports`.
 
-Set or change `credentials.rotation_trigger` to request one dedicated rotation on update. Removing the trigger does not rotate. The trigger is your own marker, such as a rotation ticket number; Terraform stores it in state. Passwords never reach the provider.
+To rotate dedicated credentials, set or change `credentials.rotation_trigger`: each change requests one rotation on update, and removing the trigger does not rotate. The trigger is your own marker, such as a ticket number, and Terraform stores it in state. Passwords never reach the provider.
 
-Update follows the rotation request token until the platform has applied it and prepared every listed namespace's credentials Secret. `observed_rotation` records the completed token and `namespace_status[].delivered_rotation` shows progress. If another rotation supersedes the request, Update follows the newer token. The copy into the cluster follows asynchronously and is not observed. Restart applications after delivery.
+Update then follows the rotation's request token until the platform has applied it and prepared the credentials Secret for every listed namespace. `observed_rotation` records the completed token and `namespace_status[].delivered_rotation` shows progress. If another rotation supersedes the request, Update follows the newer token. The copy into the cluster happens afterwards and is not observed, so restart applications once it is delivered.
 
-### When a binding waits or fails
+### Pending and failed bindings
 
-A binding is `Pending` while its database or cluster does not exist yet, is not running yet or is being deleted, and while a namespace it lists is not delivered yet. Create and Update keep waiting until their timeout, then fail. The Kupe platform keeps trying, and the binding becomes `Ready` once every listed namespace is.
+A binding is `Pending` while its database or cluster does not exist, is not running yet or is being deleted, and while any namespace it lists has not been delivered. Create and Update wait until their timeout, then fail. The platform keeps trying, and the binding becomes `Ready` once every listed namespace is.
 
-A namespace is `Failed` when it already has a Service or Endpoints object named after the database, or a Secret named `secret_name`, that the Kupe platform did not create. The binding does not replace that object, and the other namespaces keep working. Create and Update stop at once with an error that names the namespace, the database and the Secret name, and `namespace_status` carries the platform's message for it.
+A namespace is `Failed` when it already has a Service or Endpoints object named after the database, or a Secret named `secret_name`, that the platform did not create. The binding does not replace that object, and the other namespaces keep working. Create and Update stop straight away with an error that names the namespace, the database and the Secret name, and `namespace_status` carries the platform's message for it.
 
 - After a failed Create, Terraform keeps the binding in state, marked tainted: rename or remove the object, or set a different `secret_name`, then run `terraform apply` to replace the binding. `terraform destroy` removes it.
 - After a failed Update, the new list is in state. Rename or remove the object and the platform delivers into the namespace on its next try, or take the namespace out of `namespaces` and apply.
+
+### Waiting and timeouts
+
+Create and Update wait for the current generation and for every listed namespace to be `Ready`. A binding that fails or times out on create stays in state, marked tainted. Delete waits until the binding is gone. The timeouts default to 5 minutes for create and delete and 10 minutes for update. Set longer ones with `timeouts`, for example `timeouts = { create = "10m" }`.
 
 {{ .SchemaMarkdown | trimspace }}
 
