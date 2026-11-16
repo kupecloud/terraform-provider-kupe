@@ -200,7 +200,7 @@ func TestAccClusterResource_UpdateAfterConcurrentWrite(t *testing.T) {
 	shrinkPollInterval(t)
 	statusWrite := func(c map[string]any) { c["status"] = map[string]any{"phase": "Running", "observedGeneration": 1} }
 	specWrite := func(c map[string]any) {
-		c["version"] = "1.34"
+		c["version"] = "1.36"
 		c["generation"] = c["generation"].(int) + 1
 	}
 	tests := []struct {

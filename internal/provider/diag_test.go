@@ -44,7 +44,7 @@ func TestAPIErrorDetail(t *testing.T) {
 			name: "400 webhook denial shows verbatim message only",
 			err: &client.APIError{
 				StatusCode: http.StatusBadRequest,
-				Message:    `unsupported Kubernetes version "1.32", supported versions: [1.35.5 1.34.8 1.33.12]`,
+				Message:    `unsupported Kubernetes version "1.32", supported versions: [1.36.6 1.35.10]`,
 			},
 			wantSubstr: []string{
 				"kupe API returned 400",
