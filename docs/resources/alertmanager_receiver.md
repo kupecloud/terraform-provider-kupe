@@ -3,23 +3,22 @@
 page_title: "kupe_alertmanager_receiver Resource - kupe"
 subcategory: ""
 description: |-
-  Manages a single Alertmanager receiver in the tenant's Mimir Alertmanager configuration. Receivers are referenced by routes via their name. The body is provided as a JSON document via jsonencode() so any receiver type supported by Alertmanager (slack_configs, email_configs, webhook_configs, pagerduty_configs, msteams_configs, etc.) can be used without a provider upgrade.
+  Manages one receiver in your tenant's Alertmanager configuration. Routes refer to a receiver by its name. The body is a JSON document written with jsonencode(), so any receiver type Alertmanager supports (slack_configs, email_configs, webhook_configs, pagerduty_configs, msteams_configs and others) works without a provider upgrade.
 ---
 
 # kupe_alertmanager_receiver (Resource)
 
-Manages a single Alertmanager receiver in the tenant's Mimir Alertmanager configuration. Receivers are referenced by routes via their name. The body is provided as a JSON document via `jsonencode()` so any receiver type supported by Alertmanager (slack_configs, email_configs, webhook_configs, pagerduty_configs, msteams_configs, etc.) can be used without a provider upgrade.
+Manages one receiver in your tenant's Alertmanager configuration. Routes refer to a receiver by its name. The body is a JSON document written with `jsonencode()`, so any receiver type Alertmanager supports (`slack_configs`, `email_configs`, `webhook_configs`, `pagerduty_configs`, `msteams_configs` and others) works without a provider upgrade.
 
 ## Example Usage
 
 ```terraform
-# A Slack notification receiver. The body_json field accepts the standard
-# Alertmanager receiver schema. See
+# A Slack receiver. body_json takes Alertmanager's receiver schema; see
 # https://prometheus.io/docs/alerting/latest/configuration/#receiver
-# for the full set of supported sub-blocks (slack_configs, email_configs,
-# webhook_configs, pagerduty_configs, msteams_configs, etc.).
+# for every block it supports (slack_configs, email_configs,
+# webhook_configs, pagerduty_configs, msteams_configs and others).
 #
-# Use jsonencode() so HCL handles escaping for you.
+# jsonencode() handles the escaping.
 resource "kupe_alertmanager_receiver" "slack" {
   name = "slack"
   body_json = jsonencode({
@@ -44,9 +43,9 @@ resource "kupe_alertmanager_receiver" "pagerduty" {
   })
 }
 
-# Sensitive inputs come from variables so the state file does not contain
-# secrets. The Mimir gateway never sees the variable contents in plaintext:
-# kupe-api validates the receiver, then forwards it to Mimir's storage layer.
+# The credentials come from sensitive variables, which keeps them out of your
+# configuration files. They are still stored in Terraform state in plain
+# text, as part of body_json.
 variable "slack_webhook_url" {
   type      = string
   sensitive = true
@@ -63,12 +62,12 @@ variable "pagerduty_service_key" {
 
 ### Required
 
-- `body_json` (String, Sensitive) Alertmanager receiver body as a JSON document. Use HCL's `jsonencode()` to author the value. The `name` field is set automatically from the resource `name` attribute and any value embedded in the body is overridden. Marked sensitive because receiver bodies routinely embed credentials (Slack webhook URLs, PagerDuty service keys, SMTP passwords); the value is still stored in plaintext in your Terraform state, so back the state with an encrypted remote backend.
-- `name` (String) Receiver name. Immutable after creation; rename requires destroy + create.
+- `body_json` (String, Sensitive) Receiver body as a JSON document; write it with `jsonencode()`. The provider sets its `name` field from the resource's `name`, overriding any value in the body. It is marked sensitive because receiver bodies usually hold credentials, such as Slack webhook URLs, PagerDuty service keys and SMTP passwords, but it is still stored in plain text in Terraform state, so keep state in an encrypted remote backend.
+- `name` (String) Receiver name. Changing it replaces the receiver.
 
 ### Read-Only
 
-- `etag` (String) Wrapper ETag from the most recent read or write. Used for optimistic locking on subsequent updates to detect concurrent edits from the Console UI or other API clients.
+- `etag` (String) ETag from the last read or write. Updates use it to detect changes made in the meantime in the Kupe console or by other API clients.
 
 ## Import
 

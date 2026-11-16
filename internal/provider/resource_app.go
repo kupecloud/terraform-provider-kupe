@@ -77,10 +77,10 @@ var appKind = serviceKind[AppResourceModel, client.App]{
 		if !client.IsDeletionProtected(err) {
 			return "", "", false
 		}
-		return "app has deletion protection enabled", fmt.Sprintf("App %q was not deleted. Set `deletion_protection = false` on the app and its environments, run `terraform apply`, then destroy them. Terraform deletes environment resources before the app; an app with any remaining environment is kept.", m.Name.ValueString()), true
+		return "app has deletion protection enabled", fmt.Sprintf("App %q was not deleted because deletion protection is on. Set `deletion_protection = false` on the app and its environments, run `terraform apply`, then destroy them. Terraform destroys the environments before the app, and the platform keeps an app while any environment remains.", m.Name.ValueString()), true
 	},
 	stillDeleting: func(m *AppResourceModel) string {
-		return fmt.Sprintf("DELETE was accepted but app %q is still terminating. Terraform has removed it from state; cleanup continues in the background and its name stays reserved until it is gone. Check the app in the Kupe Console before creating it again.", m.Name.ValueString())
+		return fmt.Sprintf("The platform accepted the delete, but app %q is still being removed. Terraform has removed it from state. Cleanup continues in the background and the name stays reserved until it finishes. Check the app in the Kupe console before you create it again.", m.Name.ValueString())
 	},
 }
 
@@ -90,10 +90,10 @@ func (r *AppResource) Metadata(_ context.Context, req resource.MetadataRequest, 
 
 func (r *AppResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages a Kupe app's identity and deletion protection. Deploy each environment with `kupe_app_environment`. Create and update wait for the app's observed generation, independently of its environments. To destroy, turn protection off and apply first, then destroy the environments before the app. The cluster is kept.",
+		Description: "Manages a Kupe app: its name and deletion protection. Each place the app runs is a `kupe_app_environment`. Create and update wait until the platform has applied the app's settings, without waiting for its environments. To destroy the app, turn deletion protection off and apply, then destroy its environments before the app. No cluster is deleted.",
 		Attributes: map[string]schema.Attribute{
 			"name":                schema.StringAttribute{Required: true, Description: "App name: an RFC 1123 label of at most 32 characters without `--`.", Validators: appNameValidators(32), PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()}},
-			"deletion_protection": schema.BoolAttribute{Optional: true, Computed: true, Default: booldefault.StaticBool(true), Description: "Protects the app from deletion. Set to false and apply before destroying it.", PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
+			"deletion_protection": schema.BoolAttribute{Optional: true, Computed: true, Default: booldefault.StaticBool(true), Description: "Protects the app from deletion. Defaults to `true`. Set it to `false` and apply before you destroy the app.", PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()}},
 			"phase":               schema.StringAttribute{Computed: true, Description: "Current app phase."},
 			"etag":                etagAttribute(),
 			"created_at":          createdAtAttribute("the app"),
@@ -226,7 +226,7 @@ func mapAppToState(app *client.App, etag string, state *AppResourceModel) {
 
 // App identity is independent of its opaque ETag. A same-name recreation
 // cannot verify an accepted write or receive its stale retry.
-const appIdentityChangedMessage = "The app identity changed since the plan. Run plan again before applying."
+const appIdentityChangedMessage = "The app was deleted and created again with the same name after the plan. Run plan again before applying."
 
 type appIdentityChangedError struct{}
 

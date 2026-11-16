@@ -3,6 +3,6 @@ data "kupe_app_image" "web" {
 }
 
 output "image_reference" {
-  description = "Immutable image reference to use as kupe_app_environment.web.image."
+  description = "Immutable image reference for kupe_app_environment.web.image."
   value       = data.kupe_app_image.web.reference
 }

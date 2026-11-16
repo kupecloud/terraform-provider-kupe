@@ -47,9 +47,8 @@ const defaultRegistryTokenCreateTimeout = 5 * time.Minute
 // registryTokenSecretDescription is the `secret` attribute's description,
 // stated verbatim in the docs and the provider index (review M-9).
 const registryTokenSecretDescription = "The token's secret, returned only when the token is created. It is " +
-	"stored in Terraform state in plain text: Sensitive hides it from plan and apply output but does not keep it " +
-	"out of the state file. Keep state in an encrypted backend with restricted access, or create tokens outside " +
-	"Terraform."
+	"marked sensitive, which hides it in plan and apply output, but it is stored in Terraform state in plain " +
+	"text. Keep state in an encrypted backend with restricted access, or create tokens outside Terraform."
 
 // validRegistryTokenID is a token id: rt- and 16 lower-case hex characters.
 var validRegistryTokenID = regexp.MustCompile(`^rt-[a-f0-9]{16}$`)
@@ -104,14 +103,14 @@ func (r *RegistryTokenResource) Schema(ctx context.Context, _ resource.SchemaReq
 	keep := []planmodifier.String{stringplanmodifier.UseStateForUnknown()}
 	replace := []planmodifier.String{stringplanmodifier.RequiresReplace()}
 	resp.Schema = schema.Schema{
-		Description: "Manages an access token for the tenant's Kupe container registry: a registry username and " +
-			"secret for CI and anything else that pulls or pushes images without a person signed in. Sign in with " +
-			"`docker login <registry_host> --username <username> --password-stdin`. Create waits until the platform " +
-			"has issued the token (seconds); until then the registry refuses it.\n\n" +
-			"A token never changes: changing any argument replaces it with a new token and a new secret. It stops " +
-			"working when it expires, when it is revoked, and when the member who created it leaves the tenant (or, " +
-			"for a push token, loses the admin role); once the platform has removed it, the next plan creates a new " +
-			"one. A registry holds at most 50 access tokens.\n\n" +
+		Description: "Manages an access token for your tenant's Kupe container registry: a registry username and " +
+			"secret for CI, and anything else that pulls or pushes images without a person signed in. Sign in " +
+			"with `docker login <registry_host> --username <username> --password-stdin`. Create waits a few " +
+			"seconds until the platform has issued the token; until then the registry refuses it.\n\n" +
+			"A token never changes in place: changing any argument replaces it with a new token and a new " +
+			"secret. It stops working when it expires, when it is revoked, and when the member who created it " +
+			"leaves the tenant or, for a push token, loses the `admin` role. Once the platform has removed it, " +
+			"the next plan creates a new one. A registry holds at most 50 access tokens.\n\n" +
 			"### Secret in state\n\n" + registryTokenSecretDescription,
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -157,34 +156,34 @@ func (r *RegistryTokenResource) Schema(ctx context.Context, _ resource.SchemaReq
 				},
 			},
 			"username": schema.StringAttribute{
-				Description:   "Registry username to sign in with, e.g. `kupe+acme+tok-0a1b2c3d4e5f6a7b`.",
+				Description:   "Registry username to sign in with, for example `kupe+acme+tok-0a1b2c3d4e5f6a7b`.",
 				Computed:      true,
 				PlanModifiers: keep,
 			},
 			"registry_host": schema.StringAttribute{
-				Description: "Registry host to sign in to, e.g. `registry.kupe.cloud`. Returned when the token is " +
+				Description: "Registry host to sign in to, for example `registry.kupe.cloud`. Returned when the token is " +
 					"created, so it is null after import.",
 				Computed:      true,
 				PlanModifiers: keep,
 			},
 			"expires_at": schema.StringAttribute{
-				Description:   "When the token stops working (RFC 3339).",
+				Description:   "When the token stops working, in RFC 3339 format.",
 				Computed:      true,
 				PlanModifiers: keep,
 			},
 			"created_by": schema.StringAttribute{
-				Description:   "Email of the member whose credentials created the token.",
+				Description:   "Email address of the member whose credentials created the token.",
 				Computed:      true,
 				PlanModifiers: keep,
 			},
 			"created_at": createdAtAttribute("the token"),
 			"last_used_at": schema.StringAttribute{
-				Description: "When the token last pulled or pushed (RFC 3339), read hourly at most. Null until it " +
+				Description: "When the token last pulled or pushed, in RFC 3339 format, checked at most hourly. Null until it " +
 					"is first used.",
 				Computed: true,
 			},
 			"phase": schema.StringAttribute{
-				Description: "Pending until the platform has issued the token, then Ready. Failed means it can " +
+				Description: "`Pending` until the platform has issued the token, then `Ready`. `Failed` means it can " +
 					"never work: replace it.",
 				Computed: true,
 			},
@@ -298,8 +297,8 @@ func (r *RegistryTokenResource) waitForIssued(ctx context.Context, timeout time.
 			phase = "Pending"
 		}
 		diags.AddError("access token create timed out while "+phase,
-			fmt.Sprintf("Access token %q was not issued before the create timeout fired; until it is, the registry "+
-				"refuses it. To wait longer, set `timeouts.create = %q`.%s",
+			fmt.Sprintf("Access token %q was not issued before the create timeout ran out, and the registry "+
+				"refuses it until it is. To wait longer, set `timeouts.create = %q`.%s",
 				m.ID.ValueString(), longerTimeout(timeout, defaultRegistryTokenCreateTimeout), tainted))
 	}
 }
@@ -345,8 +344,8 @@ func (r *RegistryTokenResource) Read(ctx context.Context, req resource.ReadReque
 
 	if expires, err := time.Parse(time.RFC3339, token.ExpiresAt); err == nil && !expires.After(registryTokenNow()) {
 		resp.Diagnostics.AddWarning("access token expired",
-			fmt.Sprintf("Access token %q expired at %s; it will be replaced on the next apply after the platform "+
-				"removes it.", state.ID.ValueString(), token.ExpiresAt))
+			fmt.Sprintf("Access token %q expired at %s. Once the platform removes it, the next apply creates "+
+				"a new one.", state.ID.ValueString(), token.ExpiresAt))
 	}
 }
 

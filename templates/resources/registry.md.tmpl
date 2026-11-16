@@ -13,26 +13,32 @@ description: |-
 
 {{ tffile "examples/resources/kupe_registry/resource.tf" }}
 
-### Importing the registry the platform created
+### Import the registry the platform created
 
-The Kupe platform creates your registry when your plan includes one, so it is usually there before you write any configuration. Import it rather than creating it. With Terraform 1.5 or OpenTofu 1.6 and later, add an `import` block next to the resource and run `terraform apply`:
+The platform creates your registry when your plan includes one, so it is usually there before you write any configuration. Import it rather than creating it. With Terraform 1.5 or OpenTofu 1.6 and later, add an `import` block next to the resource and run `terraform apply`:
 
 {{ tffile "examples/resources/kupe_registry/import.tf" }}
 
 Or import it once from the command line, as shown under [Import](#import). A `terraform apply` that tries to create the registry while it exists fails with error code `REGISTRY_ALREADY_EXISTS` and these import steps; nothing changes on the platform. If you deleted the registry, `terraform apply` creates it again. On a plan that does not include a registry, the apply fails with `plan_limit_reached`.
 
-### Deleting the registry
+### Delete the registry
 
-Its cluster connections and access tokens are deleted with it. A stray `terraform destroy` is refused by the Kupe platform while `deletion_protection` is `true`, and the registry stays in state. To delete it, set `deletion_protection = false`, run `terraform apply`, then destroy it.
+Deleting the registry also deletes its cluster connections and access tokens. While `deletion_protection` is `true`, the platform refuses a stray `terraform destroy` and the registry stays in state. To delete it, set `deletion_protection = false`, run `terraform apply`, then destroy it.
 
 ### Storage
 
-`storage_limit` caps what the registry stores below the most your plan allows. Leave it out to use the plan's limit; `storage_limit_bytes` shows the limit in force. Lowering it below what the registry already stores is accepted: pushes are refused until images are deleted or the limit is raised.
+`storage_limit` sets a lower cap than the most your plan allows. Leave it out to use the plan's limit; `storage_limit_bytes` shows the limit in force. Lowering it below what the registry already stores is accepted: pushes are refused until images are deleted or the limit is raised.
 
-### Connecting clusters and CI
+### Connect clusters and CI
 
-- [`kupe_registry_binding`](registry_binding.md) lets every pod of a cluster pull from the registry, and gives chosen namespaces a push credential.
+- [`kupe_registry_binding`](registry_binding.md) lets every pod in a cluster pull from the registry, and gives the namespaces you choose a push credential.
 - [`kupe_registry_token`](registry_token.md) is an access token for CI and anything else that signs in with `docker login`.
+
+### Waiting and timeouts
+
+Create and Update wait until the registry is `Running` with the change in effect. They fail straight away if the registry is being deleted (`Terminating`), and after 2 minutes if it stays `Degraded` once the platform has picked up the change. If the timeout runs out first, the apply fails while the platform carries on in the background, and a registry that timed out on Create stays in state, marked tainted. A change to `deletion_protection` alone takes effect at once and is not waited for. Delete waits until the registry is gone.
+
+The timeouts default to 10 minutes for create, 5 minutes for update and 15 minutes for delete. Set longer ones with `timeouts`, for example `timeouts = { create = "20m" }`.
 
 {{ .SchemaMarkdown | trimspace }}
 

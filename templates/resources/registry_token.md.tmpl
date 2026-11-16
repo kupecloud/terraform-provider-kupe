@@ -13,15 +13,15 @@ description: |-
 
 {{ tffile "examples/resources/kupe_registry_token/resource.tf" }}
 
-### Renewing a token
+### Renew a token
 
 A token never changes in place. When it expires, the platform removes it within a day, and the next `terraform plan` shows it being created again, with a new secret. Until then a refresh warns that it has expired. To renew earlier, change `display_name` or `expires_in_days`, or run `terraform apply -replace=kupe_registry_token.ci`.
 
 A token is also revoked when the member whose credentials created it leaves the tenant, and a push token when that member loses the `admin` role.
 
-### Keeping the secret out of state
+### Keep the secret out of state
 
-`secret` is in Terraform state in plain text. Marking it Sensitive only hides it from plan and apply output. If your state backend is not encrypted and access-controlled, create the token in the Kupe Console or with `kupe registry token create` instead, and store the secret in your CI system's secret store.
+`secret` is stored in Terraform state in plain text; marking it sensitive only hides it in plan and apply output. If your state backend is not encrypted and access-controlled, create the token in the Kupe console or with `kupe registry token create` instead, and store the secret in your CI system's secret store.
 
 {{ .SchemaMarkdown | trimspace }}
 

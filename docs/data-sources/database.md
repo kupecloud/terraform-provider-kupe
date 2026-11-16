@@ -3,12 +3,12 @@
 page_title: "kupe_database Data Source - kupe"
 subcategory: ""
 description: |-
-  Reads an existing Kupe database by name. Credentials are never returned.
+  Reads a Kupe database by name. Credentials are never returned.
 ---
 
 # kupe_database (Data Source)
 
-Reads an existing Kupe database by name. Credentials are never returned.
+Reads a Kupe database by name. Credentials are never returned.
 
 ## Example Usage
 
@@ -31,28 +31,28 @@ output "orders_db_running_version" {
 
 ### Read-Only
 
-- `backup` (Attributes) Backup settings. Null when the database has never set them: it keeps the defaults, 7 days and `Daily`. (see [below for nested schema](#nestedatt--backup))
+- `backup` (Attributes) Backup settings. Null when they have never been set, in which case the defaults apply: 7 days and `Daily`. (see [below for nested schema](#nestedatt--backup))
 - `backup_size_bytes` (Number) Bytes every full backup and all WAL kept for the database take up in storage, manual backups included. 0 until measured.
 - `created_at` (String) Timestamp when the database was created.
-- `current_version` (String) Full engine version running, e.g. `18.0`.
-- `deletion_protection` (Boolean) Whether the Kupe platform refuses to delete the database.
-- `engine` (String) Database engine, e.g. `postgres`.
+- `current_version` (String) Full engine version the database runs, for example `18.0`.
+- `deletion_protection` (Boolean) Whether deletion protection is on, so the platform refuses to delete the database.
+- `engine` (String) Database engine, for example `postgres`.
 - `high_availability` (Boolean) Whether the database runs two instances with a synchronous standby.
 - `last_backup_at` (String) When the newest full backup finished (RFC 3339). Empty until the first backup completes.
 - `phase` (String) Current phase: Pending, Provisioning, Running, Degraded or Terminating.
-- `postgres` (Attributes) PostgreSQL databases, declared roles, extensions and the connection pooler returned by the database. (see [below for nested schema](#nestedatt--postgres))
+- `postgres` (Attributes) The database's PostgreSQL databases, declared roles, extensions and connection pooler. (see [below for nested schema](#nestedatt--postgres))
 - `recovery_window` (Attributes) The restore window: the oldest and newest points you can restore the database to. Null until the backups report them. (see [below for nested schema](#nestedatt--recovery_window))
-- `resources` (Attributes) Per-instance resources. (see [below for nested schema](#nestedatt--resources))
+- `resources` (Attributes) Resources of each instance. (see [below for nested schema](#nestedatt--resources))
 - `source` (Attributes) What the database was restored from. Null for a database that was not restored. (see [below for nested schema](#nestedatt--source))
-- `version` (String) Requested engine major version, e.g. `18`.
+- `version` (String) Engine major version you asked for, for example `18`.
 
 <a id="nestedatt--backup"></a>
 ### Nested Schema for `backup`
 
 Read-Only:
 
-- `retention` (Number) How far back the backups reach, in days. Null when never set: the default, 7, applies.
-- `schedule` (String) How many full backups are kept within the retention period: `Daily` keeps one for every day, `DailyThenWeekly` one for each of the last 7 days and one a week before that.
+- `retention` (Number) How far back the backups reach, in days. Null when never set, in which case the default of 7 applies.
+- `schedule` (String) How many full backups are kept within the retention period: `Daily` keeps one for every day, and `DailyThenWeekly` one for each of the last 7 days and one a week before that.
 
 
 <a id="nestedatt--postgres"></a>
@@ -123,9 +123,9 @@ Read-Only:
 
 Read-Only:
 
-- `cpu` (String) CPU, e.g. `500m`.
-- `memory` (String) Memory, e.g. `1Gi`.
-- `storage` (String) Storage, e.g. `10Gi`.
+- `cpu` (String) CPU, for example `500m`.
+- `memory` (String) Memory, for example `1Gi`.
+- `storage` (String) Storage, for example `10Gi`.
 
 
 <a id="nestedatt--source"></a>
@@ -135,4 +135,4 @@ Read-Only:
 
 - `backup` (String) Name of the manual backup the database was restored from.
 - `database` (String) Name of the database it was restored from.
-- `point_in_time` (String) The point it was restored to (RFC 3339). Null when it was restored to the latest point or from a backup.
+- `point_in_time` (String) The point it was restored to, in RFC 3339 format. Null when it was restored to the latest point or from a backup.

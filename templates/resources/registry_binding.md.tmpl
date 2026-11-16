@@ -13,21 +13,25 @@ description: |-
 
 {{ tffile "examples/resources/kupe_registry_binding/resource.tf" }}
 
-### Pulling
+### Pull images
 
-Once the connection is Ready, every pod of the cluster can pull `registry.kupe.cloud/<tenant>/<repository>:<tag>` with no `imagePullSecrets`. The pull credential stays on the platform. Create gives a warning as a reminder: pods that were already running pick it up only when they restart.
+Once the connection is `Ready`, every pod in the cluster can pull `registry.kupe.cloud/<tenant>/<repository>:<tag>` without `imagePullSecrets`. The pull credential stays on the platform. Pods that were already running pick up the connection only when they restart, and Create warns you about this.
 
-### Pushing from inside the cluster
+### Push from inside the cluster
 
-Each namespace in `push_namespaces` gets a Secret named `secret_name` (default `kupe-registry-push`) of type `kubernetes.io/dockerconfigjson`. Build tools that read a Docker config file can push with it: mount its `.dockerconfigjson` key as `config.json`. Each namespace receives a Secret named `secret_name` that can pull from and push to every repository in your registry, including replacing existing tags, so list only the namespaces that build images.
+Each namespace in `push_namespaces` gets a Secret named `secret_name` (default `kupe-registry-push`) of type `kubernetes.io/dockerconfigjson`. Build tools that read a Docker config file can push with it: mount its `.dockerconfigjson` key as `config.json`. The Secret can pull from and push to every repository in your registry, including replacing existing tags, so list only the namespaces that build images.
 
-`push_namespaces` changes in place, and the connection's pull credential is untouched: running pods keep pulling. A namespace taken out loses its Secret, and the push credential is replaced, so build jobs in the remaining push namespaces must restart to read the new Secret. Changing `secret_name`, `cluster` or `registry` replaces the connection instead: it is deleted and created again, so its pull and push credentials are reissued.
+Changes to `push_namespaces` apply in place and leave the pull credential alone, so running pods keep pulling. A namespace you take out loses its Secret, and the push credential is replaced: restart build jobs in the remaining push namespaces so they read the new Secret. Changing `secret_name`, `cluster` or `registry` replaces the connection instead: it is deleted and created again, and its pull and push credentials are reissued.
 
-A connection lists at most 10 push namespaces, which the plan checks. The registry's connections list at most 20 between them; the Kupe platform refuses a change that breaks that when it is applied.
+A connection can list at most 10 push namespaces, which the plan checks. All of a registry's connections together can list at most 20; the platform refuses a change that goes over when it is applied.
 
-### When a connection fails
+### Failed connections
 
-A push namespace is `Failed` when it already has a Secret named `secret_name` that the Kupe platform did not create. Create and Update stop at once with an error that names the namespace; every pod of the cluster can still pull. Rename or remove that Secret, or set a different `secret_name`. After a failed Create, Terraform keeps the connection in state, marked tainted, and the next `terraform apply` replaces it.
+A push namespace is `Failed` when it already has a Secret named `secret_name` that the platform did not create. Create and Update stop straight away with an error that names the namespace; every pod in the cluster can still pull. Rename or remove that Secret, or set a different `secret_name`. After a failed Create, Terraform keeps the connection in state, marked tainted, and the next `terraform apply` replaces it.
+
+### Waiting and timeouts
+
+Create and Update wait until the connection is `Ready` with every push namespace's Secret delivered, and fail straight away if a push namespace is `Failed`. A connection that fails or times out on create stays in state, marked tainted. Delete waits until the connection is gone. The timeouts default to 5 minutes; set longer ones with `timeouts`, for example `timeouts = { create = "10m" }`.
 
 {{ .SchemaMarkdown | trimspace }}
 

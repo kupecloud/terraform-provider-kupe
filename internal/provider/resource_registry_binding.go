@@ -145,9 +145,9 @@ var registryBindingKind = serviceKind[RegistryBindingResourceModel, client.Regis
 		return []string{"push_namespaces"}
 	},
 	stillDeleting: func(m *RegistryBindingResourceModel) string {
-		return fmt.Sprintf("DELETE was accepted but cluster connection %q is still being removed after the "+
-			"configured delete timeout. Terraform has removed it from state; the Kupe platform finishes deleting its "+
-			"credentials and push Secrets in the background.", m.Name.ValueString())
+		return fmt.Sprintf("The platform accepted the delete, but cluster connection %q was still being removed "+
+			"when the delete timeout ran out. Terraform has removed it from state, and the platform finishes "+
+			"deleting its credentials and push Secrets in the background.", m.Name.ValueString())
 	},
 }
 
@@ -221,18 +221,13 @@ func (r *RegistryBindingResource) Metadata(_ context.Context, req resource.Metad
 
 func (r *RegistryBindingResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Connects a cluster to the tenant's Kupe container registry. Every pod of the cluster can " +
-			"then pull its images: the pull credential stays on the platform and never enters the cluster. Each " +
-			"namespace in `push_namespaces` also gets a push credential Secret. A cluster has one connection, named " +
-			"after it, and the cluster must exist. Create and Update wait until the connection is Ready with every " +
-			"push namespace delivered, and fail at once if a push namespace is Failed. A connection that fails or " +
-			"times out on create stays in state, marked tainted. Delete waits until the connection is gone. Set " +
-			"timeouts with the `timeouts` attribute, for example `timeouts = { create = \"10m\" }` (defaults: " +
-			"create/update/delete 5m).\n\n" +
-			"Pods that were running before the connection was made keep their old settings: restart them to pull " +
-			"from the registry. `push_namespaces` changes in place. Changing `cluster`, `registry` or " +
-			"`secret_name` replaces the connection: it is deleted and created again, so its pull and push " +
-			"credentials are reissued. Credentials are never returned by the API or stored in Terraform state.",
+		Description: "Connects a cluster to your tenant's Kupe container registry. Every pod in the cluster can " +
+			"then pull its images, and the pull credential stays on the platform: it never enters the cluster. " +
+			"Each namespace in `push_namespaces` also gets a Secret with a push credential. A cluster has one " +
+			"connection, named after it, and the cluster must already exist. Pods that were running before the " +
+			"connection was made keep their old settings: restart them to pull from the registry. Changing " +
+			"`cluster`, `registry` or `secret_name` replaces the connection and reissues its credentials. " +
+			"Credentials are never returned by the API or stored in Terraform state.",
 		Attributes: map[string]schema.Attribute{
 			"registry": schema.StringAttribute{
 				Description: "Registry to connect to. A tenant has one registry, named `registry`: this is the " +
@@ -246,7 +241,7 @@ func (r *RegistryBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 				},
 			},
 			"cluster": schema.StringAttribute{
-				Description:   "Cluster to connect. It must exist. A different cluster replaces the connection.",
+				Description:   "Cluster to connect, which must already exist. Changing it replaces the connection.",
 				Required:      true,
 				Validators:    clusterRefValidators(),
 				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
@@ -259,15 +254,14 @@ func (r *RegistryBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 				},
 			},
 			"push_namespaces": schema.SetAttribute{
-				Description: "Namespaces inside the cluster that receive a push credential Secret named " +
-					"`secret_name`: up to 10, none `kube-*` or `argocd`. Each namespace receives a Secret named " +
-					"`secret_name` that can pull from and push to every repository in your registry, including " +
-					"replacing existing tags. Default none: the cluster can pull only. Changes in place: a namespace " +
-					"added gets the Secret; one taken out loses it, and the push credential is replaced, so build " +
-					"jobs in the remaining push namespaces must restart to read the new Secret. Pulls keep working " +
-					"throughout. The " +
-					"registry's connections can list at most 20 push namespaces between them; the Kupe platform " +
-					"checks that when the change is applied.",
+				Description: "Namespaces in the cluster that get a push credential Secret named `secret_name`: up to " +
+					"10, and none of them `kube-*` or `argocd`. The Secret can pull from and push to every " +
+					"repository in your registry, including replacing existing tags. Without push namespaces, " +
+					"the cluster can only pull. Changes apply in place: an added namespace gets the Secret, and one " +
+					"you take out loses it and the push credential is replaced, so build jobs in the remaining push " +
+					"namespaces must restart to read the new Secret. Pulls keep working throughout. All of the " +
+					"registry's connections together can list at most 20 push namespaces; the platform checks " +
+					"this when the change is applied.",
 				ElementType: types.StringType,
 				Optional:    true,
 				Computed:    true,
@@ -278,10 +272,9 @@ func (r *RegistryBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 				},
 			},
 			"secret_name": schema.StringAttribute{
-				Description: "Name of the push credential Secret in each push namespace. Default " +
-					"`kupe-registry-push`; it cannot be `kupe-registry-pull`. It cannot change in place: a " +
-					"different name replaces the cluster connection (it is deleted and created again, so its pull " +
-					"and push credentials are reissued).",
+				Description: "Name of the push credential Secret in each push namespace. Defaults to " +
+					"`kupe-registry-push` and cannot be `kupe-registry-pull`. Changing it replaces the connection: " +
+					"it is deleted and created again, and its pull and push credentials are reissued.",
 				Optional: true,
 				Computed: true,
 				Default:  stringdefault.StaticString(defaultRegistryPushSecretName),
@@ -294,8 +287,8 @@ func (r *RegistryBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
 			},
 			"phase": schema.StringAttribute{
-				Description: "Current phase: Pending, Ready (every pod can pull and every push namespace is " +
-					"delivered) or Failed (a push namespace could not be delivered).",
+				Description: "Current phase: `Pending`, `Ready` (every pod can pull and every push namespace has its " +
+					"Secret) or `Failed` (a push namespace could not get its Secret).",
 				Computed: true,
 			},
 			"message": schema.StringAttribute{
@@ -307,7 +300,7 @@ func (r *RegistryBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 				Computed:    true,
 			},
 			"push_username": schema.StringAttribute{
-				Description: "Registry username of the push credential; empty without push namespaces.",
+				Description: "Registry username of the push credential. Empty without push namespaces.",
 				Computed:    true,
 			},
 			"namespace_status": schema.ListNestedAttribute{
@@ -321,7 +314,7 @@ func (r *RegistryBindingResource) Schema(ctx context.Context, _ resource.SchemaR
 							Computed:    true,
 						},
 						"phase": schema.StringAttribute{
-							Description: "Pending, Ready or Failed.",
+							Description: "`Pending`, `Ready` or `Failed`.",
 							Computed:    true,
 						},
 						"message": schema.StringAttribute{

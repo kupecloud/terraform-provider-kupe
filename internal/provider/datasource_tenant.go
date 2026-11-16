@@ -35,30 +35,30 @@ func (d *TenantDataSource) Metadata(_ context.Context, req datasource.MetadataRe
 
 func (d *TenantDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Reads the current tenant's details.",
+		Description: "Reads the tenant the provider is configured for.",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
 				Description: "Tenant name.",
 				Computed:    true,
 			},
 			"display_name": schema.StringAttribute{
-				Description: "Human-readable tenant name.",
+				Description: "Tenant display name.",
 				Computed:    true,
 			},
 			"contact_email": schema.StringAttribute{
-				Description: "Primary tenant contact email.",
+				Description: "Tenant's main contact email address.",
 				Computed:    true,
 			},
 			"plan": schema.StringAttribute{
-				Description: "Current subscribed plan name.",
+				Description: "Name of the tenant's current plan.",
 				Computed:    true,
 			},
 			"enforce_metrics_limit": schema.BoolAttribute{
-				Description: "Whether metrics ingestion overage is blocked at the tenant level.",
+				Description: "Whether the tenant blocks metrics ingestion over its plan's allowance.",
 				Computed:    true,
 			},
 			"enforce_log_limit": schema.BoolAttribute{
-				Description: "Whether log ingestion overage is blocked at the tenant level.",
+				Description: "Whether the tenant blocks log ingestion over its plan's allowance.",
 				Computed:    true,
 			},
 		},

@@ -84,21 +84,21 @@ func (r *AlertmanagerRoutesResource) Metadata(_ context.Context, req resource.Me
 
 func (r *AlertmanagerRoutesResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages the entire ordered list of child routes on the root Alertmanager route " +
-			"for a tenant. Singleton: only one of these resources should exist per tenant. The root " +
-			"route itself (receiver, group_by defaults) is implicit and managed by kupe-api.",
+		Description: "Manages the ordered list of child routes under your tenant's root Alertmanager " +
+			"route. A tenant has one list, so declare this resource once. The platform manages the " +
+			"root route itself, including its default receiver and `group_by`.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
-				Description: "Always equal to the singleton constant `alertmanager-routes`. Singleton-per-tenant resource.",
+				Description: "Always `alertmanager-routes`: a tenant has one route list.",
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"routes_json": schema.StringAttribute{
-				Description: "Ordered list of routes as a JSON array. Use `jsonencode([...])` to " +
-					"author. Each element follows the Alertmanager Route schema (receiver, matchers, " +
-					"group_by, group_wait, group_interval, repeat_interval, nested routes).",
+				Description: "Ordered list of routes as a JSON array; write it with `jsonencode([...])`. Each " +
+					"element follows Alertmanager's route schema: `receiver`, `matchers`, `group_by`, " +
+					"`group_wait`, `group_interval`, `repeat_interval` and nested `routes`.",
 				Required: true,
 				// Marked Sensitive for parity with the receiver/global body_json
 				// fields: route matchers can carry sensitive label values, so we
@@ -108,8 +108,8 @@ func (r *AlertmanagerRoutesResource) Schema(_ context.Context, _ resource.Schema
 				CustomType: RoutesJSONTypeInstance,
 			},
 			"etag": schema.StringAttribute{
-				Description: "Wrapper ETag from the most recent read or write. Used for optimistic " +
-					"locking on subsequent updates.",
+				Description: "ETag from the last read or write, used to detect concurrent changes " +
+					"on update.",
 				Computed: true,
 			},
 		},
@@ -175,8 +175,8 @@ func (r *AlertmanagerRoutesResource) Create(ctx context.Context, req resource.Cr
 	if len(existing) > 0 {
 		resp.Diagnostics.AddError(
 			"alertmanager routes already exist",
-			"the tenant already has Alertmanager child routes configured. This is a singleton "+
-				"resource; import the existing list instead of creating it:\n\n"+
+			"Your tenant already has Alertmanager child routes, and it can have only one route "+
+				"list. Import it instead of creating it:\n\n"+
 				"  terraform import kupe_alertmanager_routes.<name> alertmanager-routes",
 		)
 		return

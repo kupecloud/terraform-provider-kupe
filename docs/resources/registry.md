@@ -2,21 +2,18 @@
 page_title: "kupe_registry Resource - kupe"
 subcategory: ""
 description: |-
-  Manages the tenant's Kupe container registry. A tenant has one registry, always named registry; images live at registry.kupe.cloud/<tenant>/<repository>:<tag>. The Kupe platform creates it when the tenant's plan includes one: import it (ID registry) rather than creating it. Creating it when it exists fails with the import command. Create and Update wait for the registry to reach phase=Running with the change in effect. They fail at once if the registry is being deleted (Terminating), and after 2 minutes if it stays Degraded once the platform has picked up the change. If the timeout fires first, the apply fails; the platform carries on in the background, and a registry that timed out on Create stays in state, marked tainted. A change to deletion_protection alone takes effect at once and is not waited for. Delete waits until the registry is gone. Set timeouts with the timeouts attribute, for example timeouts = { create = "20m" } (defaults: create 10m, update 5m, delete 15m).
-  Clusters pull from the registry through kupe_registry_binding, and CI systems sign in with a kupe_registry_token.
-  Destroy semantics
-  Deleting a registry deletes every image in it. They cannot be restored. deletion_protection (default true) makes the Kupe platform refuse the delete: set it to false and apply before destroying. Add lifecycle { prevent_destroy = true } to stop Terraform from planning the destroy at all.
+  Manages your tenant's Kupe container registry. A tenant has one registry, always named registry, and images live at registry.kupe.cloud/<tenant>/<repository>:<tag>. The platform creates it when your plan includes one, so import it (ID registry) rather than creating it; creating it when it exists fails with the import command. Clusters pull from the registry through kupe_registry_binding, and CI signs in with a kupe_registry_token.
+  What destroy deletes
+  Deleting a registry deletes every image in it. They cannot be restored. deletion_protection, true by default, makes the platform refuse the delete: set it to false and apply before you destroy the registry. Add lifecycle { prevent_destroy = true } to stop Terraform planning the destroy at all.
 ---
 
 # kupe_registry (Resource)
 
-Manages the tenant's Kupe container registry. A tenant has one registry, always named `registry`; images live at `registry.kupe.cloud/<tenant>/<repository>:<tag>`. The Kupe platform creates it when the tenant's plan includes one: import it (ID `registry`) rather than creating it. Creating it when it exists fails with the import command. Create and Update wait for the registry to reach phase=Running with the change in effect. They fail at once if the registry is being deleted (Terminating), and after 2 minutes if it stays Degraded once the platform has picked up the change. If the timeout fires first, the apply fails; the platform carries on in the background, and a registry that timed out on Create stays in state, marked tainted. A change to `deletion_protection` alone takes effect at once and is not waited for. Delete waits until the registry is gone. Set timeouts with the `timeouts` attribute, for example `timeouts = { create = "20m" }` (defaults: create 10m, update 5m, delete 15m).
+Manages your tenant's Kupe container registry. A tenant has one registry, always named `registry`, and images live at `registry.kupe.cloud/<tenant>/<repository>:<tag>`. The platform creates it when your plan includes one, so import it (ID `registry`) rather than creating it; creating it when it exists fails with the import command. Clusters pull from the registry through `kupe_registry_binding`, and CI signs in with a `kupe_registry_token`.
 
-Clusters pull from the registry through `kupe_registry_binding`, and CI systems sign in with a `kupe_registry_token`.
+### What destroy deletes
 
-### Destroy semantics
-
-Deleting a registry deletes every image in it. They cannot be restored. `deletion_protection` (default `true`) makes the Kupe platform refuse the delete: set it to `false` and apply before destroying. Add `lifecycle { prevent_destroy = true }` to stop Terraform from planning the destroy at all.
+Deleting a registry deletes every image in it. They cannot be restored. `deletion_protection`, `true` by default, makes the platform refuse the delete: set it to `false` and apply before you destroy the registry. Add `lifecycle { prevent_destroy = true }` to stop Terraform planning the destroy at all.
 
 ## Example Usage
 
@@ -33,14 +30,14 @@ resource "kupe_registry" "this" {
 }
 
 output "registry_endpoint" {
-  description = "Image path prefix, e.g. registry.kupe.cloud/acme."
+  description = "Image path prefix, for example registry.kupe.cloud/acme."
   value       = kupe_registry.this.endpoint
 }
 ```
 
-### Importing the registry the platform created
+### Import the registry the platform created
 
-The Kupe platform creates your registry when your plan includes one, so it is usually there before you write any configuration. Import it rather than creating it. With Terraform 1.5 or OpenTofu 1.6 and later, add an `import` block next to the resource and run `terraform apply`:
+The platform creates your registry when your plan includes one, so it is usually there before you write any configuration. Import it rather than creating it. With Terraform 1.5 or OpenTofu 1.6 and later, add an `import` block next to the resource and run `terraform apply`:
 
 ```terraform
 # The Kupe platform creates the tenant's registry when the plan includes one.
@@ -53,37 +50,43 @@ import {
 
 Or import it once from the command line, as shown under [Import](#import). A `terraform apply` that tries to create the registry while it exists fails with error code `REGISTRY_ALREADY_EXISTS` and these import steps; nothing changes on the platform. If you deleted the registry, `terraform apply` creates it again. On a plan that does not include a registry, the apply fails with `plan_limit_reached`.
 
-### Deleting the registry
+### Delete the registry
 
-Its cluster connections and access tokens are deleted with it. A stray `terraform destroy` is refused by the Kupe platform while `deletion_protection` is `true`, and the registry stays in state. To delete it, set `deletion_protection = false`, run `terraform apply`, then destroy it.
+Deleting the registry also deletes its cluster connections and access tokens. While `deletion_protection` is `true`, the platform refuses a stray `terraform destroy` and the registry stays in state. To delete it, set `deletion_protection = false`, run `terraform apply`, then destroy it.
 
 ### Storage
 
-`storage_limit` caps what the registry stores below the most your plan allows. Leave it out to use the plan's limit; `storage_limit_bytes` shows the limit in force. Lowering it below what the registry already stores is accepted: pushes are refused until images are deleted or the limit is raised.
+`storage_limit` sets a lower cap than the most your plan allows. Leave it out to use the plan's limit; `storage_limit_bytes` shows the limit in force. Lowering it below what the registry already stores is accepted: pushes are refused until images are deleted or the limit is raised.
 
-### Connecting clusters and CI
+### Connect clusters and CI
 
-- [`kupe_registry_binding`](registry_binding.md) lets every pod of a cluster pull from the registry, and gives chosen namespaces a push credential.
+- [`kupe_registry_binding`](registry_binding.md) lets every pod in a cluster pull from the registry, and gives the namespaces you choose a push credential.
 - [`kupe_registry_token`](registry_token.md) is an access token for CI and anything else that signs in with `docker login`.
+
+### Waiting and timeouts
+
+Create and Update wait until the registry is `Running` with the change in effect. They fail straight away if the registry is being deleted (`Terminating`), and after 2 minutes if it stays `Degraded` once the platform has picked up the change. If the timeout runs out first, the apply fails while the platform carries on in the background, and a registry that timed out on Create stays in state, marked tainted. A change to `deletion_protection` alone takes effect at once and is not waited for. Delete waits until the registry is gone.
+
+The timeouts default to 10 minutes for create, 5 minutes for update and 15 minutes for delete. Set longer ones with `timeouts`, for example `timeouts = { create = "20m" }`.
 
 <!-- schema generated by tfplugindocs -->
 ## Schema
 
 ### Optional
 
-- `deletion_protection` (Boolean) While `true`, the Kupe platform refuses to delete the registry. Set it to `false` and apply before destroying. Default `true`, also for an existing registry: importing an unprotected registry without this attribute in configuration plans turning protection on.
+- `deletion_protection` (Boolean) While `true`, the platform refuses to delete the registry. Set it to `false` and apply before you destroy the registry. Defaults to `true`, for an existing registry too: importing an unprotected registry without this attribute in the configuration plans turning protection on.
 - `name` (String) Registry name. A tenant has one registry, named `registry`: this is the default and the only value accepted.
-- `storage_limit` (String) Most the registry may store, with a binary unit (`Mi`, `Gi` or `Ti`), e.g. `10Gi`. It can only be set at or below the most your plan allows. When unset, the plan's limit applies. Changes in place; lowering it below what the registry stores is accepted, and pushes are then refused until images are deleted.
+- `storage_limit` (String) Most the registry can store, with a binary unit (`Mi`, `Gi` or `Ti`), for example `10Gi`. It cannot be more than your plan allows, and when unset the plan's limit applies. Changes apply in place. Lowering it below what the registry stores is accepted, and pushes are then refused until images are deleted.
 - `timeouts` (Attributes) (see [below for nested schema](#nestedatt--timeouts))
 
 ### Read-Only
 
 - `created_at` (String) Timestamp when the registry was created.
-- `endpoint` (String) Image path prefix to push to and pull from, e.g. `registry.kupe.cloud/acme`. Empty until the registry is provisioned.
+- `endpoint` (String) Image path prefix to push to and pull from, for example `registry.kupe.cloud/acme`. Empty until the registry is provisioned.
 - `etag` (String) Resource version used for optimistic locking during updates.
-- `phase` (String) Current phase: Pending, Provisioning, Running, Degraded or Terminating.
+- `phase` (String) Current phase: `Pending`, `Provisioning`, `Running`, `Degraded` or `Terminating`.
 - `repository_count` (Number) Number of repositories in the registry.
-- `storage_limit_bytes` (Number) The storage limit in force, in bytes: `storage_limit` when set, else the plan's. `-1` means unlimited. Null until the platform has applied a limit.
+- `storage_limit_bytes` (Number) The storage limit in force, in bytes: `storage_limit` when set, otherwise the plan's. `-1` means unlimited. Null until the platform has applied a limit.
 - `storage_used_bytes` (Number) What the registry stores, in bytes, as last measured by the platform.
 
 <a id="nestedatt--timeouts"></a>

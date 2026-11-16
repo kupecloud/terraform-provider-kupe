@@ -49,30 +49,30 @@ func (d *PlanDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, r
 				Required:    true,
 			},
 			"display_name": schema.StringAttribute{
-				Description: "Human-readable plan name.",
+				Description: "Plan display name.",
 				Computed:    true,
 			},
 			"platform_fee": schema.StringAttribute{
-				Description: "Deprecated: not returned (no platform costs in Terraform).",
-				DeprecationMessage: "platform_fee is always null: Terraform returns no platform costs. " +
-					"Remove references to it; a future major version removes the attribute.",
+				Description: "**Deprecated.** Always null: the provider returns no platform costs.",
+				DeprecationMessage: "platform_fee is always null: the provider returns no platform costs. " +
+					"Remove references to it; a later major version removes the attribute.",
 				Computed: true,
 			},
 			"max_clusters": schema.Int64Attribute{
-				Description: "Maximum number of clusters allowed on the plan. `0` means unlimited.",
+				Description: "Most clusters the plan allows. `0` means unlimited.",
 				Computed:    true,
 			},
 			"max_databases": schema.Int64Attribute{
-				Description: "Maximum number of databases allowed on the plan. `0` means unlimited. Null when the API does not report a database limit for the plan.",
+				Description: "Most databases the plan allows. `0` means unlimited. Null when the API reports no database limit for the plan.",
 				Computed:    true,
 			},
 			"registry_max_storage": schema.StringAttribute{
-				Description: "Most a registry may store on the plan, with a binary unit, e.g. `5Gi`. `0` means " +
+				Description: "Most a registry can store on the plan, with a binary unit, for example `5Gi`. `0` means " +
 					"unlimited. Null when the plan includes no registry.",
 				Computed: true,
 			},
 			"registry_included_storage": schema.StringAttribute{
-				Description: "Registry storage the plan includes, with a binary unit, e.g. `1Gi`. Null when the plan " +
+				Description: "Registry storage included in the plan, with a binary unit, for example `1Gi`. Null when the plan " +
 					"includes no registry.",
 				Computed: true,
 			},

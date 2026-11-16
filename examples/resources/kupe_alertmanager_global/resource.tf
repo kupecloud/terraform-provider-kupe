@@ -1,6 +1,6 @@
-# Singleton-per-tenant Alertmanager global section. Use this to set SMTP
-# defaults, slack_api_url, resolve_timeout, and other top-level fields shared
-# by every receiver in the tenant.
+# The tenant's Alertmanager global section: SMTP defaults, slack_api_url,
+# resolve_timeout and the other top-level fields every receiver shares.
+# A tenant has one, so declare this resource once.
 #
 # See https://prometheus.io/docs/alerting/latest/configuration/#configuration-file
 # for the complete field list.

@@ -35,33 +35,33 @@ func (d *ClusterDataSource) Metadata(_ context.Context, req datasource.MetadataR
 
 func (d *ClusterDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Reads an existing Kupe cluster by name.",
+		Description: "Reads a Kupe cluster by name.",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
 				Description: "Cluster name to look up.",
 				Required:    true,
 			},
 			"display_name": schema.StringAttribute{
-				Description: "**Deprecated.** Kupe clusters have no separate display name; this mirrors `name`. " +
+				Description: "**Deprecated.** Clusters have no separate display name, so this is the same as `name`. " +
 					"Use `name` instead.",
 				Computed:           true,
-				DeprecationMessage: "`display_name` is deprecated and mirrors `name`; use `name` instead.",
+				DeprecationMessage: "`display_name` is deprecated and is the same as `name`; use `name` instead.",
 			},
 			"type": schema.StringAttribute{
-				Description: "Cluster type. Only `shared` is supported today; `dedicated` is rejected with " +
+				Description: "Cluster type. Only `shared` is supported; the platform refuses `dedicated` with " +
 					"`CLUSTER_DEDICATED_UNSUPPORTED`.",
 				Computed: true,
 			},
 			"version": schema.StringAttribute{
-				Description: "Current Kubernetes version for the cluster.",
+				Description: "Kubernetes version the cluster runs.",
 				Computed:    true,
 			},
 			"high_availability": schema.BoolAttribute{
-				Description: "Whether the cluster is configured with HA (3-replica control plane). Reflects the requested setting, not operational state; see `ha_configured`.",
+				Description: "Whether the cluster is set up for HA, with a 3-replica control plane. This is the requested setting; `ha_configured` says whether HA is working.",
 				Computed:    true,
 			},
 			"phase": schema.StringAttribute{
-				Description: "Current cluster phase, for example Pending, Provisioning, Running, Upgrading, Degraded or Terminating.",
+				Description: "Current cluster phase, for example `Pending`, `Provisioning`, `Running`, `Upgrading`, `Degraded` or `Terminating`.",
 				Computed:    true,
 			},
 			"endpoint": schema.StringAttribute{
@@ -69,35 +69,35 @@ func (d *ClusterDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 				Computed:    true,
 			},
 			"ha_configured": schema.BoolAttribute{
-				Description: "True once the operator has confirmed both 3/3 apiserver replicas AND 3/3 deployed-etcd " +
-					"replicas are `Ready` for the first time. Etcd readiness is required because the OSS deployed-etcd " +
-					"path runs etcd in its own StatefulSet, so quorum loss blocks writes even with healthy apiserver pods.",
+				Description: "True once all 3 API server replicas and all 3 etcd replicas have been `Ready` for the first time. " +
+					"etcd counts because it runs in its own pods: losing etcd quorum blocks writes even while the API " +
+					"server pods are healthy.",
 				Computed: true,
 			},
 			"ha_enabled_at": schema.StringAttribute{
-				Description: "Timestamp when `ha_configured` first became true (billing anchor).",
+				Description: "When `ha_configured` first became true. HA is billed from this moment.",
 				Computed:    true,
 			},
 			"ha_phase": schema.StringAttribute{
-				Description: "Consumer-friendly HA rollup. One of `pending`, `ha-healthy`, `ha-degraded`, `ha-unavailable`. Empty for non-HA clusters.",
+				Description: "Summary of HA health: `pending`, `ha-healthy`, `ha-degraded` or `ha-unavailable`. Empty for a cluster without HA.",
 				Computed:    true,
 			},
 			"ha_replicas_ready": schema.Int64Attribute{
-				Description: "Count of HA control-plane (apiserver) replicas currently `Ready`.",
+				Description: "Number of HA control-plane (API server) replicas that are `Ready`.",
 				Computed:    true,
 			},
 			"ha_replicas_desired": schema.Int64Attribute{
-				Description: "Target HA replica count (3 when `high_availability = true`, 0 otherwise).",
+				Description: "Target number of HA API server replicas: 3 when `high_availability = true`, otherwise 0.",
 				Computed:    true,
 			},
 			"ha_etcd_replicas_ready": schema.Int64Attribute{
-				Description: "Count of deployed-etcd replicas currently `Ready`. Exposed separately because the OSS " +
-					"deployed-etcd path runs etcd in its own StatefulSet, so quorum loss blocks writes even when the " +
-					"apiserver replicas are healthy.",
+				Description: "Number of etcd replicas that are `Ready`. Reported separately because etcd runs in its own " +
+					"pods: losing etcd quorum stops the cluster serving writes even while the API server replicas " +
+					"are healthy.",
 				Computed: true,
 			},
 			"ha_etcd_replicas_desired": schema.Int64Attribute{
-				Description: "Target HA etcd replica count (3 when `high_availability = true`, 0 otherwise).",
+				Description: "Target number of HA etcd replicas: 3 when `high_availability = true`, otherwise 0.",
 				Computed:    true,
 			},
 		},

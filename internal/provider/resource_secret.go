@@ -112,9 +112,9 @@ var secretKind = serviceKind[SecretResourceModel, client.Secret]{
 		return []string{"sync"}
 	},
 	stillDeleting: func(m *SecretResourceModel) string {
-		return fmt.Sprintf("DELETE was accepted but secret %q is still terminating after the configured delete timeout. "+
-			"Terraform has removed it from state; the Kupe platform finishes withdrawing copies in the background, "+
-			"and the secret name stays reserved until that completes (creating a secret with the same name may 409 until then). "+
+		return fmt.Sprintf("The platform accepted the delete, but secret %q was still being removed when the delete timeout ran out. "+
+			"Terraform has removed it from state. The platform finishes withdrawing the copies in the background, "+
+			"and the name stays reserved until then, so creating a secret with the same name can fail with a conflict. "+
 			"The copy inside the cluster goes shortly after, or later if the cluster is down. Stored values are kept.", m.Name.ValueString())
 	},
 }
@@ -191,59 +191,54 @@ func (r *SecretResource) Metadata(_ context.Context, req resource.MetadataReques
 
 func (r *SecretResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages a Kupe Cloud secret definition and its sync targets. Write-only values require OpenTofu 1.11 or Terraform 1.11.1 or later. " +
-			"Set values_wo and bump values_wo_version to replace the stored values; changing values_wo alone sends nothing. " +
-			"Values are never stored in plan or state. A version conflict means another client changed the entry since the plan. Destroy keeps stored values. Create and Update wait until every target " +
-			"has the current values and the platform has withdrawn removed targets. The copy inside the cluster goes shortly " +
-			"after withdrawal, or later if the cluster is down. A target name conflict ends the wait at once. For other delivery " +
-			"failures, the provider keeps polling until the timeout. After a confirmed value write and accepted Create, a delivery timeout " +
-			"returns a warning and keeps the definition and confirmed versions in state. Other Create delivery failures keep the definition marked tainted. Delete waits until the " +
-			"platform has withdrawn the targets and removed the definition; stored values are kept. Set timeouts with the `timeouts` attribute, " +
-			"for example `timeouts = { create = \"5m\" }` (defaults: create/update/delete 2m).",
+		Description: "Manages a Kupe Cloud secret: a Vault path whose values Kupe delivers as Kubernetes Secrets to the cluster namespaces you list. " +
+			"Write values with `values_wo` and `values_wo_version`, which need OpenTofu 1.11 or Terraform 1.11.1 or later. " +
+			"The values never reach plan or state, and destroying the secret keeps them in Vault. " +
+			"Create and Update wait until every target has the current values and removed targets are withdrawn; the timeouts default to 2 minutes.",
 		Attributes: map[string]schema.Attribute{
 			"values_wo": schema.MapAttribute{
-				Description: "Complete replacement of the stored values. Write-only and sensitive: never stored in plan or state. Set together with values_wo_version; bump that version for each write. Removing both inputs keeps stored values.",
+				Description: "Complete set of values to store, replacing what is there. Write-only and sensitive, so never stored in plan or state. Set it with `values_wo_version` and change that number for each write. Removing both keeps the stored values.",
 				ElementType: types.StringType, Optional: true, Sensitive: true, WriteOnly: true,
 				Validators: []validator.Map{mapvalidator.SizeAtLeast(1), mapvalidator.KeysAre(configMapKey{}), mapvalidator.NoNullValues()},
 			},
 			"values_wo_version": schema.Int64Attribute{
-				Description: "Positive change counter for values_wo. Bump it to send a complete replacement. An unchanged counter never sends values, even if values_wo changes.",
+				Description: "Positive number that controls when `values_wo` is sent. Change it to replace the stored values. While it stays the same, nothing is sent, even if `values_wo` changes.",
 				Optional:    true, Validators: []validator.Int64{int64validator.AtLeast(1)}, // codespell:ignore atleast
 			},
 			"source_version": schema.Int64Attribute{
-				Description: "Current version of the Vault entry, read from its metadata, or null when there is no entry. A value write checks the version shown by the plan and refuses to overwrite a concurrent change.",
+				Description: "Version of the Vault entry, read from its metadata, or null when there is no entry. A value write checks the version shown in the plan and refuses to overwrite a change made since.",
 				Computed:    true, PlanModifiers: []planmodifier.Int64{secretSourceVersionModifier{}},
 			},
-			"name": schema.StringAttribute{Description: "Secret name (immutable after creation).", Required: true,
+			"name": schema.StringAttribute{Description: "Secret name. Changing it replaces the secret.", Required: true,
 				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()}},
-			"secret_path": schema.StringAttribute{Description: "Vault path of the stored values. Immutable after creation.", Required: true,
+			"secret_path": schema.StringAttribute{Description: "Vault path of the stored values. Changing it replaces the secret.", Required: true,
 				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()}},
 			"sync": schema.ListNestedAttribute{
-				Description: "Cluster/namespace targets to sync this secret to. At most 1,024 selected keys across all targets. Changes in place.",
+				Description: "Cluster namespaces to deliver the values to. Changes apply in place. All targets together can select at most 1,024 keys.",
 				Optional:    true,
 				NestedObject: schema.NestedAttributeObject{Attributes: map[string]schema.Attribute{
 					"cluster":     schema.StringAttribute{Description: "Target cluster name.", Required: true},
 					"namespace":   schema.StringAttribute{Description: "Target namespace in the cluster.", Required: true},
-					"secret_name": schema.StringAttribute{Description: "Override the Kubernetes Secret name (defaults to the managed secret name).", Optional: true},
+					"secret_name": schema.StringAttribute{Description: "Name of the Kubernetes Secret in the namespace. Defaults to the secret's `name`.", Optional: true},
 					"keys": schema.SetAttribute{
-						Description: "Keys to deliver: 1 to 64 per target. Each key is 1 to 253 ASCII letters, digits, '-', '_' or '.', excluding '.', '..' and names starting with '..'. Omit to deliver the whole entry. Changes in place.",
+						Description: "Keys to deliver to this target, 1 to 64. Each key is 1 to 253 ASCII letters, digits, `-`, `_` or `.`, and cannot be `.` or start with `..`. Omit it to deliver the whole entry.",
 						ElementType: types.StringType, Optional: true,
 						Validators: []validator.Set{setvalidator.SizeBetween(1, maxSecretKeysPerTarget), setvalidator.ValueStringsAre(configMapKey{})},
 					},
 				}},
 			},
 			"sync_status": schema.ListNestedAttribute{
-				Description: "Per-target delivery status, sorted by cluster then namespace. Removed targets remain Withdrawing until the platform has withdrawn them.",
+				Description: "Delivery status of each target, sorted by cluster then namespace. A removed target stays `Withdrawing` until the platform has withdrawn it.",
 				Computed:    true,
 				NestedObject: schema.NestedAttributeObject{Attributes: map[string]schema.Attribute{
 					"cluster":     schema.StringAttribute{Description: "Target cluster name.", Computed: true},
 					"namespace":   schema.StringAttribute{Description: "Target namespace in the cluster.", Computed: true},
-					"secret_name": schema.StringAttribute{Description: "Effective Secret name in the target namespace.", Computed: true},
-					"phase":       schema.StringAttribute{Description: "Pending, Synced, Failed or Withdrawing. Synced means the current values reached the namespace.", Computed: true},
-					"reason":      schema.StringAttribute{Description: "Delivery reason, such as TargetConflict, ProviderError or AwaitingCopy.", Computed: true},
+					"secret_name": schema.StringAttribute{Description: "Name of the Kubernetes Secret in the namespace.", Computed: true},
+					"phase":       schema.StringAttribute{Description: "`Pending`, `Synced`, `Failed` or `Withdrawing`. `Synced` means the current values have reached the namespace.", Computed: true},
+					"reason":      schema.StringAttribute{Description: "Why the target is in its phase, such as `TargetConflict`, `ProviderError` or `AwaitingCopy`.", Computed: true},
 				}},
 			},
-			"phase":      schema.StringAttribute{Description: "Current phase: Pending, Active, Degraded or Deleting. Active alone does not confirm current delivery.", Computed: true},
+			"phase":      schema.StringAttribute{Description: "`Pending`, `Active`, `Degraded` or `Deleting`. `Active` on its own does not confirm that the current values were delivered; see `sync_status`.", Computed: true},
 			"etag":       etagAttribute(),
 			"created_at": createdAtAttribute("the managed secret definition"),
 			"timeouts":   timeouts.Attributes(ctx, timeouts.Opts{Create: true, Update: true, Delete: true}),
@@ -280,7 +275,7 @@ func (r *SecretResource) ValidateConfig(ctx context.Context, req resource.Valida
 	}
 	if count > maxSecretKeys {
 		resp.Diagnostics.AddAttributeError(path.Root("sync"), "Too many selected keys",
-			"A secret can select at most 1,024 keys across all sync targets. Reduce the selected keys or split the definition.")
+			"A secret can select at most 1,024 keys across all its sync targets. Select fewer keys, or split the targets across two secrets.")
 	}
 }
 

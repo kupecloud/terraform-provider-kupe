@@ -38,31 +38,31 @@ func (d *AppImageDataSource) Metadata(_ context.Context, req datasource.Metadata
 
 func (d *AppImageDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Resolves an image tag or digest through the Kupe API to an immutable sha256 reference. " +
-			"Use `reference` as `kupe_app_environment.web.image`. Each read resolves again; a moving tag can " +
-			"change the next plan and deploy on apply. The provider sends no registry credentials.",
+		Description: "Resolves an image tag or digest to an immutable sha256 reference through the Kupe API. " +
+			"Use `reference` as `kupe_app_environment.web.image`. Every read resolves the image again, so a " +
+			"moving tag can change the next plan and deploy on apply. The provider sends no registry credentials.",
 		Attributes: map[string]schema.Attribute{
 			"image": schema.StringAttribute{
-				Description: "Image tag or digest from the tenant's container registry or a public registry approved by the platform.",
+				Description: "Image tag or digest, from your tenant's container registry or a public registry the platform allows.",
 				Required:    true,
 				Validators:  []validator.String{stringvalidator.LengthBetween(1, 512)},
 			},
 			"reference": schema.StringAttribute{
-				Description: "Immutable image reference, including the registry host and `@sha256:` digest. An image index keeps its index digest.",
+				Description: "Immutable image reference with the registry host and `@sha256:` digest. For an image index, this is the index digest.",
 				Computed:    true,
 			},
 			"platforms": schema.ListAttribute{
-				Description: "Platform names returned by the API, as `os/architecture` or `os/architecture/variant`. " +
-					"This bounded summary may omit platforms; successful resolution confirms linux/amd64 support.",
+				Description: "Platforms the API reports, as `os/architecture` or `os/architecture/variant`. The list " +
+					"can leave some out; a successful resolution confirms linux/amd64 support.",
 				Computed:    true,
 				ElementType: types.StringType,
 			},
 			"user": schema.StringAttribute{
-				Description: "The image's numeric non-root user for linux/amd64, as checked by the platform.",
+				Description: "Numeric non-root user the linux/amd64 image runs as, as checked by the platform.",
 				Computed:    true,
 			},
 			"exposed_ports": schema.ListAttribute{
-				Description: "Exposed TCP port numbers for linux/amd64, as returned by the API.",
+				Description: "TCP ports the linux/amd64 image exposes, as returned by the API.",
 				Computed:    true,
 				ElementType: types.Int64Type,
 			},
@@ -104,7 +104,7 @@ func (d *AppImageDataSource) Read(ctx context.Context, req datasource.ReadReques
 	}
 	if len(image.Reference) > 512 || !appDigestPattern.MatchString(image.Reference) {
 		resp.Diagnostics.AddAttributeError(path.Root("image"), "invalid image resolution",
-			"The Kupe API did not return an immutable sha256 image reference. Retry the plan; if this persists, contact Kupe Cloud support.")
+			"The Kupe API did not return an immutable sha256 image reference. Retry the plan, and contact Kupe Cloud support if it keeps happening.")
 		return
 	}
 	platforms := make([]string, 0, len(image.Platforms))
@@ -136,11 +136,11 @@ func (d *AppImageDataSource) Read(ctx context.Context, req datasource.ReadReques
 func appImageErrorDiagnostic(err error) (string, string) {
 	var apiErr *client.APIError
 	if errors.As(err, &apiErr) && apiErr.NonJSON && apiErr.StatusCode == http.StatusNotFound {
-		return "app image route not found", "The Kupe API returned 404 for the image lookup. The API may be older than this provider and not support app images, or a proxy may be answering in its place. " +
+		return "app image route not found", "The Kupe API returned 404 for the image lookup. Either the API is older than this provider and cannot resolve app images, or a proxy answered in its place. " +
 			"Check the API version. To plan or destroy, replace `data.kupe_app_image` in your configuration with the image digest reference from Terraform state."
 	}
 	if !errors.As(err, &apiErr) || apiErr.NonJSON {
-		return "failed to resolve app image", "The Kupe API could not resolve the image. Retry the plan. If this persists, contact Kupe Cloud support."
+		return "failed to resolve app image", "The Kupe API could not resolve the image. Retry the plan, and contact Kupe Cloud support if it keeps happening."
 	}
 
 	summary := "failed to resolve app image"

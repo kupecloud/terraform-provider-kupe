@@ -44,7 +44,7 @@ func (r *APIKeyResource) Metadata(_ context.Context, req resource.MetadataReques
 
 func (r *APIKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages a Kupe Cloud API key for machine-to-machine authentication.",
+		Description: "Manages a Kupe Cloud API key, for tools and pipelines that call the API. Every attribute is fixed at creation: changing one replaces the key.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "API key ID.",
@@ -54,14 +54,14 @@ func (r *APIKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"display_name": schema.StringAttribute{
-				Description: "Human-readable name for the API key (immutable).",
+				Description: "Name for the API key. Changing it replaces the key.",
 				Required:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"role": schema.StringAttribute{
-				Description: "API key role. Valid values are admin and readonly. Immutable after creation.",
+				Description: "API key's role: `admin` or `readonly`. Changing it replaces the key.",
 				Required:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
@@ -71,9 +71,9 @@ func (r *APIKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"expires_at": schema.StringAttribute{
-				Description: "Expiration time in RFC3339 format. Optional and immutable after creation. " +
-					"If you omit it the server decides whether the key expires; the resolved value is " +
-					"reflected back into state.",
+				Description: "When the key expires, in RFC 3339 format. Changing it replaces the key. If you " +
+					"omit it, the platform decides whether the key expires, and the provider records the " +
+					"result in state.",
 				Optional: true,
 				// Computed so a server-assigned expiry (when the user leaves
 				// this null) is recorded in state without Terraform seeing a
@@ -89,7 +89,7 @@ func (r *APIKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"key": schema.StringAttribute{
-				Description: "The raw API key. Only available on creation and stored in Terraform state as sensitive. Sensitive redacts UI output but does not prevent the value from being written to state.",
+				Description: "The API key itself. It is only returned when the key is created. It is marked sensitive, which hides it in plan and apply output, but it is stored in Terraform state in plain text.",
 				Computed:    true,
 				Sensitive:   true,
 				PlanModifiers: []planmodifier.String{
@@ -97,7 +97,7 @@ func (r *APIKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"created_by": schema.StringAttribute{
-				Description: "Email of the user who created the key.",
+				Description: "Email address of the user who created the key.",
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
@@ -185,7 +185,7 @@ func (r *APIKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 
 func (r *APIKeyResource) Update(_ context.Context, _ resource.UpdateRequest, resp *resource.UpdateResponse) {
 	// API keys are immutable — all fields use RequiresReplace
-	resp.Diagnostics.AddError("api keys are immutable", "API keys cannot be updated, only replaced")
+	resp.Diagnostics.AddError("api keys are immutable", "An API key cannot be changed in place. Changing any attribute replaces it.")
 }
 
 func (r *APIKeyResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {

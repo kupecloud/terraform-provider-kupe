@@ -1,20 +1,14 @@
 ---
-page_title: "Kupe Provider"
+page_title: "Kupe provider"
 description: |-
-  Use the Kupe provider to manage tenant-scoped Kupe Cloud resources with Terraform or OpenTofu.
+  Manage your Kupe Cloud tenant with Terraform or OpenTofu.
 ---
 
-# Kupe Provider
+# Kupe provider
 
-The Kupe provider manages tenant-scoped Kupe Cloud resources including apps and their environments, clusters, databases, the container registry, secrets, members, API keys, and per-tenant Alertmanager configuration.
+The Kupe provider manages your Kupe Cloud tenant from Terraform or OpenTofu: apps and their environments, clusters, databases, the container registry, secrets, members, API keys and your tenant's Alertmanager configuration.
 
-Use it when you want:
-
-- reviewed infrastructure changes through plan and apply
-- repeatable tenant setup in Terraform or OpenTofu
-- platform resources managed alongside the rest of your infrastructure code
-
-## Example Usage
+## Example usage
 
 ```terraform
 terraform {
@@ -32,15 +26,15 @@ provider "kupe" {
 }
 ```
 
-Use `KUPE_API_KEY` for authentication in hosted Kupe Cloud environments.
+On Kupe Cloud, authenticate with an API key in `KUPE_API_KEY`.
 
-For normal environments, use an `https://` API host. Plain HTTP is only supported for local development endpoints such as `http://localhost:8080`.
+Use an `https://` host. The provider accepts plain HTTP only for `localhost` and loopback addresses, such as `http://localhost:8080` during local development.
 
 ## State contains secrets
 
-`kupe_api_key.key` and `kupe_registry_token.secret` are stored in Terraform state in plain text. Marking them Sensitive hides them from plan and apply output but does not keep them out of the state file. Keep state in an encrypted backend with restricted access, or create API keys and access tokens outside Terraform.
+`kupe_api_key.key` and `kupe_registry_token.secret` are stored in Terraform state in plain text. Both are marked sensitive, which hides them in plan and apply output, but they are still in the state file. Keep state in an encrypted backend with restricted access, or create API keys and access tokens outside Terraform.
 
-## Available Resources
+## Resources
 
 - `kupe_app`
 - `kupe_app_environment`
@@ -58,7 +52,7 @@ For normal environments, use an `https://` API host. Plain HTTP is only supporte
 - `kupe_alertmanager_receiver`
 - `kupe_alertmanager_routes`
 
-## Available Data Sources
+## Data sources
 
 - `kupe_app_image`
 - `kupe_tenant`

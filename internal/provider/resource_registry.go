@@ -144,10 +144,10 @@ var registryKind = serviceKind[RegistryResourceModel, client.Registry]{
 				m.Name.ValueString(), registryDeleteNotice), true
 	},
 	stillDeleting: func(m *RegistryResourceModel) string {
-		return fmt.Sprintf("DELETE was accepted but registry %q is still being deleted after the configured delete "+
-			"timeout. Deleting a registry deletes every image in it; this can take a few minutes. Terraform has "+
-			"removed it from state; the Kupe platform finishes in the background, and a new registry cannot be "+
-			"created until it is gone. Override with `timeouts.delete = \"30m\"`.", m.Name.ValueString())
+		return fmt.Sprintf("The platform accepted the delete, but registry %q was still being deleted when the delete "+
+			"timeout ran out. Deleting every image in a registry can take a few minutes. Terraform has "+
+			"removed it from state, the platform finishes in the background, and a new registry cannot be "+
+			"created until it is gone. To wait longer, set `timeouts.delete = \"30m\"`.", m.Name.ValueString())
 	},
 }
 
@@ -157,23 +157,15 @@ func (r *RegistryResource) Metadata(_ context.Context, req resource.MetadataRequ
 
 func (r *RegistryResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages the tenant's Kupe container registry. A tenant has one registry, always named " +
-			"`registry`; images live at `registry.kupe.cloud/<tenant>/<repository>:<tag>`. The Kupe platform " +
-			"creates it when the tenant's plan includes one: import it (ID `registry`) rather than creating it. " +
-			"Creating it when it exists fails with the import command. Create and Update wait " +
-			"for the registry to reach phase=Running with the change in effect. They fail at once if the registry " +
-			"is being deleted (Terminating), and after 2 minutes if it stays Degraded once the platform has picked " +
-			"up the change. If the timeout fires first, the apply fails; the platform carries on in the background, " +
-			"and a registry that timed out on Create stays in state, marked tainted. A change to " +
-			"`deletion_protection` alone takes effect at once and is not waited for. Delete waits until the " +
-			"registry is gone. Set timeouts with the `timeouts` attribute, for example " +
-			"`timeouts = { create = \"20m\" }` (defaults: create 10m, update 5m, delete 15m).\n\n" +
-			"Clusters pull from the registry through `kupe_registry_binding`, and CI systems sign in with a " +
-			"`kupe_registry_token`.\n\n" +
-			"### Destroy semantics\n\n" +
-			registryDeleteNotice + " `deletion_protection` (default `true`) makes the Kupe platform refuse the " +
-			"delete: set it to `false` and apply before destroying. Add `lifecycle { prevent_destroy = true }` to " +
-			"stop Terraform from planning the destroy at all.",
+		Description: "Manages your tenant's Kupe container registry. A tenant has one registry, always named " +
+			"`registry`, and images live at `registry.kupe.cloud/<tenant>/<repository>:<tag>`. The platform " +
+			"creates it when your plan includes one, so import it (ID `registry`) rather than creating it; " +
+			"creating it when it exists fails with the import command. Clusters pull from the registry " +
+			"through `kupe_registry_binding`, and CI signs in with a `kupe_registry_token`.\n\n" +
+			"### What destroy deletes\n\n" +
+			registryDeleteNotice + " `deletion_protection`, `true` by default, makes the platform refuse the " +
+			"delete: set it to `false` and apply before you destroy the registry. Add " +
+			"`lifecycle { prevent_destroy = true }` to stop Terraform planning the destroy at all.",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
 				Description: "Registry name. A tenant has one registry, named `registry`: this is the default and " +
@@ -187,24 +179,24 @@ func (r *RegistryResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 				},
 			},
 			"storage_limit": schema.StringAttribute{
-				Description: "Most the registry may store, with a binary unit (`Mi`, `Gi` or `Ti`), e.g. `10Gi`. It " +
-					"can only be set at or below the most your plan allows. When unset, the plan's limit applies. " +
-					"Changes in place; lowering it below what the registry stores is accepted, and pushes are then " +
+				Description: "Most the registry can store, with a binary unit (`Mi`, `Gi` or `Ti`), for example `10Gi`. " +
+					"It cannot be more than your plan allows, and when unset the plan's limit applies. Changes " +
+					"apply in place. Lowering it below what the registry stores is accepted, and pushes are then " +
 					"refused until images are deleted.",
 				Optional:   true,
 				Validators: registryStorageLimitValidators(),
 			},
 			"deletion_protection": schema.BoolAttribute{
-				Description: "While `true`, the Kupe platform refuses to delete the registry. Set it to `false` and " +
-					"apply before destroying. Default `true`, also for an existing registry: importing an unprotected " +
-					"registry without this attribute in configuration plans turning protection on.",
+				Description: "While `true`, the platform refuses to delete the registry. Set it to `false` and apply " +
+					"before you destroy the registry. Defaults to `true`, for an existing registry too: importing " +
+					"an unprotected registry without this attribute in the configuration plans turning protection on.",
 				Optional: true,
 				Computed: true,
 				Default:  booldefault.StaticBool(true),
 			},
 			"endpoint": schema.StringAttribute{
-				Description: "Image path prefix to push to and pull from, e.g. `registry.kupe.cloud/acme`. Empty " +
-					"until the registry is provisioned.",
+				Description: "Image path prefix to push to and pull from, for example `registry.kupe.cloud/acme`. " +
+					"Empty until the registry is provisioned.",
 				Computed: true,
 			},
 			"storage_used_bytes": schema.Int64Attribute{
@@ -212,7 +204,7 @@ func (r *RegistryResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 				Computed:    true,
 			},
 			"storage_limit_bytes": schema.Int64Attribute{
-				Description: "The storage limit in force, in bytes: `storage_limit` when set, else the plan's. " +
+				Description: "The storage limit in force, in bytes: `storage_limit` when set, otherwise the plan's. " +
 					"`-1` means unlimited. Null until the platform has applied a limit.",
 				Computed: true,
 			},
@@ -221,7 +213,7 @@ func (r *RegistryResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 				Computed:    true,
 			},
 			"phase": schema.StringAttribute{
-				Description: "Current phase: Pending, Provisioning, Running, Degraded or Terminating.",
+				Description: "Current phase: `Pending`, `Provisioning`, `Running`, `Degraded` or `Terminating`.",
 				Computed:    true,
 			},
 			"etag":       etagAttribute(),

@@ -142,13 +142,12 @@ var clusterKind = serviceKind[ClusterResourceModel, client.Cluster]{
 	},
 	settingsChanged: clusterSettingsChanged,
 	stillDeleting: func(m *ClusterResourceModel) string {
-		return fmt.Sprintf("DELETE was accepted but cluster %q is still terminating after the configured "+
-			"delete timeout. Terraform has removed the cluster from state; the Kupe platform "+
-			"continues teardown of the underlying resources in the background, and the cluster "+
-			"name stays reserved until that completes (creating a cluster with the same name may "+
-			"409 until then). If the cluster stays in this state, check it in the Kupe Console or "+
-			"contact Kupe Cloud support. Override with `timeouts.delete = \"30m\"` for clusters "+
-			"with heavier teardown.", m.Name.ValueString())
+		return fmt.Sprintf("The platform accepted the delete, but cluster %q was still being removed when the "+
+			"delete timeout ran out. Terraform has removed it from state. The platform carries on "+
+			"tearing it down in the background, and the name stays reserved until it finishes, so "+
+			"creating a cluster with the same name can fail with a conflict. If the cluster stays in "+
+			"this state, check it in the Kupe console or contact Kupe Cloud support. For a cluster "+
+			"that takes longer to tear down, set `timeouts.delete = \"30m\"`.", m.Name.ValueString())
 	},
 }
 
@@ -158,27 +157,25 @@ func (r *ClusterResource) Metadata(_ context.Context, req resource.MetadataReque
 
 func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages a Kupe cluster for a tenant. Create and Update wait for the " +
-			"cluster to reach phase=Running with the change applied. They fail at once if the cluster is being " +
-			"deleted (Terminating), and after 2 minutes if it stays Degraded once the platform has picked up the " +
-			"change; a cluster that was Degraded before the change gets the chance to recover with it. If " +
-			"the timeout fires first, the apply fails; the platform carries on in the background, and a cluster " +
-			"that timed out on Create stays in state, marked tainted. Delete waits for the cluster to finish " +
-			"terminating. Set " +
-			"timeouts with the `timeouts` attribute, for example " +
-			"`timeouts = { create = \"30m\" }` (defaults: create/update 15m, delete 10m).\n\n" +
-			"### Destroy semantics\n\n" +
-			"`terraform destroy` (or removing this resource from configuration) is **non-recoverable**. " +
-			"When the cluster is deleted, the Kupe platform will:\n\n" +
-			"- Permanently remove every workload running inside the cluster, along with its storage.\n" +
-			"- Remove the cluster's public DNS endpoint.\n\n" +
-			"The same contract applies whether you delete via Terraform, the `kupe` CLI, or the " +
-			"Kupe Console.",
+		Description: "Manages a Kupe cluster. Create and Update wait until the cluster is `Running` with the change " +
+			"applied. They fail straight away if the cluster is being deleted (`Terminating`), and after 2 " +
+			"minutes if it stays `Degraded` once the platform has picked up the change; a cluster that was " +
+			"already `Degraded` gets the chance to recover with the change. If the timeout runs out first, the " +
+			"apply fails while the platform carries on in the background, and a cluster that timed out on " +
+			"Create stays in state, marked tainted. Delete waits until the cluster is gone. The timeouts " +
+			"default to 15 minutes for create and update and 10 minutes for delete; set longer ones with " +
+			"`timeouts`, for example `timeouts = { create = \"30m\" }`.\n\n" +
+			"### What destroy deletes\n\n" +
+			"Destroying the cluster, or removing it from the configuration, cannot be undone. The platform:\n\n" +
+			"- deletes every workload in the cluster, with its storage;\n" +
+			"- removes the cluster's public DNS endpoint.\n\n" +
+			"The same happens whether you delete the cluster with Terraform, the `kupe` CLI or the " +
+			"Kupe console.",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
-				Description: "Cluster name (immutable after creation). A lowercase DNS label starting with a letter, " +
-					"without `--`. The Kupe platform also limits the tenant and cluster names together to 52 " +
-					"characters and refuses a longer cluster name when it is created.",
+				Description: "Cluster name: a lowercase DNS label that starts with a letter and has no `--`. The tenant " +
+					"and cluster names together can be at most 52 characters, and the platform refuses a longer " +
+					"name when the cluster is created. Changing it replaces the cluster.",
 				Required:   true,
 				Validators: clusterNameValidators(),
 				PlanModifiers: []planmodifier.String{
@@ -186,24 +183,22 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				},
 			},
 			"display_name": schema.StringAttribute{
-				Description: "**Deprecated.** Kupe clusters have no separate display name: `name` is the " +
-					"user-facing identifier everywhere (console, CLI, kubeconfig contexts). The value is accepted " +
-					"and ignored by the API and is kept in state exactly as configured; remove it from your " +
-					"configuration. Until provider v1.6.1 this attribute was required and compared against an " +
-					"empty API echo, which tainted every freshly created cluster with \"inconsistent result after " +
-					"apply\" and replaced it on the next apply.",
+				Description: "**Deprecated.** Clusters have no separate display name: `name` is shown everywhere, " +
+					"including the console, the CLI and kubeconfig contexts. The API ignores this value, and the " +
+					"provider keeps it in state exactly as configured. Remove it from your configuration. Before " +
+					"provider v1.6.1 this attribute was required, and comparing it with the API's empty echo " +
+					"tainted every new cluster with \"inconsistent result after apply\" and replaced it on the " +
+					"next apply.",
 				Optional: true,
 				DeprecationMessage: "`display_name` is deprecated: the cluster `name` is the display name. The " +
 					"attribute is ignored. Remove it from your configuration.",
 			},
 			"type": schema.StringAttribute{
-				Description: "**Deprecated.** Cluster type. Only `shared` is supported today; the operator rejects " +
-					"`dedicated` with the canonical `CLUSTER_DEDICATED_UNSUPPORTED` error code. Leave unset (the " +
-					"provider defaults to `shared`) or omit from your configuration entirely. The attribute remains " +
-					"in the schema so that existing state migrates cleanly; future support for dedicated nodes will " +
-					"likely take a different shape (per-cluster node-pool reference) rather than reviving this enum.",
-				DeprecationMessage: "`type` is deprecated. Only `shared` is supported and it's now the default. Remove " +
-					"this attribute from your configuration. A future provider release may drop the attribute entirely.",
+				Description: "**Deprecated.** Cluster type. Only `shared` is supported, and it is the default; the platform " +
+					"refuses `dedicated` with the error code `CLUSTER_DEDICATED_UNSUPPORTED`. Remove it from your " +
+					"configuration. The attribute stays in the schema so that existing state still loads.",
+				DeprecationMessage: "`type` is deprecated. Only `shared` is supported, and it is the default. Remove " +
+					"the attribute from your configuration; a later provider release may drop it.",
 				Optional: true,
 				Computed: true,
 				Default:  stringdefault.StaticString("shared"),
@@ -215,7 +210,7 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				},
 			},
 			"version": schema.StringAttribute{
-				Description: "Kubernetes version (e.g., 1.35).",
+				Description: "Kubernetes version, for example `1.35`.",
 				Optional:    true,
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
@@ -228,15 +223,14 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				},
 			},
 			"resources": schema.SingleNestedAttribute{
-				Description: "Resource limits for the cluster. Updates send a partial PATCH that " +
-					"includes only the fields present in this block: fields you omit are **left " +
-					"unchanged** on the server. To change an individual field, write it explicitly. " +
-					"Removing the entire `resources` block sends an empty `resources` object to the " +
-					"server to request clearing the limits.",
+				Description: "CPU, memory and storage limits for the cluster. An update sends only the fields you " +
+					"set here, and the platform keeps the current value of any field you leave out, so write " +
+					"each field you want to change. Removing the whole `resources` block sends an empty " +
+					"`resources` object, which asks the platform to clear the limits.",
 				Optional: true,
 				Attributes: map[string]schema.Attribute{
 					"cpu": schema.StringAttribute{
-						Description: "CPU limit (e.g., 4, 500m).",
+						Description: "CPU limit, for example `4` or `500m`.",
 						Optional:    true,
 						Computed:    true,
 						PlanModifiers: []planmodifier.String{
@@ -244,7 +238,7 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 						},
 					},
 					"memory": schema.StringAttribute{
-						Description: "Memory limit (e.g., 16Gi, 512Mi).",
+						Description: "Memory limit, for example `16Gi` or `512Mi`.",
 						Optional:    true,
 						Computed:    true,
 						PlanModifiers: []planmodifier.String{
@@ -252,7 +246,7 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 						},
 					},
 					"storage": schema.StringAttribute{
-						Description: "Storage limit (e.g., 100Gi).",
+						Description: "Storage limit, for example `100Gi`.",
 						Optional:    true,
 						Computed:    true,
 						PlanModifiers: []planmodifier.String{
@@ -262,17 +256,15 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				},
 			},
 			"high_availability": schema.BoolAttribute{
-				Description: "Enable a 3-replica HA control plane with HA etcd (chart-managed external etcd StatefulSet) " +
-					"and hard anti-affinity. " +
-					"Adds an hourly charge (see `data.kupe_plan` for the rate). When unset, a new cluster is created " +
-					"without HA and an existing or imported cluster keeps its current setting, so removing the " +
-					"attribute from configuration does not turn HA off.\n\n" +
-					"**Create-time-only.** This attribute is effectively immutable: changing it on an existing resource forces " +
-					"Terraform to **replace** the cluster (destroy + create). The operator rejects both directions of the " +
-					"toggle with canonical error codes (`HA_ENABLE_ON_EXISTING_UNSUPPORTED`, `HA_DISABLE_UNSUPPORTED`), so " +
-					"`RequiresReplace` here makes Terraform's plan reflect that reality up front. Use a blue-green swap " +
-					"workflow if you need HA on an existing cluster: create a new HA cluster, redeploy via GitOps, swap traffic, " +
-					"then destroy the old.",
+				Description: "Runs a highly available control plane: 3 API server replicas and a separate 3-replica " +
+					"etcd, kept on different nodes by hard anti-affinity. HA adds an hourly charge; " +
+					"`data.kupe_plan` shows the rate. When " +
+					"unset, a new cluster is created without HA and an existing or imported cluster keeps its " +
+					"current setting, so removing the attribute does not turn HA off.\n\n" +
+					"**Set at creation only.** Changing it on an existing cluster makes Terraform **replace** the " +
+					"cluster (destroy, then create), because the platform refuses to turn HA on or off in place " +
+					"(`HA_ENABLE_ON_EXISTING_UNSUPPORTED`, `HA_DISABLE_UNSUPPORTED`). To move to HA, create a new " +
+					"HA cluster, redeploy your workloads to it, move the traffic across, then destroy the old one.",
 				Optional: true,
 				Computed: true,
 				// No default: a schema default would apply to an unset
@@ -286,7 +278,7 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				},
 			},
 			"phase": schema.StringAttribute{
-				Description: "Current cluster phase, for example Pending, Provisioning, Running, Upgrading, Degraded or Terminating.",
+				Description: "Current cluster phase, for example `Pending`, `Provisioning`, `Running`, `Upgrading`, `Degraded` or `Terminating`.",
 				Computed:    true,
 			},
 			"endpoint": schema.StringAttribute{
@@ -294,40 +286,38 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				Computed:    true,
 			},
 			"ha_configured": schema.BoolAttribute{
-				Description: "True once the operator has confirmed both 3/3 apiserver replicas AND 3/3 deployed-etcd " +
-					"replicas are `Ready` for the first time. Etcd readiness is required because the OSS deployed-etcd " +
-					"path runs etcd in its own StatefulSet, so quorum loss with healthy apiserver pods still blocks " +
-					"writes. Distinct from `high_availability` (the requested state): read this attribute when " +
-					"downstream automation needs to wait for HA to be operationally available, not just toggled on.",
+				Description: "True once all 3 API server replicas and all 3 etcd replicas have been `Ready` for the first time. " +
+					"etcd counts because it runs in its own pods: losing etcd quorum blocks writes even while the API " +
+					"server pods are healthy. `high_availability` is the setting you asked for; read this attribute " +
+					"when automation needs to wait until HA is working.",
 				Computed: true,
 			},
 			"ha_enabled_at": schema.StringAttribute{
-				Description: "Timestamp when `ha_configured` first became true. This is the billing anchor: HA hours " +
-					"accrue from this moment. Stamped once, never updated, never cleared.",
+				Description: "When `ha_configured` first became true. HA is billed from this moment. It is set once " +
+					"and never changed or cleared.",
 				Computed: true,
 			},
 			"ha_phase": schema.StringAttribute{
-				Description: "Consumer-friendly HA rollup. One of `pending`, `ha-healthy`, `ha-degraded`, `ha-unavailable`. " +
-					"Empty for non-HA clusters. Use this in downstream automation to branch on operational state without " +
-					"inspecting individual conditions.",
+				Description: "Summary of HA health: `pending`, `ha-healthy`, `ha-degraded` or `ha-unavailable`. Empty for " +
+					"a cluster without HA. Use it in automation instead of reading individual conditions.",
 				Computed: true,
 			},
 			"ha_replicas_ready": schema.Int64Attribute{
-				Description: "Count of HA control-plane (apiserver) replicas currently `Ready`. Zero for non-HA clusters.",
+				Description: "Number of HA control-plane (API server) replicas that are `Ready`. Zero for a cluster without HA.",
 				Computed:    true,
 			},
 			"ha_replicas_desired": schema.Int64Attribute{
-				Description: "Target HA replica count (3 when `high_availability = true`, 0 otherwise).",
+				Description: "Target number of HA API server replicas: 3 when `high_availability = true`, otherwise 0.",
 				Computed:    true,
 			},
 			"ha_etcd_replicas_ready": schema.Int64Attribute{
-				Description: "Count of deployed-etcd replicas currently `Ready`. Exposed separately because the OSS " +
-					"deployed-etcd path runs etcd in its own StatefulSet, so etcd quorum loss leaves the cluster unable " +
-					"to serve writes even when the apiserver replicas are healthy.",
+				Description: "Number of etcd replicas that are `Ready`. Reported separately because etcd runs in its own " +
+					"pods: losing etcd quorum stops the cluster serving writes even while the API server replicas " +
+					"are healthy.",
 				Computed: true,
 			},
 			"ha_etcd_replicas_desired": schema.Int64Attribute{
-				Description: "Target HA etcd replica count (3 when `high_availability = true`, 0 otherwise).",
+				Description: "Target number of HA etcd replicas: 3 when `high_availability = true`, otherwise 0.",
 				Computed:    true,
 			},
 			"etag":       etagAttribute(),

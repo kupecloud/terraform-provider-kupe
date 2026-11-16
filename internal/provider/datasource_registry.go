@@ -27,7 +27,7 @@ func (d *RegistryDataSource) Metadata(_ context.Context, req datasource.Metadata
 
 func (d *RegistryDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Reads the tenant's Kupe container registry. A tenant has at most one, named `registry`; " +
+		Description: "Reads your tenant's Kupe container registry. A tenant has at most one, named `registry`; " +
 			"reading fails when the tenant has none.",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
@@ -37,15 +37,15 @@ func (d *RegistryDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 				Validators:  registryNameValidators(),
 			},
 			"storage_limit": schema.StringAttribute{
-				Description: "The tenant's own storage limit, e.g. `10Gi`. Null when the plan's limit applies.",
+				Description: "The registry's own storage limit, for example `10Gi`. Null when the plan's limit applies.",
 				Computed:    true,
 			},
 			"deletion_protection": schema.BoolAttribute{
-				Description: "Whether the Kupe platform refuses to delete the registry.",
+				Description: "Whether deletion protection is on, so the platform refuses to delete the registry.",
 				Computed:    true,
 			},
 			"endpoint": schema.StringAttribute{
-				Description: "Image path prefix to push to and pull from, e.g. `registry.kupe.cloud/acme`.",
+				Description: "Image path prefix to push to and pull from, for example `registry.kupe.cloud/acme`.",
 				Computed:    true,
 			},
 			"storage_used_bytes": schema.Int64Attribute{
@@ -62,7 +62,7 @@ func (d *RegistryDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 				Computed:    true,
 			},
 			"phase": schema.StringAttribute{
-				Description: "Current phase: Pending, Provisioning, Running, Degraded or Terminating.",
+				Description: "Current phase: `Pending`, `Provisioning`, `Running`, `Degraded` or `Terminating`.",
 				Computed:    true,
 			},
 			"created_at": schema.StringAttribute{

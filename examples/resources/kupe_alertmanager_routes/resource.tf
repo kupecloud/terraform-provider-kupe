@@ -1,15 +1,14 @@
-# Singleton-per-tenant route list. The root route itself (default receiver,
-# default group_by) is implicit and managed by kupe-api; this resource owns
-# the ordered list of child routes that branch off the root.
+# The tenant's route list. The platform manages the root route, with its
+# default receiver and group_by; this resource owns the ordered child routes
+# under it. A tenant has one list, so declare this resource once.
 #
-# Routes are evaluated top-to-bottom, and the first match wins (unless `continue`
-# is set on the matched route). Reordering, inserting, and removing routes are
-# all atomic single-PUT operations because the resource owns the entire list.
+# Routes are checked top to bottom and the first match wins, unless the
+# matched route sets `continue`. Because this resource owns the whole list,
+# reordering, adding or removing routes is a single update.
 
-# Two receivers the routes below dispatch to. Included inline so the example
-# stands alone. The kupe-api validator rejects route configs that reference
-# undeclared receivers, so any real config will need at least one receiver
-# resource alongside the routes resource.
+# The two receivers the routes below send to, included so the example
+# stands alone. The API refuses routes that name a receiver that does not
+# exist, so a real configuration declares its receivers too.
 resource "kupe_alertmanager_receiver" "slack" {
   name = "slack"
   body_json = jsonencode({
@@ -49,23 +48,23 @@ resource "kupe_alertmanager_routes" "main" {
       group_interval  = "5m"
       repeat_interval = "1h"
     },
-    # Slack-only for the infra team.
+    # The infra team's alerts go to Slack only.
     {
       matchers = ["team=\"infra\""]
       receiver = "slack"
     },
-    # Catch-all for everything else: fall through to the default receiver
-    # by leaving `receiver` empty (inherits from the root).
+    # Warnings go to the default receiver: with no `receiver`, the route
+    # inherits the root route's. `continue = true` keeps matching later routes.
     {
       matchers = ["severity=\"warning\""]
       continue = true
     },
   ])
 
-  # Make sure the receivers exist before this resource creates the routes.
-  # Without these explicit dependencies, terraform may try to write the
-  # routes first and the kupe-api validator will reject any references to
-  # missing receivers with a 400.
+  # The routes name their receivers as strings, so Terraform cannot see the
+  # dependency. depends_on creates the receivers first: without it, Terraform
+  # can write the routes first, and the API refuses a route whose receiver
+  # does not exist yet.
   depends_on = [
     kupe_alertmanager_receiver.slack,
     kupe_alertmanager_receiver.pagerduty,

@@ -2,21 +2,21 @@
 page_title: "kupe_registry_token Resource - kupe"
 subcategory: ""
 description: |-
-  Manages an access token for the tenant's Kupe container registry: a registry username and secret for CI and anything else that pulls or pushes images without a person signed in. Sign in with docker login <registry_host> --username <username> --password-stdin. Create waits until the platform has issued the token (seconds); until then the registry refuses it.
-  A token never changes: changing any argument replaces it with a new token and a new secret. It stops working when it expires, when it is revoked, and when the member who created it leaves the tenant (or, for a push token, loses the admin role); once the platform has removed it, the next plan creates a new one. A registry holds at most 50 access tokens.
+  Manages an access token for your tenant's Kupe container registry: a registry username and secret for CI, and anything else that pulls or pushes images without a person signed in. Sign in with docker login <registry_host> --username <username> --password-stdin. Create waits a few seconds until the platform has issued the token; until then the registry refuses it.
+  A token never changes in place: changing any argument replaces it with a new token and a new secret. It stops working when it expires, when it is revoked, and when the member who created it leaves the tenant or, for a push token, loses the admin role. Once the platform has removed it, the next plan creates a new one. A registry holds at most 50 access tokens.
   Secret in state
-  The token's secret, returned only when the token is created. It is stored in Terraform state in plain text: Sensitive hides it from plan and apply output but does not keep it out of the state file. Keep state in an encrypted backend with restricted access, or create tokens outside Terraform.
+  The token's secret, returned only when the token is created. It is marked sensitive, which hides it in plan and apply output, but it is stored in Terraform state in plain text. Keep state in an encrypted backend with restricted access, or create tokens outside Terraform.
 ---
 
 # kupe_registry_token (Resource)
 
-Manages an access token for the tenant's Kupe container registry: a registry username and secret for CI and anything else that pulls or pushes images without a person signed in. Sign in with `docker login <registry_host> --username <username> --password-stdin`. Create waits until the platform has issued the token (seconds); until then the registry refuses it.
+Manages an access token for your tenant's Kupe container registry: a registry username and secret for CI, and anything else that pulls or pushes images without a person signed in. Sign in with `docker login <registry_host> --username <username> --password-stdin`. Create waits a few seconds until the platform has issued the token; until then the registry refuses it.
 
-A token never changes: changing any argument replaces it with a new token and a new secret. It stops working when it expires, when it is revoked, and when the member who created it leaves the tenant (or, for a push token, loses the admin role); once the platform has removed it, the next plan creates a new one. A registry holds at most 50 access tokens.
+A token never changes in place: changing any argument replaces it with a new token and a new secret. It stops working when it expires, when it is revoked, and when the member who created it leaves the tenant or, for a push token, loses the `admin` role. Once the platform has removed it, the next plan creates a new one. A registry holds at most 50 access tokens.
 
 ### Secret in state
 
-The token's secret, returned only when the token is created. It is stored in Terraform state in plain text: Sensitive hides it from plan and apply output but does not keep it out of the state file. Keep state in an encrypted backend with restricted access, or create tokens outside Terraform.
+The token's secret, returned only when the token is created. It is marked sensitive, which hides it in plan and apply output, but it is stored in Terraform state in plain text. Keep state in an encrypted backend with restricted access, or create tokens outside Terraform.
 
 ## Example Usage
 
@@ -40,15 +40,15 @@ output "registry_login" {
 }
 ```
 
-### Renewing a token
+### Renew a token
 
 A token never changes in place. When it expires, the platform removes it within a day, and the next `terraform plan` shows it being created again, with a new secret. Until then a refresh warns that it has expired. To renew earlier, change `display_name` or `expires_in_days`, or run `terraform apply -replace=kupe_registry_token.ci`.
 
 A token is also revoked when the member whose credentials created it leaves the tenant, and a push token when that member loses the `admin` role.
 
-### Keeping the secret out of state
+### Keep the secret out of state
 
-`secret` is in Terraform state in plain text. Marking it Sensitive only hides it from plan and apply output. If your state backend is not encrypted and access-controlled, create the token in the Kupe Console or with `kupe registry token create` instead, and store the secret in your CI system's secret store.
+`secret` is stored in Terraform state in plain text; marking it sensitive only hides it in plan and apply output. If your state backend is not encrypted and access-controlled, create the token in the Kupe console or with `kupe registry token create` instead, and store the secret in your CI system's secret store.
 
 <!-- schema generated by tfplugindocs -->
 ## Schema
@@ -67,14 +67,14 @@ A token is also revoked when the member whose credentials created it leaves the 
 ### Read-Only
 
 - `created_at` (String) Timestamp when the token was created.
-- `created_by` (String) Email of the member whose credentials created the token.
-- `expires_at` (String) When the token stops working (RFC 3339).
+- `created_by` (String) Email address of the member whose credentials created the token.
+- `expires_at` (String) When the token stops working, in RFC 3339 format.
 - `id` (String) Token ID: `rt-` and 16 hex characters.
-- `last_used_at` (String) When the token last pulled or pushed (RFC 3339), read hourly at most. Null until it is first used.
-- `phase` (String) Pending until the platform has issued the token, then Ready. Failed means it can never work: replace it.
-- `registry_host` (String) Registry host to sign in to, e.g. `registry.kupe.cloud`. Returned when the token is created, so it is null after import.
-- `secret` (String, Sensitive) The token's secret, returned only when the token is created. It is stored in Terraform state in plain text: Sensitive hides it from plan and apply output but does not keep it out of the state file. Keep state in an encrypted backend with restricted access, or create tokens outside Terraform. Null after import.
-- `username` (String) Registry username to sign in with, e.g. `kupe+acme+tok-0a1b2c3d4e5f6a7b`.
+- `last_used_at` (String) When the token last pulled or pushed, in RFC 3339 format, checked at most hourly. Null until it is first used.
+- `phase` (String) `Pending` until the platform has issued the token, then `Ready`. `Failed` means it can never work: replace it.
+- `registry_host` (String) Registry host to sign in to, for example `registry.kupe.cloud`. Returned when the token is created, so it is null after import.
+- `secret` (String, Sensitive) The token's secret, returned only when the token is created. It is marked sensitive, which hides it in plan and apply output, but it is stored in Terraform state in plain text. Keep state in an encrypted backend with restricted access, or create tokens outside Terraform. Null after import.
+- `username` (String) Registry username to sign in with, for example `kupe+acme+tok-0a1b2c3d4e5f6a7b`.
 
 <a id="nestedatt--timeouts"></a>
 ### Nested Schema for `timeouts`

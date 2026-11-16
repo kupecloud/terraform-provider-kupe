@@ -1,6 +1,7 @@
 resource "kupe_app" "this" {
   name = "shop"
 
-  # Protection defaults to true. Before destroy, set this to false and apply.
+  # Deletion protection is on by default. To destroy the app, set this to
+  # false and apply first.
   # deletion_protection = false
 }
