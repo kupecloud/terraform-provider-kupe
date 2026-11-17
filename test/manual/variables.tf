@@ -9,10 +9,3 @@ variable "slack_webhook_url" {
   sensitive   = true
   default     = "https://hooks.slack.com/services/SMOKE/TEST/PLACEHOLDER"
 }
-
-variable "smtp_password" {
-  description = "Placeholder SMTP password for the global smoke."
-  type        = string
-  sensitive   = true
-  default     = "smoke-placeholder"
-}

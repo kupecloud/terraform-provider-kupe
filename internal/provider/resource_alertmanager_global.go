@@ -17,8 +17,8 @@ import (
 )
 
 // AlertmanagerGlobalResource is a singleton-per-tenant resource that owns
-// the `global` section of the Alertmanager configuration: SMTP defaults,
-// slack_api_url, resolve_timeout, and other top-level fields.
+// the `global` section of the Alertmanager configuration: slack_api_url,
+// resolve_timeout, and other top-level fields.
 //
 // Modelled as a JSON blob for the same reason as receivers — the
 // Alertmanager global schema evolves frequently and modelling each field
@@ -29,11 +29,8 @@ import (
 //
 //	resource "kupe_alertmanager_global" "main" {
 //	  body_json = jsonencode({
-//	    smtp_from         = "alerts@example.com"
-//	    smtp_smarthost    = "smtp.example.com:587"
-//	    smtp_auth_username = "alerts@example.com"
-//	    smtp_auth_password = var.smtp_password
-//	    resolve_timeout   = "5m"
+//	    slack_api_url   = var.slack_webhook_url
+//	    resolve_timeout = "5m"
 //	  })
 //	}
 //
@@ -79,7 +76,7 @@ func (r *AlertmanagerGlobalResource) Schema(_ context.Context, _ resource.Schema
 			"body_json": schema.StringAttribute{
 				Description: "Global section as a JSON document; write it with `jsonencode()`. The fields are " +
 					"listed in the Alertmanager documentation. It is marked sensitive because it usually " +
-					"holds SMTP credentials, OAuth secrets and webhook tokens, but it is still stored in " +
+					"holds OAuth secrets and webhook tokens, but it is still stored in " +
 					"plain text in Terraform state, so keep state in an encrypted remote backend.",
 				Required:   true,
 				Sensitive:  true,

@@ -1,7 +1,8 @@
 # A Slack receiver. body_json takes Alertmanager's receiver schema; see
 # https://prometheus.io/docs/alerting/latest/configuration/#receiver
-# for every block it supports (slack_configs, email_configs,
-# webhook_configs, pagerduty_configs, msteams_configs and others).
+# for every block it supports (slack_configs,
+# webhook_configs, pagerduty_configs, msteams_configs and others). Email
+# receivers (email_configs) are not supported yet.
 #
 # jsonencode() handles the escaping.
 resource "kupe_alertmanager_receiver" "slack" {

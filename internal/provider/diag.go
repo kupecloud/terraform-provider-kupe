@@ -316,6 +316,10 @@ func apiErrorDetail(err error) string {
 		case client.CodeCreationPaused:
 			return base + "\n\nCreation is temporarily paused on the Kupe platform, so nothing was created. " +
 				"Existing resources are not affected. Run `terraform apply` again later."
+		case client.CodeAlertmanagerEmailUnsupported:
+			return base + "\n\nTenant Alertmanager email is not supported yet: the platform has no managed " +
+				"sender. Remove `email_configs` receivers and the `smtp_*` global fields from `body_json`, " +
+				"and use another receiver type such as `slack_configs` or `webhook_configs`."
 		case client.CodeStorageShrinkUnsupported:
 			return base + "\n\nDatabase storage can only grow. Keep the current size or set a larger one."
 		case client.CodePlanLimitReached:
