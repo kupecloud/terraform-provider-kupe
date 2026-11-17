@@ -3,20 +3,21 @@
 page_title: "kupe_alertmanager_receiver Resource - kupe"
 subcategory: ""
 description: |-
-  Manages one receiver in your tenant's Alertmanager configuration. Routes refer to a receiver by its name. The body is a JSON document written with jsonencode(), so any receiver type Alertmanager supports (slack_configs, email_configs, webhook_configs, pagerduty_configs, msteams_configs and others) works without a provider upgrade.
+  Manages one receiver in your tenant's Alertmanager configuration. Routes refer to a receiver by its name. The body is a JSON document written with jsonencode(), so any receiver type Alertmanager supports (slack_configs, webhook_configs, pagerduty_configs, msteams_configs and others) works without a provider upgrade. Email receivers (email_configs) and the smtp_* global fields are not supported: the API refuses them.
 ---
 
 # kupe_alertmanager_receiver (Resource)
 
-Manages one receiver in your tenant's Alertmanager configuration. Routes refer to a receiver by its name. The body is a JSON document written with `jsonencode()`, so any receiver type Alertmanager supports (`slack_configs`, `email_configs`, `webhook_configs`, `pagerduty_configs`, `msteams_configs` and others) works without a provider upgrade.
+Manages one receiver in your tenant's Alertmanager configuration. Routes refer to a receiver by its name. The body is a JSON document written with `jsonencode()`, so any receiver type Alertmanager supports (`slack_configs`, `webhook_configs`, `pagerduty_configs`, `msteams_configs` and others) works without a provider upgrade. Email receivers (`email_configs`) and the `smtp_*` global fields are not supported: the API refuses them.
 
 ## Example Usage
 
 ```terraform
 # A Slack receiver. body_json takes Alertmanager's receiver schema; see
 # https://prometheus.io/docs/alerting/latest/configuration/#receiver
-# for every block it supports (slack_configs, email_configs,
-# webhook_configs, pagerduty_configs, msteams_configs and others).
+# for every block it supports (slack_configs,
+# webhook_configs, pagerduty_configs, msteams_configs and others). Email
+# receivers (email_configs) are not supported yet.
 #
 # jsonencode() handles the escaping.
 resource "kupe_alertmanager_receiver" "slack" {
@@ -62,7 +63,7 @@ variable "pagerduty_service_key" {
 
 ### Required
 
-- `body_json` (String, Sensitive) Receiver body as a JSON document; write it with `jsonencode()`. The provider sets its `name` field from the resource's `name`, overriding any value in the body. It is marked sensitive because receiver bodies usually hold credentials, such as Slack webhook URLs, PagerDuty service keys and SMTP passwords, but it is still stored in plain text in Terraform state, so keep state in an encrypted remote backend.
+- `body_json` (String, Sensitive) Receiver body as a JSON document; write it with `jsonencode()`. The provider sets its `name` field from the resource's `name`, overriding any value in the body. It is marked sensitive because receiver bodies usually hold credentials, such as Slack webhook URLs and PagerDuty service keys, but it is still stored in plain text in Terraform state, so keep state in an encrypted remote backend.
 - `name` (String) Receiver name. Changing it replaces the receiver.
 
 ### Read-Only

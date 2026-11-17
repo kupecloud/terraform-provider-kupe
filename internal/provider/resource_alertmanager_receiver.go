@@ -26,7 +26,7 @@ import (
 //   - name      — required, immutable, the receiver identifier referenced
 //     by routes.
 //   - body_json — required, an Alertmanager receiver body as a JSON
-//     document (e.g. slack_configs / email_configs / webhook_configs).
+//     document (e.g. slack_configs / webhook_configs).
 //     Users author the body via HCL's jsonencode() function for readability.
 //
 // # Why JSON, not nested HCL blocks
@@ -91,8 +91,9 @@ func (r *AlertmanagerReceiverResource) Schema(_ context.Context, _ resource.Sche
 	resp.Schema = schema.Schema{
 		Description: "Manages one receiver in your tenant's Alertmanager configuration. Routes refer to a " +
 			"receiver by its name. The body is a JSON document written with `jsonencode()`, so any receiver " +
-			"type Alertmanager supports (`slack_configs`, `email_configs`, `webhook_configs`, " +
-			"`pagerduty_configs`, `msteams_configs` and others) works without a provider upgrade.",
+			"type Alertmanager supports (`slack_configs`, `webhook_configs`, " +
+			"`pagerduty_configs`, `msteams_configs` and others) works without a provider upgrade. Email receivers " +
+			"(`email_configs`) and the `smtp_*` global fields are not supported: the API refuses them.",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
 				Description: "Receiver name. Changing it replaces the receiver.",
@@ -105,7 +106,7 @@ func (r *AlertmanagerReceiverResource) Schema(_ context.Context, _ resource.Sche
 				Description: "Receiver body as a JSON document; write it with `jsonencode()`. The provider sets " +
 					"its `name` field from the resource's `name`, overriding any value in the body. It is " +
 					"marked sensitive because receiver bodies usually hold credentials, such as Slack webhook " +
-					"URLs, PagerDuty service keys and SMTP passwords, but it is still stored in plain text " +
+					"URLs and PagerDuty service keys, but it is still stored in plain text " +
 					"in Terraform state, so keep state in an encrypted remote backend.",
 				Required:   true,
 				Sensitive:  true,

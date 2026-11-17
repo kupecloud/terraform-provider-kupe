@@ -83,6 +83,15 @@ func TestAPIErrorDetail(t *testing.T) {
 			wantNoSubstr: []string{"databases"},
 		},
 		{
+			name: "400 alertmanager_email_unsupported says email is not offered",
+			err: &client.APIError{
+				StatusCode: http.StatusBadRequest,
+				Message:    "email receivers are not supported",
+				Code:       client.CodeAlertmanagerEmailUnsupported,
+			},
+			wantSubstr: []string{"Error code: alertmanager_email_unsupported", "email is not supported yet", "`email_configs`", "`smtp_*`"},
+		},
+		{
 			name: "400 storage_shrink_unsupported says storage only grows",
 			err: &client.APIError{
 				StatusCode: http.StatusBadRequest,

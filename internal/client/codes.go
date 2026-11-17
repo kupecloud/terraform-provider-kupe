@@ -59,6 +59,11 @@ const (
 	CodeBackupsUnavailable = "backups_unavailable"
 )
 
+// CodeAlertmanagerEmailUnsupported comes with a 400 when a tenant
+// Alertmanager receiver or global section uses email (`email_configs`,
+// `smtp_*`), which the platform does not offer until it has a managed sender.
+const CodeAlertmanagerEmailUnsupported = "alertmanager_email_unsupported"
+
 // Manual backup and restore codes, all kupe-api's own.
 const (
 	// CodeDatabaseNotReady comes with a 409 when a manual backup is taken of

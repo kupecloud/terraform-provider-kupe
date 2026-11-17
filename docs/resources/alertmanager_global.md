@@ -13,7 +13,7 @@ Manages the `global` section of your tenant's Alertmanager configuration. A tena
 ## Example Usage
 
 ```terraform
-# The tenant's Alertmanager global section: SMTP defaults, slack_api_url,
+# The tenant's Alertmanager global section: slack_api_url,
 # resolve_timeout and the other top-level fields every receiver shares.
 # A tenant has one, so declare this resource once.
 #
@@ -21,15 +21,12 @@ Manages the `global` section of your tenant's Alertmanager configuration. A tena
 # for the complete field list.
 resource "kupe_alertmanager_global" "main" {
   body_json = jsonencode({
-    smtp_from          = "alerts@example.com"
-    smtp_smarthost     = "smtp.example.com:587"
-    smtp_auth_username = "alerts@example.com"
-    smtp_auth_password = var.smtp_password
-    resolve_timeout    = "5m"
+    slack_api_url   = var.slack_webhook_url
+    resolve_timeout = "5m"
   })
 }
 
-variable "smtp_password" {
+variable "slack_webhook_url" {
   type      = string
   sensitive = true
 }
@@ -40,7 +37,7 @@ variable "smtp_password" {
 
 ### Required
 
-- `body_json` (String, Sensitive) Global section as a JSON document; write it with `jsonencode()`. The fields are listed in the Alertmanager documentation. It is marked sensitive because it usually holds SMTP credentials, OAuth secrets and webhook tokens, but it is still stored in plain text in Terraform state, so keep state in an encrypted remote backend.
+- `body_json` (String, Sensitive) Global section as a JSON document; write it with `jsonencode()`. The fields are listed in the Alertmanager documentation. It is marked sensitive because it usually holds OAuth secrets and webhook tokens, but it is still stored in plain text in Terraform state, so keep state in an encrypted remote backend.
 
 ### Read-Only
 
