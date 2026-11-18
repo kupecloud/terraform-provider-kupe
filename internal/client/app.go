@@ -48,7 +48,7 @@ type AppEnvironment struct {
 	Cluster            string                `json:"cluster"`
 	DeletionProtection bool                  `json:"deletionProtection"`
 	DeploymentRevision int64                 `json:"deploymentRevision"`
-	Web                *AppWeb               `json:"web"`
+	Runtime            *AppRuntime           `json:"runtime"`
 	Secrets            []AppSecret           `json:"secrets"`
 	Databases          []AppDatabase         `json:"databases"`
 	Domains            []string              `json:"domains"`
@@ -68,11 +68,11 @@ type AppResources struct {
 	Limits   AppQuantities `json:"limits"`
 }
 
-// AppWeb is sent in full on PATCH. In particular Env must encode [] when
+// AppRuntime is sent in full on PATCH. In particular Env must encode [] when
 // cleared: omitting it from a merge patch would retain the previous list.
 // Autoscaling has no omitempty for the same reason: a removed block is sent
 // as null, which the API reads as "stop autoscaling".
-type AppWeb struct {
+type AppRuntime struct {
 	Image    string `json:"image"`
 	Port     int32  `json:"port"`
 	Replicas int32  `json:"replicas"`
@@ -86,7 +86,7 @@ type AppWeb struct {
 	HealthChecks AppHealthChecks `json:"healthChecks"`
 }
 
-// AppAutoscaling scales the web pods between MinPods and MaxPods on average
+// AppAutoscaling scales the app's pods between MinPods and MaxPods on average
 // CPU use, CPUPercent of the CPU request.
 type AppAutoscaling struct {
 	MinPods    int32 `json:"minPods"`
@@ -181,7 +181,7 @@ type CreateAppEnvironmentRequest struct {
 	Environment        string        `json:"environment"`
 	Cluster            string        `json:"cluster"`
 	DeletionProtection *bool         `json:"deletionProtection,omitempty"`
-	Web                *AppWeb       `json:"web"`
+	Runtime            *AppRuntime   `json:"runtime"`
 	Secrets            []AppSecret   `json:"secrets"`
 	Databases          []AppDatabase `json:"databases,omitempty"`
 	Domains            []string      `json:"domains"`
@@ -191,7 +191,7 @@ type CreateAppEnvironmentRequest struct {
 // DeploymentRevision is deliberately absent: only the retry route changes it.
 // Pointers distinguish omitted lists from an explicit empty replacement.
 type PatchAppEnvironmentRequest struct {
-	Web                *AppWeb        `json:"web,omitempty"`
+	Runtime            *AppRuntime    `json:"runtime,omitempty"`
 	Secrets            *[]AppSecret   `json:"secrets,omitempty"`
 	Databases          *[]AppDatabase `json:"databases,omitempty"`
 	Domains            *[]string      `json:"domains,omitempty"`
@@ -315,7 +315,7 @@ type AppRelease struct {
 }
 
 type AppReleaseRuntime struct {
-	AppWeb
+	AppRuntime
 	Secrets   []AppReleaseSecret `json:"secrets"`
 	Databases []AppDatabase      `json:"databases"`
 }

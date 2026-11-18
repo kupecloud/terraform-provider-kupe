@@ -19,7 +19,7 @@ resource "kupe_app_environment" "smoke" {
   cluster             = kupe_cluster.smoke.name
   deletion_protection = false
 
-  web = {
+  runtime = {
     image = data.kupe_app_image.smoke.reference
     port  = 8080
   }

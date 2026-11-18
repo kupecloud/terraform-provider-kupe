@@ -14,7 +14,7 @@ import (
 	"github.com/kupecloud/terraform-provider-kupe/internal/client"
 )
 
-type appWebModel struct {
+type appRuntimeModel struct {
 	Image        types.String `tfsdk:"image"`
 	Port         types.Int64  `tfsdk:"port"`
 	Replicas     types.Int64  `tfsdk:"replicas"`
@@ -50,32 +50,32 @@ const defaultAppDatabaseEnv = "DATABASE_URL"
 
 // appEnvironmentSettings converts a fully known apply plan. Unknown values
 // remain framework diagnostics, never zero-valued API writes.
-func appEnvironmentSettings(ctx context.Context, m *AppEnvironmentResourceModel) (*client.AppWeb, []client.AppSecret, []client.AppDatabase, []string, diag.Diagnostics) {
+func appEnvironmentSettings(ctx context.Context, m *AppEnvironmentResourceModel) (*client.AppRuntime, []client.AppSecret, []client.AppDatabase, []string, diag.Diagnostics) {
 	var diags diag.Diagnostics
 	rejectNullAppListEntries(m.Secrets, path.Root("secrets"), &diags)
 	rejectNullAppListEntries(m.Databases, path.Root("databases"), &diags)
-	var web appWebModel
-	diags.Append(m.Web.As(ctx, &web, basetypes.ObjectAsOptions{})...)
+	var runtime appRuntimeModel
+	diags.Append(m.Runtime.As(ctx, &runtime, basetypes.ObjectAsOptions{})...)
 	if diags.HasError() {
 		return nil, nil, nil, nil, diags
 	}
-	rejectNullAppListEntries(web.Env, path.Root("web").AtName("env"), &diags)
+	rejectNullAppListEntries(runtime.Env, path.Root("runtime").AtName("env"), &diags)
 	if diags.HasError() {
 		return nil, nil, nil, nil, diags
 	}
 	// #nosec G115 -- The schema validates port in 1..65535 and replicas in 1..10 before apply.
-	out := &client.AppWeb{Image: web.Image.ValueString(), Port: int32(web.Port.ValueInt64()), Replicas: int32(web.Replicas.ValueInt64()), Command: []string{}, Args: []string{}, Env: []client.AppEnvVar{}}
-	diags.Append(web.Command.ElementsAs(ctx, &out.Command, false)...)
-	diags.Append(web.Args.ElementsAs(ctx, &out.Args, false)...)
+	out := &client.AppRuntime{Image: runtime.Image.ValueString(), Port: int32(runtime.Port.ValueInt64()), Replicas: int32(runtime.Replicas.ValueInt64()), Command: []string{}, Args: []string{}, Env: []client.AppEnvVar{}}
+	diags.Append(runtime.Command.ElementsAs(ctx, &out.Command, false)...)
+	diags.Append(runtime.Args.ElementsAs(ctx, &out.Args, false)...)
 	if diags.HasError() {
 		return nil, nil, nil, nil, diags
 	}
-	resources := web.Resources.Attributes()
+	resources := runtime.Resources.Attributes()
 	out.Resources.Requests = appQuantitiesFromObject(resources["requests"].(types.Object))
 	out.Resources.Limits = appQuantitiesFromObject(resources["limits"].(types.Object))
-	out.Autoscaling = appAutoscalingFromObject(web.Autoscaling)
+	out.Autoscaling = appAutoscalingFromObject(runtime.Autoscaling)
 	var env []appEnvModel
-	diags.Append(web.Env.ElementsAs(ctx, &env, false)...)
+	diags.Append(runtime.Env.ElementsAs(ctx, &env, false)...)
 	if diags.HasError() {
 		return nil, nil, nil, nil, diags
 	}
@@ -91,7 +91,7 @@ func appEnvironmentSettings(ctx context.Context, m *AppEnvironmentResourceModel)
 		}
 		out.Env = append(out.Env, value)
 	}
-	health := web.HealthChecks.Attributes()
+	health := runtime.HealthChecks.Attributes()
 	out.HealthChecks = client.AppHealthChecks{Readiness: appProbeFromObject(health["readiness"].(types.Object)), Liveness: appProbeFromObject(health["liveness"].(types.Object))}
 	var secrets []appSecretModel
 	diags.Append(m.Secrets.ElementsAs(ctx, &secrets, false)...)
@@ -205,9 +205,9 @@ func appAutoscalingToObject(autoscaling *client.AppAutoscaling) types.Object {
 	return types.ObjectValueMust(appAutoscalingTypes, map[string]attr.Value{"min_pods": types.Int64Value(int64(autoscaling.MinPods)), "max_pods": types.Int64Value(int64(autoscaling.MaxPods)), "cpu_percent": types.Int64Value(int64(cpu))})
 }
 
-func appWebToObject(web *client.AppWeb) types.Object {
-	if web == nil {
-		return types.ObjectNull(appWebTypes)
+func appRuntimeToObject(runtime *client.AppRuntime) types.Object {
+	if runtime == nil {
+		return types.ObjectNull(appRuntimeTypes)
 	}
 	stringsList := func(values []string) types.List {
 		out := make([]attr.Value, 0, len(values))
@@ -216,8 +216,8 @@ func appWebToObject(web *client.AppWeb) types.Object {
 		}
 		return types.ListValueMust(types.StringType, out)
 	}
-	env := make([]attr.Value, 0, len(web.Env))
-	for _, value := range web.Env {
+	env := make([]attr.Value, 0, len(runtime.Env))
+	for _, value := range runtime.Env {
 		literal, ref := types.StringNull(), types.ObjectNull(appKeyRefTypes)
 		if value.Value != nil {
 			literal = types.StringValue(*value.Value)
@@ -227,19 +227,19 @@ func appWebToObject(web *client.AppWeb) types.Object {
 		}
 		env = append(env, types.ObjectValueMust(appEnvTypes, map[string]attr.Value{"name": types.StringValue(value.Name), "value": literal, "secret_key_ref": ref}))
 	}
-	return types.ObjectValueMust(appWebTypes, map[string]attr.Value{
-		"image": types.StringValue(web.Image), "port": types.Int64Value(int64(web.Port)), "replicas": types.Int64Value(int64(web.Replicas)),
-		"autoscaling": appAutoscalingToObject(web.Autoscaling),
-		"resources":   types.ObjectValueMust(appResourcesTypes, map[string]attr.Value{"requests": appDefaultQuantities(web.Resources.Requests.CPU, web.Resources.Requests.Memory), "limits": appDefaultQuantities(web.Resources.Limits.CPU, web.Resources.Limits.Memory)}),
-		"command":     stringsList(web.Command), "args": stringsList(web.Args), "env": types.ListValueMust(types.ObjectType{AttrTypes: appEnvTypes}, env),
-		"health_checks": types.ObjectValueMust(appHealthTypes, map[string]attr.Value{"readiness": appProbeToObject(web.HealthChecks.Readiness), "liveness": appProbeToObject(web.HealthChecks.Liveness)}),
+	return types.ObjectValueMust(appRuntimeTypes, map[string]attr.Value{
+		"image": types.StringValue(runtime.Image), "port": types.Int64Value(int64(runtime.Port)), "replicas": types.Int64Value(int64(runtime.Replicas)),
+		"autoscaling": appAutoscalingToObject(runtime.Autoscaling),
+		"resources":   types.ObjectValueMust(appResourcesTypes, map[string]attr.Value{"requests": appDefaultQuantities(runtime.Resources.Requests.CPU, runtime.Resources.Requests.Memory), "limits": appDefaultQuantities(runtime.Resources.Limits.CPU, runtime.Resources.Limits.Memory)}),
+		"command":     stringsList(runtime.Command), "args": stringsList(runtime.Args), "env": types.ListValueMust(types.ObjectType{AttrTypes: appEnvTypes}, env),
+		"health_checks": types.ObjectValueMust(appHealthTypes, map[string]attr.Value{"readiness": appProbeToObject(runtime.HealthChecks.Readiness), "liveness": appProbeToObject(runtime.HealthChecks.Liveness)}),
 	})
 }
 
 func mapAppEnvironmentToState(env *client.AppEnvironment, etag string, m *AppEnvironmentResourceModel) {
 	m.App, m.Name, m.Cluster = types.StringValue(env.App), types.StringValue(env.Environment), types.StringValue(env.Cluster)
 	m.DeletionProtection, m.DeploymentRevision = types.BoolValue(env.DeletionProtection), types.Int64Value(env.DeploymentRevision)
-	m.Web = appWebToObject(env.Web)
+	m.Runtime = appRuntimeToObject(env.Runtime)
 	secrets := make([]attr.Value, 0, len(env.Secrets))
 	for _, secret := range env.Secrets {
 		secrets = append(secrets, types.ObjectValueMust(appSecretTypes, map[string]attr.Value{"name": types.StringValue(secret.Name), "path": types.StringValue(secret.Path)}))
@@ -282,33 +282,33 @@ func appReleaseName(ref *client.AppReleaseRef) types.String {
 // Even a protection-only patch carries all lists, so list removals never become
 // omissions during a combined update. This does not change deploymentRevision.
 func appEnvironmentPatch(ctx context.Context, plan, prior *AppEnvironmentResourceModel) (client.PatchAppEnvironmentRequest, bool, diag.Diagnostics) {
-	web, secrets, databases, domains, diags := appEnvironmentSettings(ctx, plan)
-	changed := !plan.Web.Equal(prior.Web) || !plan.Secrets.Equal(prior.Secrets) || !plan.Databases.Equal(prior.Databases) || !plan.Domains.Equal(prior.Domains) || !plan.DeletionProtection.Equal(prior.DeletionProtection)
+	runtime, secrets, databases, domains, diags := appEnvironmentSettings(ctx, plan)
+	changed := !plan.Runtime.Equal(prior.Runtime) || !plan.Secrets.Equal(prior.Secrets) || !plan.Databases.Equal(prior.Databases) || !plan.Domains.Equal(prior.Domains) || !plan.DeletionProtection.Equal(prior.DeletionProtection)
 	if diags.HasError() || !changed {
 		return client.PatchAppEnvironmentRequest{}, false, diags
 	}
 	protected := plan.DeletionProtection.ValueBool()
-	if plan.Web.Equal(prior.Web) && plan.Secrets.Equal(prior.Secrets) && plan.Databases.Equal(prior.Databases) && plan.Domains.Equal(prior.Domains) {
+	if plan.Runtime.Equal(prior.Runtime) && plan.Secrets.Equal(prior.Secrets) && plan.Databases.Equal(prior.Databases) && plan.Domains.Equal(prior.Domains) {
 		// The API serves protection-only cleanup while Apps are off.
 		return client.PatchAppEnvironmentRequest{DeletionProtection: &protected}, true, diags
 	}
-	return client.PatchAppEnvironmentRequest{Web: web, Secrets: &secrets, Databases: &databases, Domains: &domains, DeletionProtection: &protected}, true, diags
+	return client.PatchAppEnvironmentRequest{Runtime: runtime, Secrets: &secrets, Databases: &databases, Domains: &domains, DeletionProtection: &protected}, true, diags
 }
 
-// Only secret entries referenced by web.env contribute to a release. Changing
+// Only secret entries referenced by runtime.env contribute to a release. Changing
 // an unused Vault path is a settings update, just like a domain change. Any
 // database connection change, env included, deploys.
 func appEnvironmentDeployingChange(plan, prior *AppEnvironmentResourceModel) bool {
-	if !appWebReleaseIdentity(plan.Web).Equal(appWebReleaseIdentity(prior.Web)) || !plan.DeploymentRevision.Equal(prior.DeploymentRevision) || !plan.Databases.Equal(prior.Databases) {
+	if !appRuntimeReleaseIdentity(plan.Runtime).Equal(appRuntimeReleaseIdentity(prior.Runtime)) || !plan.DeploymentRevision.Equal(prior.DeploymentRevision) || !plan.Databases.Equal(prior.Databases) {
 		return true
 	}
 	if plan.Secrets.Equal(prior.Secrets) {
 		return false
 	}
-	if plan.Web.IsNull() || plan.Web.IsUnknown() || plan.Secrets.IsUnknown() || prior.Secrets.IsUnknown() {
+	if plan.Runtime.IsNull() || plan.Runtime.IsUnknown() || plan.Secrets.IsUnknown() || prior.Secrets.IsUnknown() {
 		return true
 	}
-	env := plan.Web.Attributes()["env"].(types.List)
+	env := plan.Runtime.Attributes()["env"].(types.List)
 	if env.IsUnknown() {
 		return true
 	}
@@ -356,25 +356,25 @@ func appEnvironmentDeployingChange(plan, prior *AppEnvironmentResourceModel) boo
 	return false
 }
 
-// appWebReleaseIdentity is web as a release records it. Under autoscaling a
+// appRuntimeReleaseIdentity is runtime as a release records it. Under autoscaling a
 // release records min_pods as its replicas (kupe-control-operator
 // CanonicalRuntime), so changing replicas alone starts no release and is a
-// settings update. An unknown min_pods keeps web as it is, which counts as a
+// settings update. An unknown min_pods keeps runtime as it is, which counts as a
 // deploying change.
-func appWebReleaseIdentity(web types.Object) types.Object {
-	if web.IsNull() || web.IsUnknown() {
-		return web
+func appRuntimeReleaseIdentity(runtime types.Object) types.Object {
+	if runtime.IsNull() || runtime.IsUnknown() {
+		return runtime
 	}
-	attrs := web.Attributes()
+	attrs := runtime.Attributes()
 	autoscaling, ok := attrs["autoscaling"].(types.Object)
 	if !ok || autoscaling.IsNull() || autoscaling.IsUnknown() {
-		return web
+		return runtime
 	}
 	minPods := autoscaling.Attributes()["min_pods"]
 	if minPods == nil || minPods.IsUnknown() {
-		return web
+		return runtime
 	}
 	identity := maps.Clone(attrs)
 	identity["replicas"] = minPods
-	return types.ObjectValueMust(appWebTypes, identity)
+	return types.ObjectValueMust(appRuntimeTypes, identity)
 }

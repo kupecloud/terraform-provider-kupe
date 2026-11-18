@@ -32,7 +32,7 @@ func appTestEnvironmentModel() AppEnvironmentResourceModel {
 	return AppEnvironmentResourceModel{
 		App: types.StringValue("shop"), Name: types.StringValue("production"), Cluster: types.StringValue("europe"),
 		DeletionProtection: types.BoolValue(true), DeploymentRevision: types.Int64Value(1),
-		Web:            appWebToObject(&client.AppWeb{Image: "ghcr.io/kupecloud/hello-kupe@sha256:" + strings.Repeat("a", 64), Port: 8080, Replicas: 1, Resources: client.AppResources{Requests: client.AppQuantities{CPU: "250m", Memory: "256Mi"}, Limits: client.AppQuantities{CPU: "1", Memory: "512Mi"}}, HealthChecks: client.AppHealthChecks{Readiness: &client.AppProbe{TCP: &client.AppTCPProbe{}}}}),
+		Runtime:        appRuntimeToObject(&client.AppRuntime{Image: "ghcr.io/kupecloud/hello-kupe@sha256:" + strings.Repeat("a", 64), Port: 8080, Replicas: 1, Resources: client.AppResources{Requests: client.AppQuantities{CPU: "250m", Memory: "256Mi"}, Limits: client.AppQuantities{CPU: "1", Memory: "512Mi"}}, HealthChecks: client.AppHealthChecks{Readiness: &client.AppProbe{TCP: &client.AppTCPProbe{}}}}),
 		Secrets:        types.ListValueMust(types.ObjectType{AttrTypes: appSecretTypes}, []attr.Value{}),
 		Databases:      types.ListValueMust(types.ObjectType{AttrTypes: appDatabaseTypes}, []attr.Value{}),
 		DatabaseStatus: types.ListValueMust(types.ObjectType{AttrTypes: appDatabaseStatusTypes}, []attr.Value{}),
@@ -53,7 +53,7 @@ func TestAppImageDigestRejectsTagsAndAllowsUnknown(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var resp validator.StringResponse
-			appImageDigest{}.ValidateString(context.Background(), validator.StringRequest{Path: path.Root("web").AtName("image"), ConfigValue: tc.value}, &resp)
+			appImageDigest{}.ValidateString(context.Background(), validator.StringRequest{Path: path.Root("runtime").AtName("image"), ConfigValue: tc.value}, &resp)
 			if resp.Diagnostics.HasError() != tc.invalid {
 				t.Fatalf("digest validation: %v", resp.Diagnostics)
 			}
@@ -72,7 +72,7 @@ func TestAppEnvironmentPatchAlwaysIncludesCompletePlannedLists(t *testing.T) {
 	if diags.HasError() || !changed {
 		t.Fatalf("patch failed: %v", diags)
 	}
-	if patch.Web == nil || patch.Web.Env == nil || patch.Secrets == nil || *patch.Secrets == nil || patch.Domains == nil || len(*patch.Domains) != 1 {
+	if patch.Runtime == nil || patch.Runtime.Env == nil || patch.Secrets == nil || *patch.Secrets == nil || patch.Domains == nil || len(*patch.Domains) != 1 {
 		t.Fatalf("incomplete planned replacement lists: %+v", patch)
 	}
 	if appEnvironmentDeployingChange(&plan, &prior) {
@@ -86,12 +86,12 @@ func TestAppEnvironmentOnlyReferencedSecretChangesDeploy(t *testing.T) {
 		return types.ObjectValueMust(appSecretTypes, map[string]attr.Value{"name": types.StringValue(name), "path": types.StringValue(vaultPath)})
 	}
 	prior.Secrets = types.ListValueMust(types.ObjectType{AttrTypes: appSecretTypes}, []attr.Value{secret("payments", "apps/old"), secret("unused", "apps/unused")})
-	web, _, _, _, diags := appEnvironmentSettings(context.Background(), &prior)
+	runtime, _, _, _, diags := appEnvironmentSettings(context.Background(), &prior)
 	if diags.HasError() {
 		t.Fatal(diags)
 	}
-	web.Env = []client.AppEnvVar{{Name: "API_KEY", ValueFrom: &client.AppValueFrom{SecretKeyRef: client.AppSecretKeyRef{Secret: "payments", Key: "API_KEY"}}}}
-	prior.Web = appWebToObject(web)
+	runtime.Env = []client.AppEnvVar{{Name: "API_KEY", ValueFrom: &client.AppValueFrom{SecretKeyRef: client.AppSecretKeyRef{Secret: "payments", Key: "API_KEY"}}}}
+	prior.Runtime = appRuntimeToObject(runtime)
 	plan := prior
 	plan.Secrets = types.ListValueMust(types.ObjectType{AttrTypes: appSecretTypes}, []attr.Value{secret("payments", "apps/old"), secret("unused", "apps/changed")})
 	if appEnvironmentDeployingChange(&plan, &prior) {
@@ -136,28 +136,34 @@ func TestAppEnvironmentConfigurationValidatesCrossFieldLimits(t *testing.T) {
 	base := appTestEnvironmentModel()
 	for _, tc := range []struct {
 		name    string
-		change  func(*client.AppWeb)
+		change  func(*client.AppRuntime)
 		invalid bool
 	}{
-		{"defaults", func(*client.AppWeb) {}, false},
-		{"two value sources", func(w *client.AppWeb) {
+		{"defaults", func(*client.AppRuntime) {}, false},
+		{"two value sources", func(w *client.AppRuntime) {
 			value := "literal"
 			w.Env = []client.AppEnvVar{{Name: "KEY", Value: &value, ValueFrom: &client.AppValueFrom{SecretKeyRef: client.AppSecretKeyRef{Secret: "absent", Key: "KEY"}}}}
 		}, true},
-		{"long multibyte argument", func(w *client.AppWeb) { w.Args = []string{strings.Repeat("é", 513)} }, true},
-		{"both probes", func(w *client.AppWeb) { w.HealthChecks.Readiness.HTTP = &client.AppHTTPProbe{Path: "/"} }, true},
-		{"limit below request", func(w *client.AppWeb) { w.Resources.Limits.CPU = "100m" }, true},
-		{"autoscaling pod range", func(w *client.AppWeb) { w.Autoscaling = &client.AppAutoscaling{MinPods: 2, MaxPods: 6, CPUPercent: 70} }, false},
-		{"autoscaling one pod", func(w *client.AppWeb) { w.Autoscaling = &client.AppAutoscaling{MinPods: 3, MaxPods: 3, CPUPercent: 70} }, false},
-		{"autoscaling min above max", func(w *client.AppWeb) { w.Autoscaling = &client.AppAutoscaling{MinPods: 6, MaxPods: 2, CPUPercent: 70} }, true},
+		{"long multibyte argument", func(w *client.AppRuntime) { w.Args = []string{strings.Repeat("é", 513)} }, true},
+		{"both probes", func(w *client.AppRuntime) { w.HealthChecks.Readiness.HTTP = &client.AppHTTPProbe{Path: "/"} }, true},
+		{"limit below request", func(w *client.AppRuntime) { w.Resources.Limits.CPU = "100m" }, true},
+		{"autoscaling pod range", func(w *client.AppRuntime) {
+			w.Autoscaling = &client.AppAutoscaling{MinPods: 2, MaxPods: 6, CPUPercent: 70}
+		}, false},
+		{"autoscaling one pod", func(w *client.AppRuntime) {
+			w.Autoscaling = &client.AppAutoscaling{MinPods: 3, MaxPods: 3, CPUPercent: 70}
+		}, false},
+		{"autoscaling min above max", func(w *client.AppRuntime) {
+			w.Autoscaling = &client.AppAutoscaling{MinPods: 6, MaxPods: 2, CPUPercent: 70}
+		}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			web, _, _, _, diags := appEnvironmentSettings(ctx, &base)
+			runtime, _, _, _, diags := appEnvironmentSettings(ctx, &base)
 			if diags.HasError() {
 				t.Fatal(diags)
 			}
-			tc.change(web)
-			webRaw, err := appWebToObject(web).ToTerraformValue(ctx)
+			tc.change(runtime)
+			runtimeRaw, err := appRuntimeToObject(runtime).ToTerraformValue(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -169,7 +175,7 @@ func TestAppEnvironmentConfigurationValidatesCrossFieldLimits(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			raw := testPlanValue(t, sch, map[string]tftypes.Value{"web": webRaw, "secrets": secretsRaw, "domains": domainsRaw})
+			raw := testPlanValue(t, sch, map[string]tftypes.Value{"runtime": runtimeRaw, "secrets": secretsRaw, "domains": domainsRaw})
 			var resp resource.ValidateConfigResponse
 			r.ValidateConfig(ctx, resource.ValidateConfigRequest{Config: tfsdk.Config{Schema: sch.Schema, Raw: raw}}, &resp)
 			if resp.Diagnostics.HasError() != tc.invalid {
@@ -181,13 +187,13 @@ func TestAppEnvironmentConfigurationValidatesCrossFieldLimits(t *testing.T) {
 
 func TestAppReleaseMatchesCanonicalQuantitiesAndReferencedKeys(t *testing.T) {
 	m := appTestEnvironmentModel()
-	web, _, _, _, diags := appEnvironmentSettings(context.Background(), &m)
+	runtime, _, _, _, diags := appEnvironmentSettings(context.Background(), &m)
 	if diags.HasError() {
 		t.Fatal(diags)
 	}
-	web.Resources.Requests.CPU = "0.5"
-	env := &client.AppEnvironment{DeploymentRevision: 2, Web: web}
-	release := &client.AppRelease{DeploymentRevision: 2, Runtime: client.AppReleaseRuntime{AppWeb: *web}}
+	runtime.Resources.Requests.CPU = "0.5"
+	env := &client.AppEnvironment{DeploymentRevision: 2, Runtime: runtime}
+	release := &client.AppRelease{DeploymentRevision: 2, Runtime: client.AppReleaseRuntime{AppRuntime: *runtime}}
 	release.Runtime.Resources.Requests.CPU = "500m"
 	if !appReleaseMatches(env, release) {
 		t.Fatal("equal quantity spellings failed request correlation")
@@ -220,12 +226,12 @@ func TestAppEnvironmentNullListEntriesDiagnoseAndUnknownDefers(t *testing.T) {
 				if listName == "secrets" {
 					m.Secrets = list
 				} else {
-					web := m.Web.Attributes()
-					web["env"] = list
-					m.Web = types.ObjectValueMust(appWebTypes, web)
+					runtime := m.Runtime.Attributes()
+					runtime["env"] = list
+					m.Runtime = types.ObjectValueMust(appRuntimeTypes, runtime)
 				}
 				rawAttrs := map[string]tftypes.Value{}
-				for name, value := range map[string]attr.Value{"web": m.Web, "secrets": m.Secrets, "domains": m.Domains} {
+				for name, value := range map[string]attr.Value{"runtime": m.Runtime, "secrets": m.Secrets, "domains": m.Domains} {
 					raw, err := value.ToTerraformValue(ctx)
 					if err != nil {
 						t.Fatal(err)
@@ -253,9 +259,9 @@ func TestAppEnvironmentNullListEntriesDiagnoseAndUnknownDefers(t *testing.T) {
 				// Force secret-difference traversal, including the null/unknown entry.
 				prior := appTestEnvironmentModel()
 				prior.Secrets = types.ListValueMust(types.ObjectType{AttrTypes: appSecretTypes}, []attr.Value{types.ObjectValueMust(appSecretTypes, map[string]attr.Value{"name": types.StringValue("unused"), "path": types.StringValue("apps/unused")})})
-				// Keep Web and revision equal so secret-difference analysis reaches
-				// the env element guard instead of returning on a changed Web.
-				prior.Web = m.Web
+				// Keep Runtime and revision equal so secret-difference analysis reaches
+				// the env element guard instead of returning on a changed Runtime.
+				prior.Runtime = m.Runtime
 				prior.DeploymentRevision = m.DeploymentRevision
 				if !appEnvironmentDeployingChange(&m, &prior) {
 					t.Fatal("null or unknown nested entries must conservatively require deployment analysis")
@@ -285,12 +291,12 @@ func TestAppEnvironmentConfigurationValidatesDatabaseConnections(t *testing.T) {
 	var sch resource.SchemaResponse
 	r.Schema(ctx, resource.SchemaRequest{}, &sch)
 	base := appTestEnvironmentModel()
-	web, _, _, _, diags := appEnvironmentSettings(ctx, &base)
+	runtime, _, _, _, diags := appEnvironmentSettings(ctx, &base)
 	if diags.HasError() {
 		t.Fatal(diags)
 	}
 	literal := "info"
-	web.Env = []client.AppEnvVar{{Name: "LOG_LEVEL", Value: &literal}}
+	runtime.Env = []client.AppEnvVar{{Name: "LOG_LEVEL", Value: &literal}}
 	for _, tc := range []struct {
 		name, app           string
 		databases           types.List
@@ -299,7 +305,7 @@ func TestAppEnvironmentConfigurationValidatesDatabaseConnections(t *testing.T) {
 		{name: "two connections to one database", databases: appTestDatabases(appTestDatabase("main", "orders-db", "", ""), appTestDatabase("reports", "orders-db", "analytics", "REPORTS_URL"))},
 		{name: "duplicate name", databases: appTestDatabases(appTestDatabase("main", "orders-db", "", ""), appTestDatabase("main", "users-db", "", "USERS_URL")), summary: "Duplicate connection", detail: "Connection names must be unique.", at: "databases[1].name"},
 		{name: "default env used twice", databases: appTestDatabases(appTestDatabase("main", "orders-db", "", ""), appTestDatabase("users", "users-db", "", "DATABASE_URL")), summary: "Duplicate variable", detail: "Another connection already sets this variable. Give each connection its own env.", at: "databases[1].env"},
-		{name: "env set in web.env", databases: appTestDatabases(appTestDatabase("main", "orders-db", "", "LOG_LEVEL")), summary: "Variable already set", detail: "web.env already sets this variable. Choose another env for this connection.", at: "databases[0].env"},
+		{name: "env set in runtime.env", databases: appTestDatabases(appTestDatabase("main", "orders-db", "", "LOG_LEVEL")), summary: "Variable already set", detail: "runtime.env already sets this variable. Choose another env for this connection.", at: "databases[0].env"},
 		{name: "same database twice", databases: appTestDatabases(appTestDatabase("main", "orders-db", "analytics", ""), appTestDatabase("again", "orders-db", "analytics", "AGAIN_URL")), summary: "Duplicate database", detail: "Another connection already uses this database and logical_database. Connect each one once per environment.", at: "databases[1].database"},
 		{name: "binding name too long", app: strings.Repeat("a", 32), databases: appTestDatabases(appTestDatabase(strings.Repeat("c", 8), "orders-db", "", "")), summary: "Connection name too long", detail: "The app, environment and connection names together can be at most 49 characters, so that the connection's database binding name, app-<app>-<environment>-<connection>-migrate, fits in 63.", at: "databases[0].name"},
 		{name: "binding name at the limit", app: strings.Repeat("a", 32), databases: appTestDatabases(appTestDatabase(strings.Repeat("c", 7), "orders-db", "", ""))},
@@ -310,7 +316,7 @@ func TestAppEnvironmentConfigurationValidatesDatabaseConnections(t *testing.T) {
 				app = "shop"
 			}
 			rawAttrs := map[string]tftypes.Value{"app": tftypes.NewValue(tftypes.String, app), "name": tftypes.NewValue(tftypes.String, "production")}
-			for name, value := range map[string]attr.Value{"web": appWebToObject(web), "secrets": base.Secrets, "domains": base.Domains, "databases": tc.databases} {
+			for name, value := range map[string]attr.Value{"runtime": appRuntimeToObject(runtime), "secrets": base.Secrets, "domains": base.Domains, "databases": tc.databases} {
 				raw, err := value.ToTerraformValue(ctx)
 				if err != nil {
 					t.Fatal(err)
@@ -361,7 +367,7 @@ func TestAppEnvironmentDatabaseChangesDeployAndPatchTheWholeList(t *testing.T) {
 			if diags.HasError() || !changed {
 				t.Fatalf("patch failed: %v", diags)
 			}
-			if patch.Databases == nil || len(*patch.Databases) != tc.want || patch.Web == nil || patch.Secrets == nil || patch.Domains == nil {
+			if patch.Databases == nil || len(*patch.Databases) != tc.want || patch.Runtime == nil || patch.Secrets == nil || patch.Domains == nil {
 				t.Fatalf("patch did not carry the complete lists: %+v", patch)
 			}
 		})
@@ -459,13 +465,13 @@ func TestAppEnvironmentStateMapsDatabasesAndOmitsSecretNames(t *testing.T) {
 
 func TestAppReleaseMatchesDatabasesByName(t *testing.T) {
 	m := appTestEnvironmentModel()
-	web, _, _, _, diags := appEnvironmentSettings(context.Background(), &m)
+	runtime, _, _, _, diags := appEnvironmentSettings(context.Background(), &m)
 	if diags.HasError() {
 		t.Fatal(diags)
 	}
 	main, reports := client.AppDatabase{Name: "main", Database: "orders-db", Env: "DATABASE_URL"}, client.AppDatabase{Name: "reports", Database: "orders-db", LogicalDatabase: "analytics", Env: "REPORTS_URL"}
-	env := &client.AppEnvironment{DeploymentRevision: 1, Web: web, Databases: []client.AppDatabase{main, reports}}
-	release := &client.AppRelease{DeploymentRevision: 1, Runtime: client.AppReleaseRuntime{AppWeb: *web, Databases: []client.AppDatabase{reports, main}}}
+	env := &client.AppEnvironment{DeploymentRevision: 1, Runtime: runtime, Databases: []client.AppDatabase{main, reports}}
+	release := &client.AppRelease{DeploymentRevision: 1, Runtime: client.AppReleaseRuntime{AppRuntime: *runtime, Databases: []client.AppDatabase{reports, main}}}
 	if !appReleaseMatches(env, release) {
 		t.Fatal("the same connections in another order did not match")
 	}
@@ -533,15 +539,15 @@ func TestAppEnvironmentReplaceAttributesMatchSchema(t *testing.T) {
 
 func appTestAutoscalingModel(replicas, minPods, maxPods int32) AppEnvironmentResourceModel {
 	m := appTestEnvironmentModel()
-	web, _, _, _, diags := appEnvironmentSettings(context.Background(), &m)
+	runtime, _, _, _, diags := appEnvironmentSettings(context.Background(), &m)
 	if diags.HasError() {
 		panic(fmt.Sprint(diags))
 	}
-	web.Replicas = replicas
+	runtime.Replicas = replicas
 	if minPods > 0 {
-		web.Autoscaling = &client.AppAutoscaling{MinPods: minPods, MaxPods: maxPods, CPUPercent: 70}
+		runtime.Autoscaling = &client.AppAutoscaling{MinPods: minPods, MaxPods: maxPods, CPUPercent: 70}
 	}
-	m.Web = appWebToObject(web)
+	m.Runtime = appRuntimeToObject(runtime)
 	return m
 }
 
@@ -550,17 +556,17 @@ func appTestAutoscalingModel(replicas, minPods, maxPods int32) AppEnvironmentRes
 func TestAppEnvironmentAutoscalingWire(t *testing.T) {
 	ctx := context.Background()
 	scaled := appTestAutoscalingModel(1, 2, 6)
-	web, _, _, _, diags := appEnvironmentSettings(ctx, &scaled)
+	runtime, _, _, _, diags := appEnvironmentSettings(ctx, &scaled)
 	if diags.HasError() {
 		t.Fatal(diags)
 	}
-	if want := (client.AppAutoscaling{MinPods: 2, MaxPods: 6, CPUPercent: 70}); web.Autoscaling == nil || *web.Autoscaling != want {
-		t.Fatalf("autoscaling = %+v, want %+v", web.Autoscaling, want)
+	if want := (client.AppAutoscaling{MinPods: 2, MaxPods: 6, CPUPercent: 70}); runtime.Autoscaling == nil || *runtime.Autoscaling != want {
+		t.Fatalf("autoscaling = %+v, want %+v", runtime.Autoscaling, want)
 	}
 	plain := appTestAutoscalingModel(1, 0, 0)
 	patch, changed, diags := appEnvironmentPatch(ctx, &plain, &scaled)
-	if diags.HasError() || !changed || patch.Web == nil || patch.Web.Autoscaling != nil {
-		t.Fatalf("removal patch = %+v, changed %v, %v", patch.Web, changed, diags)
+	if diags.HasError() || !changed || patch.Runtime == nil || patch.Runtime.Autoscaling != nil {
+		t.Fatalf("removal patch = %+v, changed %v, %v", patch.Runtime, changed, diags)
 	}
 	data, err := json.Marshal(patch)
 	if err != nil {
@@ -572,10 +578,10 @@ func TestAppEnvironmentAutoscalingWire(t *testing.T) {
 }
 
 func TestAppEnvironmentAutoscalingState(t *testing.T) {
-	if got := appWebToObject(&client.AppWeb{}).Attributes()["autoscaling"]; !got.IsNull() {
+	if got := appRuntimeToObject(&client.AppRuntime{}).Attributes()["autoscaling"]; !got.IsNull() {
 		t.Fatalf("a response without autoscaling maps to %v, want null", got)
 	}
-	got := appWebToObject(&client.AppWeb{Autoscaling: &client.AppAutoscaling{MinPods: 2, MaxPods: 6}}).Attributes()["autoscaling"].(types.Object).Attributes()
+	got := appRuntimeToObject(&client.AppRuntime{Autoscaling: &client.AppAutoscaling{MinPods: 2, MaxPods: 6}}).Attributes()["autoscaling"].(types.Object).Attributes()
 	if got["min_pods"].(types.Int64).ValueInt64() != 2 || got["max_pods"].(types.Int64).ValueInt64() != 6 || got["cpu_percent"].(types.Int64).ValueInt64() != appDefaultCPUPercent {
 		t.Fatalf("autoscaling without cpuPercent maps to %v, want the default target", got)
 	}
@@ -603,11 +609,11 @@ func TestAppEnvironmentAutoscalingDeployingChange(t *testing.T) {
 		})
 	}
 	unknown := appTestAutoscalingModel(1, 2, 6)
-	attrs := unknown.Web.Attributes()
+	attrs := unknown.Runtime.Attributes()
 	scaling := attrs["autoscaling"].(types.Object).Attributes()
 	scaling["min_pods"] = types.Int64Unknown()
 	attrs["autoscaling"] = types.ObjectValueMust(appAutoscalingTypes, scaling)
-	unknown.Web = types.ObjectValueMust(appWebTypes, attrs)
+	unknown.Runtime = types.ObjectValueMust(appRuntimeTypes, attrs)
 	prior := appTestAutoscalingModel(1, 2, 6)
 	if !appEnvironmentDeployingChange(&unknown, &prior) {
 		t.Fatal("an unknown min_pods was not treated as deploying")
@@ -616,12 +622,12 @@ func TestAppEnvironmentAutoscalingDeployingChange(t *testing.T) {
 
 func TestAppReleaseMatchesAutoscalingReplicas(t *testing.T) {
 	m := appTestAutoscalingModel(1, 2, 6)
-	web, _, _, _, diags := appEnvironmentSettings(context.Background(), &m)
+	runtime, _, _, _, diags := appEnvironmentSettings(context.Background(), &m)
 	if diags.HasError() {
 		t.Fatal(diags)
 	}
-	env := &client.AppEnvironment{DeploymentRevision: 1, Web: web}
-	release := &client.AppRelease{DeploymentRevision: 1, Runtime: client.AppReleaseRuntime{AppWeb: *web}}
+	env := &client.AppEnvironment{DeploymentRevision: 1, Runtime: runtime}
+	release := &client.AppRelease{DeploymentRevision: 1, Runtime: client.AppReleaseRuntime{AppRuntime: *runtime}}
 	release.Runtime.Replicas = 2
 	release.Runtime.Autoscaling = &client.AppAutoscaling{MinPods: 2, MaxPods: 6, CPUPercent: 70}
 	if !appReleaseMatches(env, release) {
@@ -637,7 +643,7 @@ func TestAppReleaseMatchesAutoscalingReplicas(t *testing.T) {
 	}
 }
 
-// A state written before autoscaling existed has no web.autoscaling key; it
+// A state written before autoscaling existed has no runtime.autoscaling key; it
 // decodes with the block null, so it plans no change against a configuration
 // without the block.
 func TestAppEnvironmentStateWithoutAutoscalingDecodes(t *testing.T) {
@@ -645,16 +651,16 @@ func TestAppEnvironmentStateWithoutAutoscalingDecodes(t *testing.T) {
 	r := NewAppEnvironmentResource().(*AppEnvironmentResource)
 	sch := testResourceSchema(t, r)
 	m := appTestEnvironmentModel()
-	webRaw, err := m.Web.ToTerraformValue(ctx)
+	runtimeRaw, err := m.Runtime.ToTerraformValue(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	stored := testPlanValue(t, sch, map[string]tftypes.Value{"web": webRaw})
+	stored := testPlanValue(t, sch, map[string]tftypes.Value{"runtime": runtimeRaw})
 	state := map[string]any{}
 	if err := json.Unmarshal(testTerraformJSON(t, stored), &state); err != nil {
 		t.Fatal(err)
 	}
-	delete(state["web"].(map[string]any), "autoscaling")
+	delete(state["runtime"].(map[string]any), "autoscaling")
 	data, err := json.Marshal(state)
 	if err != nil {
 		t.Fatal(err)
@@ -675,8 +681,8 @@ func TestAppEnvironmentStateWithoutAutoscalingDecodes(t *testing.T) {
 	if diags := (tfsdk.State{Schema: sch.Schema, Raw: upgraded}).Get(ctx, &decoded); diags.HasError() {
 		t.Fatal(diags)
 	}
-	if !decoded.Web.Equal(m.Web) {
-		t.Fatalf("web = %v, want %v with autoscaling null", decoded.Web, m.Web)
+	if !decoded.Runtime.Equal(m.Runtime) {
+		t.Fatalf("runtime = %v, want %v with autoscaling null", decoded.Runtime, m.Runtime)
 	}
 }
 

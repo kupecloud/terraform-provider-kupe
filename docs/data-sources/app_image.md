@@ -2,23 +2,23 @@
 page_title: "kupe_app_image Data Source - kupe"
 subcategory: ""
 description: |-
-  Resolves an image tag or digest to an immutable sha256 reference through the Kupe API. Use reference as kupe_app_environment.web.image. Every read resolves the image again, so a moving tag can change the next plan and deploy on apply. The provider sends no registry credentials.
+  Resolves an image tag or digest to an immutable sha256 reference through the Kupe API. Use reference as kupe_app_environment.runtime.image. Every read resolves the image again, so a moving tag can change the next plan and deploy on apply. The provider sends no registry credentials.
 ---
 
 # kupe_app_image (Data Source)
 
-Resolves an image tag or digest to an immutable sha256 reference through the Kupe API. Use `reference` as `kupe_app_environment.web.image`. Every read resolves the image again, so a moving tag can change the next plan and deploy on apply. The provider sends no registry credentials.
+Resolves an image tag or digest to an immutable sha256 reference through the Kupe API. Use `reference` as `kupe_app_environment.runtime.image`. Every read resolves the image again, so a moving tag can change the next plan and deploy on apply. The provider sends no registry credentials.
 
 ## Example usage
 
 ```terraform
-data "kupe_app_image" "web" {
+data "kupe_app_image" "app" {
   image = "ghcr.io/kupecloud/hello-kupe:1.5.1"
 }
 
 output "image_reference" {
-  description = "Immutable image reference for kupe_app_environment.web.image."
-  value       = data.kupe_app_image.web.reference
+  description = "Immutable image reference for kupe_app_environment.runtime.image."
+  value       = data.kupe_app_image.app.reference
 }
 ```
 

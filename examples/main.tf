@@ -21,7 +21,7 @@ data "kupe_plan" "pro" {
 }
 
 # Resolve a version tag before using it as an app environment's image.
-data "kupe_app_image" "web" {
+data "kupe_app_image" "app" {
   image = "ghcr.io/kupecloud/hello-kupe:1.5.1"
 }
 

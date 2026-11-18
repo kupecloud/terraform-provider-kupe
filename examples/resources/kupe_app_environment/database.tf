@@ -22,7 +22,7 @@ resource "kupe_app_environment" "orders" {
   name    = "production"
   cluster = "europe"
 
-  web = {
+  runtime = {
     image = "ghcr.io/kupecloud/hello-kupe@sha256:be393b04d81f3a3e63d57be12dce11e823b1af75ea3997eecbc2d19a3b434f93"
     port  = 8080
   }

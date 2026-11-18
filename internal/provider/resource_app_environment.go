@@ -117,7 +117,7 @@ func (r *AppEnvironmentResource) Create(ctx context.Context, req resource.Create
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	web, secrets, databases, domains, diags := appEnvironmentSettings(ctx, &plan)
+	runtime, secrets, databases, domains, diags := appEnvironmentSettings(ctx, &plan)
 	resp.Diagnostics.Append(diags...)
 	timeout, diags := plan.Timeouts.Create(ctx, appEnvironmentKind.defaults.create)
 	resp.Diagnostics.Append(diags...)
@@ -127,7 +127,7 @@ func (r *AppEnvironmentResource) Create(ctx context.Context, req resource.Create
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	protected := plan.DeletionProtection.ValueBool()
-	env, etag, err := r.client.CreateAppEnvironment(ctx, plan.App.ValueString(), client.CreateAppEnvironmentRequest{Environment: plan.Name.ValueString(), Cluster: plan.Cluster.ValueString(), Web: web, Secrets: secrets, Databases: databases, Domains: domains, DeletionProtection: &protected})
+	env, etag, err := r.client.CreateAppEnvironment(ctx, plan.App.ValueString(), client.CreateAppEnvironmentRequest{Environment: plan.Name.ValueString(), Cluster: plan.Cluster.ValueString(), Runtime: runtime, Secrets: secrets, Databases: databases, Domains: domains, DeletionProtection: &protected})
 	if err != nil {
 		resp.Diagnostics.AddError("failed to create app environment", apiErrorDetail(err))
 		return
@@ -294,7 +294,7 @@ func appEnvironmentSettingsChanged(prior *AppEnvironmentResourceModel, current *
 		equal bool
 	}{
 		{"app", prior.App.Equal(mapped.App)}, {"name", prior.Name.Equal(mapped.Name)}, {"cluster", prior.Cluster.Equal(mapped.Cluster)},
-		{"web", prior.Web.Equal(mapped.Web)}, {"secrets", prior.Secrets.Equal(mapped.Secrets)}, {"databases", prior.Databases.Equal(mapped.Databases)}, {"domains", prior.Domains.Equal(mapped.Domains)},
+		{"runtime", prior.Runtime.Equal(mapped.Runtime)}, {"secrets", prior.Secrets.Equal(mapped.Secrets)}, {"databases", prior.Databases.Equal(mapped.Databases)}, {"domains", prior.Domains.Equal(mapped.Domains)},
 		{"deletion_protection", prior.DeletionProtection.Equal(mapped.DeletionProtection)}, {"deployment_revision", prior.DeploymentRevision.Equal(mapped.DeploymentRevision)},
 	} {
 		if !item.equal {
@@ -321,7 +321,7 @@ func (r *AppEnvironmentResource) waitAppEnvironment(ctx context.Context, timeout
 		// Status observations never silently adopt another writer's config.
 		mapAppEnvironmentToState(current, etag, m)
 		m.App, m.Name, m.Cluster = acceptedModel.App, acceptedModel.Name, acceptedModel.Cluster
-		m.Web, m.Secrets, m.Databases, m.Domains = acceptedModel.Web, acceptedModel.Secrets, acceptedModel.Databases, acceptedModel.Domains
+		m.Runtime, m.Secrets, m.Databases, m.Domains = acceptedModel.Runtime, acceptedModel.Secrets, acceptedModel.Databases, acceptedModel.Domains
 		m.DeletionProtection, m.DeploymentRevision = acceptedModel.DeletionProtection, acceptedModel.DeploymentRevision
 		if !deploying {
 			preserveAppPlannedStatus(m, &acceptedModel)
@@ -477,21 +477,21 @@ func appReleaseFailureDetail(release *client.AppRelease, current *client.AppEnvi
 }
 
 func appReleaseMatches(accepted *client.AppEnvironment, release *client.AppRelease) bool {
-	if accepted.DeploymentRevision != release.DeploymentRevision || accepted.Web == nil {
+	if accepted.DeploymentRevision != release.DeploymentRevision || accepted.Runtime == nil {
 		return false
 	}
-	expectedWeb, releaseWeb := *accepted.Web, release.Runtime.AppWeb
-	if expectedWeb.Autoscaling != nil {
+	expectedRuntime, releaseRuntime := *accepted.Runtime, release.Runtime.AppRuntime
+	if expectedRuntime.Autoscaling != nil {
 		// The release records min_pods as its replicas under autoscaling.
-		expectedWeb.Replicas = expectedWeb.Autoscaling.MinPods
+		expectedRuntime.Replicas = expectedRuntime.Autoscaling.MinPods
 	}
-	normaliseAppQuantities(&expectedWeb.Resources)
-	normaliseAppQuantities(&releaseWeb.Resources)
-	if !appWebToObject(&expectedWeb).Equal(appWebToObject(&releaseWeb)) {
+	normaliseAppQuantities(&expectedRuntime.Resources)
+	normaliseAppQuantities(&releaseRuntime.Resources)
+	if !appRuntimeToObject(&expectedRuntime).Equal(appRuntimeToObject(&releaseRuntime)) {
 		return false
 	}
 	referenced := map[string]map[string]bool{}
-	for _, env := range accepted.Web.Env {
+	for _, env := range accepted.Runtime.Env {
 		if env.ValueFrom != nil {
 			ref := env.ValueFrom.SecretKeyRef
 			if referenced[ref.Secret] == nil {

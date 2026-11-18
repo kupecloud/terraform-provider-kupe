@@ -12,7 +12,7 @@ Manages one Kupe app environment. Applying deploying settings requests a release
 ## Example usage
 
 ```terraform
-data "kupe_app_image" "web" {
+data "kupe_app_image" "app" {
   image = "ghcr.io/kupecloud/hello-kupe:1.5.1"
 }
 
@@ -25,8 +25,8 @@ resource "kupe_app_environment" "this" {
   name    = "production"
   cluster = "europe"
 
-  web = {
-    image = data.kupe_app_image.web.reference
+  runtime = {
+    image = data.kupe_app_image.app.reference
     port  = 8080
     env = [{ name = "LOG_LEVEL", value = "info" }]
     health_checks = { readiness = { http = { path = "/healthz" } } }
@@ -37,7 +37,7 @@ resource "kupe_app_environment" "this" {
   }
 
   # Write values at this path in the console Vault page before referencing
-  # them in web.env. Do not target this environment's namespace separately.
+  # them in runtime.env. Do not target this environment's namespace separately.
   # secrets = [{ name = "payments", path = "apps/shop/production/payments" }]
 
   # Increase by one to retry an unchanged deployment.
@@ -71,7 +71,7 @@ resource "kupe_app_environment" "multi" {
   name     = each.key
   cluster  = each.value.cluster
 
-  web = {
+  runtime = {
     image    = "ghcr.io/kupecloud/hello-kupe@sha256:be393b04d81f3a3e63d57be12dce11e823b1af75ea3997eecbc2d19a3b434f93"
     port     = 8080
     replicas = each.value.replicas
@@ -84,13 +84,13 @@ resource "kupe_app_environment" "multi" {
 
 ## Image tags and digests
 
-Use `data.kupe_app_image` to resolve a tag or digest, then set `web.image` to its `reference`. The environment accepts only a sha256 digest reference. The data source calls the Kupe API on each read and the provider keeps no image cache.
+Use `data.kupe_app_image` to resolve a tag or digest, then set `runtime.image` to its `reference`. The environment accepts only a sha256 digest reference. The data source calls the Kupe API on each read and the provider keeps no image cache.
 
-Pin a version tag in production. If a moving tag such as `latest` points to a new digest, the next plan shows a `web.image` change and applying that plan deploys it. A version tag can also be reassigned by its publisher; use a digest input when the image identity must stay fixed.
+Pin a version tag in production. If a moving tag such as `latest` points to a new digest, the next plan shows a `runtime.image` change and applying that plan deploys it. A version tag can also be reassigned by its publisher; use a digest input when the image identity must stay fixed.
 
 ## Deploying and retrying
 
-An apply that changes `web`, a referenced secret path, `databases` or `deployment_revision` requests a deployment and waits for its requested release. Domain and protection changes wait for the observed settings without starting a release. The default timeouts are create 30 minutes, update 20 minutes and delete 20 minutes.
+An apply that changes `runtime`, a referenced secret path, `databases` or `deployment_revision` requests a deployment and waits for its requested release. Domain and protection changes wait for the observed settings without starting a release. The default timeouts are create 30 minutes, update 20 minutes and delete 20 minutes.
 
 A failed first deploy, or one that times out while deploying, gives a warning. Terraform retains the resource without taint, so an unchanged apply plans no change. A failed update reports an error and retains the accepted configuration; an unchanged apply does not resubmit it.
 
@@ -100,11 +100,11 @@ If another client changes the environment before its release can be identified, 
 
 ## Autoscaling
 
-Set `web.autoscaling` to let the pod count follow CPU use, between `min_pods` and `max_pods` (each 1 to 10). Autoscaling adds or removes pods to keep average CPU use near `cpu_percent` of each pod's CPU request, 70 by default. Memory use is not considered.
+Set `runtime.autoscaling` to let the pod count follow CPU use, between `min_pods` and `max_pods` (each 1 to 10). Autoscaling adds or removes pods to keep average CPU use near `cpu_percent` of each pod's CPU request, 70 by default. Memory use is not considered.
 
 ```terraform
-web = {
-  image       = data.kupe_app_image.web.reference
+runtime = {
+  image       = data.kupe_app_image.app.reference
   port        = 8080
   autoscaling = { min_pods = 2, max_pods = 6 }
 }
@@ -116,7 +116,7 @@ Pods are spread across nodes where the cluster allows, so draining one node stop
 
 ## Vault references
 
-Each `secrets` entry points to a tenant Vault path. Write its values in the console Vault page. Environment variables reference its declared name and key. Secret values are never provider attributes. The API refuses removal of a secret entry while `web.env` still references it.
+Each `secrets` entry points to a tenant Vault path. Write its values in the console Vault page. Environment variables reference its declared name and key. Secret values are never provider attributes. The API refuses removal of a secret entry while `runtime.env` still references it.
 
 ## Databases
 
@@ -145,7 +145,7 @@ resource "kupe_app_environment" "orders" {
   name    = "production"
   cluster = "europe"
 
-  web = {
+  runtime = {
     image = "ghcr.io/kupecloud/hello-kupe@sha256:be393b04d81f3a3e63d57be12dce11e823b1af75ea3997eecbc2d19a3b434f93"
     port  = 8080
   }
@@ -181,15 +181,15 @@ Destroying an environment deletes its namespace and everything in it. Its own Va
 - `app` (String) App identity. Reference `kupe_app.this.name` to order creation and deletion.
 - `cluster` (String) Cluster that runs the environment. Changing it replaces the environment.
 - `name` (String) Environment name: an RFC 1123 label of at most 20 characters without `--`.
-- `web` (Attributes) Complete runtime configuration. Images must be pinned by digest. (see [below for nested schema](#nestedatt--web))
+- `runtime` (Attributes) Complete runtime configuration. Images must be pinned by digest. (see [below for nested schema](#nestedatt--runtime))
 
 ### Optional
 
-- `databases` (Attributes List) Databases the web workload connects to, at most 5. Each connection puts the database's URL in an environment variable. Removing a connection keeps the database and its backups. (see [below for nested schema](#nestedatt--databases))
+- `databases` (Attributes List) Databases the app connects to, at most 5. Each connection puts the database's URL in an environment variable. Removing a connection keeps the database and its backups. (see [below for nested schema](#nestedatt--databases))
 - `deletion_protection` (Boolean) Set to false and apply before destroying the environment.
 - `deployment_revision` (Number) Increase by one to retry the current deployment. An unchanged apply never retries.
 - `domains` (Set of String) Complete set of exact lowercase custom hostnames. Domain changes do not deploy.
-- `secrets` (Attributes List) Vault paths referenced by the web workload. Write their values in the console Vault page. (see [below for nested schema](#nestedatt--secrets))
+- `secrets` (Attributes List) Vault paths referenced by the app. Write their values in the console Vault page. (see [below for nested schema](#nestedatt--secrets))
 - `timeouts` (Attributes) (see [below for nested schema](#nestedatt--timeouts))
 
 ### Read-Only
@@ -207,8 +207,8 @@ Destroying an environment deletes its namespace and everything in it. Its own Va
 - `recovery_release` (String) Release used for recovery.
 - `requested_release` (String) Requested release name.
 
-<a id="nestedatt--web"></a>
-### Nested Schema for `web`
+<a id="nestedatt--runtime"></a>
+### Nested Schema for `runtime`
 
 Required:
 
@@ -218,15 +218,15 @@ Required:
 Optional:
 
 - `args` (List of String) Arguments, at most 32 strings of 1024 bytes each.
-- `autoscaling` (Attributes) Scales the pod count between `min_pods` and `max_pods` on average CPU use. Changing these settings deploys; scaling within the range does not. Remove the block to go back to `replicas`. (see [below for nested schema](#nestedatt--web--autoscaling))
+- `autoscaling` (Attributes) Scales the pod count between `min_pods` and `max_pods` on average CPU use. Changing these settings deploys; scaling within the range does not. Remove the block to go back to `replicas`. (see [below for nested schema](#nestedatt--runtime--autoscaling))
 - `command` (List of String) Entrypoint, at most 32 strings of 1024 bytes each.
-- `env` (Attributes List) Ordered environment variables. Choose value or secret_key_ref per entry. (see [below for nested schema](#nestedatt--web--env))
-- `health_checks` (Attributes) Readiness and optional liveness probes. (see [below for nested schema](#nestedatt--web--health_checks))
+- `env` (Attributes List) Ordered environment variables. Choose value or secret_key_ref per entry. (see [below for nested schema](#nestedatt--runtime--env))
+- `health_checks` (Attributes) Readiness and optional liveness probes. (see [below for nested schema](#nestedatt--runtime--health_checks))
 - `replicas` (Number) Number of pods, 1 to 10. Not used while autoscaling is set.
-- `resources` (Attributes) Requests and limits. (see [below for nested schema](#nestedatt--web--resources))
+- `resources` (Attributes) Requests and limits. (see [below for nested schema](#nestedatt--runtime--resources))
 
-<a id="nestedatt--web--autoscaling"></a>
-### Nested Schema for `web.autoscaling`
+<a id="nestedatt--runtime--autoscaling"></a>
+### Nested Schema for `runtime.autoscaling`
 
 Required:
 
@@ -238,8 +238,8 @@ Optional:
 - `cpu_percent` (Number) Target average CPU use as a percentage of each pod's CPU request, 10 to 100. Defaults to 70.
 
 
-<a id="nestedatt--web--env"></a>
-### Nested Schema for `web.env`
+<a id="nestedatt--runtime--env"></a>
+### Nested Schema for `runtime.env`
 
 Required:
 
@@ -247,11 +247,11 @@ Required:
 
 Optional:
 
-- `secret_key_ref` (Attributes) Reference to a declared secret, never a secret value. (see [below for nested schema](#nestedatt--web--env--secret_key_ref))
+- `secret_key_ref` (Attributes) Reference to a declared secret, never a secret value. (see [below for nested schema](#nestedatt--runtime--env--secret_key_ref))
 - `value` (String) Literal value. Use secret_key_ref for credentials.
 
-<a id="nestedatt--web--env--secret_key_ref"></a>
-### Nested Schema for `web.env.secret_key_ref`
+<a id="nestedatt--runtime--env--secret_key_ref"></a>
+### Nested Schema for `runtime.env.secret_key_ref`
 
 Required:
 
@@ -260,67 +260,67 @@ Required:
 
 
 
-<a id="nestedatt--web--health_checks"></a>
-### Nested Schema for `web.health_checks`
+<a id="nestedatt--runtime--health_checks"></a>
+### Nested Schema for `runtime.health_checks`
 
 Optional:
 
-- `liveness` (Attributes) Choose exactly one of tcp or http. (see [below for nested schema](#nestedatt--web--health_checks--liveness))
-- `readiness` (Attributes) Choose exactly one of tcp or http. (see [below for nested schema](#nestedatt--web--health_checks--readiness))
+- `liveness` (Attributes) Choose exactly one of tcp or http. (see [below for nested schema](#nestedatt--runtime--health_checks--liveness))
+- `readiness` (Attributes) Choose exactly one of tcp or http. (see [below for nested schema](#nestedatt--runtime--health_checks--readiness))
 
-<a id="nestedatt--web--health_checks--liveness"></a>
-### Nested Schema for `web.health_checks.liveness`
+<a id="nestedatt--runtime--health_checks--liveness"></a>
+### Nested Schema for `runtime.health_checks.liveness`
 
 Optional:
 
-- `http` (Attributes) HTTP probe on the web port. (see [below for nested schema](#nestedatt--web--health_checks--liveness--http))
-- `tcp` (Attributes) TCP probe on the web port. (see [below for nested schema](#nestedatt--web--health_checks--liveness--tcp))
+- `http` (Attributes) HTTP probe on the app's port. (see [below for nested schema](#nestedatt--runtime--health_checks--liveness--http))
+- `tcp` (Attributes) TCP probe on the app's port. (see [below for nested schema](#nestedatt--runtime--health_checks--liveness--tcp))
 
-<a id="nestedatt--web--health_checks--liveness--http"></a>
-### Nested Schema for `web.health_checks.liveness.http`
+<a id="nestedatt--runtime--health_checks--liveness--http"></a>
+### Nested Schema for `runtime.health_checks.liveness.http`
 
 Required:
 
 - `path` (String) HTTP path beginning with /.
 
 
-<a id="nestedatt--web--health_checks--liveness--tcp"></a>
-### Nested Schema for `web.health_checks.liveness.tcp`
+<a id="nestedatt--runtime--health_checks--liveness--tcp"></a>
+### Nested Schema for `runtime.health_checks.liveness.tcp`
 
 
 
-<a id="nestedatt--web--health_checks--readiness"></a>
-### Nested Schema for `web.health_checks.readiness`
+<a id="nestedatt--runtime--health_checks--readiness"></a>
+### Nested Schema for `runtime.health_checks.readiness`
 
 Optional:
 
-- `http` (Attributes) HTTP probe on the web port. (see [below for nested schema](#nestedatt--web--health_checks--readiness--http))
-- `tcp` (Attributes) TCP probe on the web port. (see [below for nested schema](#nestedatt--web--health_checks--readiness--tcp))
+- `http` (Attributes) HTTP probe on the app's port. (see [below for nested schema](#nestedatt--runtime--health_checks--readiness--http))
+- `tcp` (Attributes) TCP probe on the app's port. (see [below for nested schema](#nestedatt--runtime--health_checks--readiness--tcp))
 
-<a id="nestedatt--web--health_checks--readiness--http"></a>
-### Nested Schema for `web.health_checks.readiness.http`
+<a id="nestedatt--runtime--health_checks--readiness--http"></a>
+### Nested Schema for `runtime.health_checks.readiness.http`
 
 Required:
 
 - `path` (String) HTTP path beginning with /.
 
 
-<a id="nestedatt--web--health_checks--readiness--tcp"></a>
-### Nested Schema for `web.health_checks.readiness.tcp`
+<a id="nestedatt--runtime--health_checks--readiness--tcp"></a>
+### Nested Schema for `runtime.health_checks.readiness.tcp`
 
 
 
 
-<a id="nestedatt--web--resources"></a>
-### Nested Schema for `web.resources`
+<a id="nestedatt--runtime--resources"></a>
+### Nested Schema for `runtime.resources`
 
 Optional:
 
-- `limits` (Attributes) (see [below for nested schema](#nestedatt--web--resources--limits))
-- `requests` (Attributes) (see [below for nested schema](#nestedatt--web--resources--requests))
+- `limits` (Attributes) (see [below for nested schema](#nestedatt--runtime--resources--limits))
+- `requests` (Attributes) (see [below for nested schema](#nestedatt--runtime--resources--requests))
 
-<a id="nestedatt--web--resources--limits"></a>
-### Nested Schema for `web.resources.limits`
+<a id="nestedatt--runtime--resources--limits"></a>
+### Nested Schema for `runtime.resources.limits`
 
 Optional:
 
@@ -328,8 +328,8 @@ Optional:
 - `memory` (String) Memory quantity.
 
 
-<a id="nestedatt--web--resources--requests"></a>
-### Nested Schema for `web.resources.requests`
+<a id="nestedatt--runtime--resources--requests"></a>
+### Nested Schema for `runtime.resources.requests`
 
 Optional:
 

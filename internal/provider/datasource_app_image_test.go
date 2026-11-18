@@ -421,7 +421,7 @@ data "kupe_app_image" "test" { image = %q }
 	wantHint := regexp.MustCompile(`(?s)Apps are not enabled.*To\s+plan\s+or\s+destroy,\s+replace.*data.kupe_app_image.*digest\s+reference\s+from\s+Terraform\s+state`)
 	var resolutions int
 	resource.UnitTest(t, resource.TestCase{ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(), Steps: []resource.TestStep{
-		{Config: withData, Check: resource.TestCheckResourceAttr(appEnvironmentAddr, "web.image", resolved.Reference)},
+		{Config: withData, Check: resource.TestCheckResourceAttr(appEnvironmentAddr, "runtime.image", resolved.Reference)},
 		{Config: withData, PlanOnly: true, PreConfig: func() { mock.setState(func(m *mockKupeAPI) { m.appsDisabled = true }) }, ExpectError: wantHint},
 		{Config: withData, Destroy: true, ExpectError: wantHint},
 		// The literal is the same digest asserted in state above. Removing the
@@ -433,7 +433,7 @@ data "kupe_app_image" "test" { image = %q }
 			mock.mu.Lock()
 			resolutions = len(mock.appImageRequests)
 			mock.mu.Unlock()
-		}, Check: resource.TestCheckResourceAttr(appEnvironmentAddr, "web.image", resolved.Reference)},
+		}, Check: resource.TestCheckResourceAttr(appEnvironmentAddr, "runtime.image", resolved.Reference)},
 		{Config: pinned, Destroy: true},
 	}})
 	mock.mu.Lock()
