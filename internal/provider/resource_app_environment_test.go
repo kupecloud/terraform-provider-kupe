@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"net/http"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -135,27 +136,27 @@ func TestAppEnvironmentConfigurationValidatesCrossFieldLimits(t *testing.T) {
 	r.Schema(ctx, resource.SchemaRequest{}, &sch)
 	base := appTestEnvironmentModel()
 	for _, tc := range []struct {
-		name    string
-		change  func(*client.AppRuntime)
-		invalid bool
+		name   string
+		change func(*client.AppRuntime)
+		at     string // path of the expected error; empty when valid
 	}{
-		{"defaults", func(*client.AppRuntime) {}, false},
+		{"defaults", func(*client.AppRuntime) {}, ""},
 		{"two value sources", func(w *client.AppRuntime) {
 			value := "literal"
 			w.Env = []client.AppEnvVar{{Name: "KEY", Value: &value, ValueFrom: &client.AppValueFrom{SecretKeyRef: client.AppSecretKeyRef{Secret: "absent", Key: "KEY"}}}}
-		}, true},
-		{"long multibyte argument", func(w *client.AppRuntime) { w.Args = []string{strings.Repeat("é", 513)} }, true},
-		{"both probes", func(w *client.AppRuntime) { w.HealthChecks.Readiness.HTTP = &client.AppHTTPProbe{Path: "/"} }, true},
-		{"limit below request", func(w *client.AppRuntime) { w.Resources.Limits.CPU = "100m" }, true},
+		}, "runtime.env[0]"},
+		{"long multibyte argument", func(w *client.AppRuntime) { w.Args = []string{strings.Repeat("é", 513)} }, "runtime.args[0]"},
+		{"both probes", func(w *client.AppRuntime) { w.HealthChecks.Readiness.HTTP = &client.AppHTTPProbe{Path: "/"} }, "runtime.health_checks.readiness"},
+		{"limit below request", func(w *client.AppRuntime) { w.Resources.Limits.CPU = "100m" }, "runtime.resources.limits.cpu"},
 		{"autoscaling pod range", func(w *client.AppRuntime) {
 			w.Autoscaling = &client.AppAutoscaling{MinPods: 2, MaxPods: 6, CPUPercent: 70}
-		}, false},
+		}, ""},
 		{"autoscaling one pod", func(w *client.AppRuntime) {
 			w.Autoscaling = &client.AppAutoscaling{MinPods: 3, MaxPods: 3, CPUPercent: 70}
-		}, false},
+		}, ""},
 		{"autoscaling min above max", func(w *client.AppRuntime) {
 			w.Autoscaling = &client.AppAutoscaling{MinPods: 6, MaxPods: 2, CPUPercent: 70}
-		}, true},
+		}, "runtime.autoscaling.min_pods"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			runtime, _, _, _, diags := appEnvironmentSettings(ctx, &base)
@@ -178,8 +179,20 @@ func TestAppEnvironmentConfigurationValidatesCrossFieldLimits(t *testing.T) {
 			raw := testPlanValue(t, sch, map[string]tftypes.Value{"runtime": runtimeRaw, "secrets": secretsRaw, "domains": domainsRaw})
 			var resp resource.ValidateConfigResponse
 			r.ValidateConfig(ctx, resource.ValidateConfigRequest{Config: tfsdk.Config{Schema: sch.Schema, Raw: raw}}, &resp)
-			if resp.Diagnostics.HasError() != tc.invalid {
-				t.Fatalf("configuration validation: %v", resp.Diagnostics)
+			if tc.at == "" {
+				if resp.Diagnostics.HasError() {
+					t.Fatalf("valid configuration refused: %v", resp.Diagnostics)
+				}
+				return
+			}
+			var paths []string
+			for _, got := range resp.Diagnostics.Errors() {
+				if withPath, ok := got.(diag.DiagnosticWithPath); ok {
+					paths = append(paths, withPath.Path().String())
+				}
+			}
+			if !slices.Contains(paths, tc.at) {
+				t.Fatalf("error paths = %v, want %s: %v", paths, tc.at, resp.Diagnostics)
 			}
 		})
 	}

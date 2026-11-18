@@ -165,3 +165,75 @@ func TestAppEnvironmentReadMapsPublicFlatStatus(t *testing.T) {
 		t.Fatalf("wrong public environment mapping: %+v", env)
 	}
 }
+
+// The bodies below are literal kupe-api JSON (appEnvironmentResponse and
+// appRelease in kupe-api internal/server/swagger_models.go), not this
+// package's structs re-encoded, so they pin the wire keys.
+func TestGetAppEnvironmentDecodesRuntimeKey(t *testing.T) {
+	mock := newMockAPI()
+	defer mock.close()
+	mock.on(http.MethodGet, "/api/v1/tenants/acme/apps/shop/environments/staging", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("ETag", `"env.uid.4"`)
+		_, _ = w.Write([]byte(`{"name":"shop-staging","uid":"env-uid","generation":4,"resourceVersion":"41","createdAt":"2026-11-18T10:00:00Z",
+"app":"shop","environment":"staging","cluster":"europe","deletionProtection":true,"deploymentRevision":2,
+"runtime":{"image":"ghcr.io/kupecloud/hello-kupe@sha256:` + strings.Repeat("a", 64) + `","port":8080,"replicas":1,
+"autoscaling":{"minPods":2,"maxPods":6,"cpuPercent":70},
+"resources":{"requests":{"cpu":"250m","memory":"256Mi"},"limits":{"cpu":"1","memory":"512Mi"}},
+"env":[{"name":"LOG_LEVEL","value":"info"}],"healthChecks":{"readiness":{"http":{"path":"/healthz"}}}},
+"secrets":[],"databases":[],"domains":[],"status":{"phase":"Ready","observedGeneration":4}}`))
+	})
+	env, etag, err := mock.client("acme").GetAppEnvironment(context.Background(), "shop", "staging")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if etag != `"env.uid.4"` {
+		t.Fatalf("etag = %s", etag)
+	}
+	rt := env.Runtime
+	if rt == nil {
+		t.Fatal("runtime did not decode from the response's runtime key")
+	}
+	if rt.Image != "ghcr.io/kupecloud/hello-kupe@sha256:"+strings.Repeat("a", 64) || rt.Port != 8080 || rt.Replicas != 1 {
+		t.Fatalf("runtime = %+v", rt)
+	}
+	if rt.Autoscaling == nil || *rt.Autoscaling != (AppAutoscaling{MinPods: 2, MaxPods: 6, CPUPercent: 70}) {
+		t.Fatalf("autoscaling = %+v", rt.Autoscaling)
+	}
+	if rt.Resources.Limits.Memory != "512Mi" || len(rt.Env) != 1 || rt.Env[0].Name != "LOG_LEVEL" ||
+		rt.HealthChecks.Readiness == nil || rt.HealthChecks.Readiness.HTTP == nil || rt.HealthChecks.Readiness.HTTP.Path != "/healthz" {
+		t.Fatalf("runtime = %+v", rt)
+	}
+}
+
+func TestListAppReleasesDecodesFlatRuntime(t *testing.T) {
+	mock := newMockAPI()
+	defer mock.close()
+	mock.on(http.MethodGet, "/api/v1/tenants/acme/apps/shop/environments/staging/releases", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"items":[{"name":"shop-staging-r3","number":3,"deploymentRevision":2,"trigger":"Deploy",
+"runtime":{"image":"ghcr.io/kupecloud/hello-kupe@sha256:` + strings.Repeat("b", 64) + `","port":8080,"replicas":2,
+"autoscaling":{"minPods":2,"maxPods":6,"cpuPercent":70},
+"resources":{"requests":{"cpu":"250m","memory":"256Mi"},"limits":{"cpu":"1","memory":"512Mi"}},
+"secrets":[{"name":"payments","path":"apps/shop/staging/payments","keys":["API_KEY"]}],
+"databases":[{"name":"main","database":"orders","env":"DATABASE_URL"}]},
+"chart":{"revision":"abc"},"status":{"phase":"Succeeded"}}]}`))
+	})
+	releases, err := mock.client("acme").ListAppReleases(context.Background(), "shop", "staging")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(releases) != 1 {
+		t.Fatalf("releases = %+v", releases)
+	}
+	rt := releases[0].Runtime
+	if rt.Image != "ghcr.io/kupecloud/hello-kupe@sha256:"+strings.Repeat("b", 64) || rt.Port != 8080 || rt.Replicas != 2 {
+		t.Fatalf("flat release runtime did not decode: %+v", rt)
+	}
+	if rt.Autoscaling == nil || rt.Autoscaling.MaxPods != 6 || rt.Resources.Requests.CPU != "250m" {
+		t.Fatalf("release runtime = %+v", rt)
+	}
+	if len(rt.Secrets) != 1 || rt.Secrets[0].Path != "apps/shop/staging/payments" || len(rt.Databases) != 1 || rt.Databases[0].Env != "DATABASE_URL" {
+		t.Fatalf("release secrets/databases = %+v / %+v", rt.Secrets, rt.Databases)
+	}
+}
