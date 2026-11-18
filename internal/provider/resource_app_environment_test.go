@@ -741,17 +741,18 @@ func testTerraformJSON(t *testing.T, value tftypes.Value) []byte {
 // entry, the cluster and the other Vault entries.
 func TestAppEnvironmentDeleteDiagnosticsNameVaultEntry(t *testing.T) {
 	m := &AppEnvironmentResourceModel{App: types.StringValue("shop"), Name: types.StringValue("production")}
-	want := "Its own Vault entry `apps/shop/production`, where secrets added in the console are stored, is permanently deleted unless another secret still uses it. The cluster and other Vault entries are kept."
+	entry := "Its own Vault entry `apps/shop/production`, where secrets added in the console are stored, "
+	rule := " permanently deleted unless a secret or another environment outside this one still uses it. The cluster and other Vault entries are kept."
 	refusal := fmt.Errorf("delete app environment: %w",
 		&client.APIError{StatusCode: http.StatusConflict, Code: client.CodeDeletionProtected, Message: "deletion protection is on"})
 	summary, detail, ok := appEnvironmentKind.deleteRefused(m, refusal)
 	if !ok || summary != "app environment has deletion protection enabled" {
 		t.Fatalf("deleteRefused() = %q, %v", summary, ok)
 	}
-	if !strings.HasSuffix(detail, "Destroying an environment deletes its namespace and everything in it. "+want) {
+	if !strings.HasSuffix(detail, "Destroying an environment deletes its namespace and everything in it. "+entry+"is"+rule) {
 		t.Errorf("refusal detail = %q", detail)
 	}
-	if got := appEnvironmentKind.stillDeleting(m); !strings.HasSuffix(got, "Its name stays reserved until cleanup finishes. "+want) {
+	if got := appEnvironmentKind.stillDeleting(m); !strings.HasSuffix(got, "Its name stays reserved until cleanup finishes. "+entry+"will be"+rule) {
 		t.Errorf("stillDeleting = %q", got)
 	}
 }
