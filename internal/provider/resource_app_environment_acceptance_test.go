@@ -32,7 +32,7 @@ resource "kupe_app_environment" "test" {
   name = "production"
   cluster = "europe"
   deletion_protection = false
-  web = {
+  runtime = {
     image = "ghcr.io/kupecloud/hello-kupe@sha256:%s"
     port = 8080
   }
@@ -254,12 +254,12 @@ func TestAccAppEnvironmentReferencedSecretEditMakesRelease(t *testing.T) {
 }
 
 func TestMockReleaseSecretsOnlyCountsReferencedSecrets(t *testing.T) {
-	web := &client.AppWeb{Env: []client.AppEnvVar{{Name: "A", ValueFrom: &client.AppValueFrom{SecretKeyRef: client.AppSecretKeyRef{Secret: "used", Key: "k"}}}}}
-	got := mockReleaseSecrets(web, []client.AppSecret{{Name: "used", Path: "apps/u"}, {Name: "unused", Path: "apps/x"}})
+	runtime := &client.AppRuntime{Env: []client.AppEnvVar{{Name: "A", ValueFrom: &client.AppValueFrom{SecretKeyRef: client.AppSecretKeyRef{Secret: "used", Key: "k"}}}}}
+	got := mockReleaseSecrets(runtime, []client.AppSecret{{Name: "used", Path: "apps/u"}, {Name: "unused", Path: "apps/x"}})
 	if len(got) != 1 || got[0].Name != "used" {
 		t.Fatalf("release secrets = %+v, want only the referenced one", got)
 	}
-	two := &client.AppWeb{Env: []client.AppEnvVar{
+	two := &client.AppRuntime{Env: []client.AppEnvVar{
 		{Name: "A", ValueFrom: &client.AppValueFrom{SecretKeyRef: client.AppSecretKeyRef{Secret: "a", Key: "k"}}},
 		{Name: "B", ValueFrom: &client.AppValueFrom{SecretKeyRef: client.AppSecretKeyRef{Secret: "b", Key: "k"}}},
 	}}
@@ -269,7 +269,7 @@ func TestMockReleaseSecretsOnlyCountsReferencedSecrets(t *testing.T) {
 		t.Fatal("a pure reorder of referenced secrets changed the release secrets")
 	}
 	if got := mockReleaseSecrets(nil, []client.AppSecret{{Name: "used"}}); len(got) != 0 {
-		t.Fatalf("nil web produced %+v", got)
+		t.Fatalf("nil runtime produced %+v", got)
 	}
 }
 
@@ -287,17 +287,17 @@ func TestAccAppEnvironmentConservativeAmbiguityDoesNotResubmit(t *testing.T) {
 					mock.mu.Lock()
 					mock.appEnvironmentAfterWrite = []func(*client.AppEnvironment, *[]client.AppRelease){func(env *client.AppEnvironment, history *[]client.AppRelease) { // Complete a real B -> C -> B sequence before the first
 						// provider observation; generation/revision/runtime alone cannot identify B.
-						acceptedImage := env.Web.Image
+						acceptedImage := env.Runtime.Image
 						if foreignConfig {
 							env.Generation++
-							env.Web.Image = "ghcr.io/kupecloud/hello-kupe@sha256:" + strings.Repeat("c", 64)
+							env.Runtime.Image = "ghcr.io/kupecloud/hello-kupe@sha256:" + strings.Repeat("c", 64)
 							mock.appMockRelease("shop/production", env)
 						} else {
 							env.Generation++
-							env.Web.Image = "ghcr.io/kupecloud/hello-kupe@sha256:" + strings.Repeat("c", 64)
+							env.Runtime.Image = "ghcr.io/kupecloud/hello-kupe@sha256:" + strings.Repeat("c", 64)
 							mock.appMockRelease("shop/production", env)
 							env.Generation++
-							env.Web.Image = acceptedImage
+							env.Runtime.Image = acceptedImage
 							mock.appMockRelease("shop/production", env)
 						}
 						env.Status.ObservedGeneration = env.Generation
@@ -389,7 +389,7 @@ resource "kupe_app_environment" "parallel" {
  name = each.key
  cluster = "europe"
  deletion_protection = false
- web = {
+ runtime = {
    image = "ghcr.io/kupecloud/hello-kupe@sha256:%s"
    port = 8080
  }
@@ -581,20 +581,20 @@ func (check appImageOnlyPlan) CheckPlan(_ context.Context, req plancheck.CheckPl
 			resp.Error = fmt.Errorf("environment settings missing from plan")
 			return
 		}
-		beforeWeb, beforeOK := before["web"].(map[string]any)
-		afterWeb, afterOK := after["web"].(map[string]any)
-		if !beforeOK || !afterOK || beforeWeb["image"] != check.before || afterWeb["image"] != check.after {
+		beforeRuntime, beforeOK := before["runtime"].(map[string]any)
+		afterRuntime, afterOK := after["runtime"].(map[string]any)
+		if !beforeOK || !afterOK || beforeRuntime["image"] != check.before || afterRuntime["image"] != check.after {
 			resp.Error = fmt.Errorf("plan did not contain the resolved image transition")
 			return
 		}
-		for key, value := range beforeWeb {
-			if key != "image" && !reflect.DeepEqual(value, afterWeb[key]) {
-				resp.Error = fmt.Errorf("tag movement changed web.%s", key)
+		for key, value := range beforeRuntime {
+			if key != "image" && !reflect.DeepEqual(value, afterRuntime[key]) {
+				resp.Error = fmt.Errorf("tag movement changed runtime.%s", key)
 				return
 			}
 		}
-		if len(beforeWeb) != len(afterWeb) {
-			resp.Error = fmt.Errorf("tag movement changed the web settings shape")
+		if len(beforeRuntime) != len(afterRuntime) {
+			resp.Error = fmt.Errorf("tag movement changed the runtime settings shape")
 			return
 		}
 		for _, key := range []string{"app", "name", "cluster", "deletion_protection", "deployment_revision", "secrets", "domains", "timeouts"} {
@@ -616,9 +616,9 @@ func TestAccAppEnvironmentImageTagMovesOnceAndUnchangedApplyOnlyReads(t *testing
 	first, next := mockAppImageResolution("a"), mockAppImageResolution("b")
 	mock.appImages[mockAppImageTag] = first
 	config := testAccAppEnvironmentConfig(mock.url(), "a", "")
-	config = strings.Replace(config, fmt.Sprintf("image = %q", first.Reference), "image = data.kupe_app_image.web.reference", 1)
+	config = strings.Replace(config, fmt.Sprintf("image = %q", first.Reference), "image = data.kupe_app_image.app.reference", 1)
 	config += fmt.Sprintf(`
-data "kupe_app_image" "web" { image = %q }
+data "kupe_app_image" "app" { image = %q }
 `, mockAppImageTag)
 	var writesBefore, resolutionsBefore int
 	writeCount := func() int {
@@ -653,21 +653,21 @@ data "kupe_app_image" "web" { image = %q }
 			if request.method != "PATCH" {
 				continue
 			}
-			web, ok := request.body["web"].(map[string]any)
-			if !ok || web["image"] != next.Reference {
+			runtime, ok := request.body["runtime"].(map[string]any)
+			if !ok || runtime["image"] != next.Reference {
 				return fmt.Errorf("tag movement PATCH did not deploy the newly resolved digest")
 			}
 		}
 		return nil
 	}
 	acc.UnitTest(t, acc.TestCase{ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(), Steps: []acc.TestStep{
-		{Config: config, Check: acc.TestCheckResourceAttr(appEnvironmentAddr, "web.image", first.Reference)},
+		{Config: config, Check: acc.TestCheckResourceAttr(appEnvironmentAddr, "runtime.image", first.Reference)},
 		{Config: config, PreConfig: func() { mock.setState(func(m *mockKupeAPI) { m.appImages[mockAppImageTag] = next }) },
 			ConfigPlanChecks: acc.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
 				plancheck.ExpectResourceAction(appEnvironmentAddr, plancheck.ResourceActionUpdate),
 				appImageOnlyPlan{before: first.Reference, after: next.Reference},
 			}},
-			Check: acc.ComposeTestCheckFunc(acc.TestCheckResourceAttr(appEnvironmentAddr, "web.image", next.Reference), assertSingleImagePatch)},
+			Check: acc.ComposeTestCheckFunc(acc.TestCheckResourceAttr(appEnvironmentAddr, "runtime.image", next.Reference), assertSingleImagePatch)},
 		{Config: config, PreConfig: func() {
 			writesBefore = writeCount()
 			mock.mu.Lock()
@@ -829,9 +829,9 @@ func TestAccAppEnvironmentAutoscalingLifecycle(t *testing.T) {
 	defer mock.close()
 	// A short timeout makes a release the provider fails to match fail the
 	// step instead of waiting out the default.
-	withWeb := func(web string) string {
+	withRuntime := func(runtime string) string {
 		base := testAccAppEnvironmentConfig(mock.url(), "a", "timeouts = { create = \"5s\", update = \"5s\" }")
-		return strings.Replace(base, "port = 8080", "port = 8080\n    "+web, 1)
+		return strings.Replace(base, "port = 8080", "port = 8080\n    "+runtime, 1)
 	}
 	releases := func() int {
 		mock.mu.Lock()
@@ -846,16 +846,16 @@ func TestAccAppEnvironmentAutoscalingLifecycle(t *testing.T) {
 			return nil
 		}
 	}
-	created := withWeb("autoscaling = { min_pods = 2, max_pods = 6 }")
-	wider := withWeb("autoscaling = { min_pods = 2, max_pods = 8 }")
-	replicasOnly := withWeb("replicas = 3\n    autoscaling = { min_pods = 2, max_pods = 8 }")
-	removed := withWeb("replicas = 3")
+	created := withRuntime("autoscaling = { min_pods = 2, max_pods = 6 }")
+	wider := withRuntime("autoscaling = { min_pods = 2, max_pods = 8 }")
+	replicasOnly := withRuntime("replicas = 3\n    autoscaling = { min_pods = 2, max_pods = 8 }")
+	removed := withRuntime("replicas = 3")
 	acc.UnitTest(t, acc.TestCase{ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(), Steps: []acc.TestStep{
 		{Config: created, Check: acc.ComposeTestCheckFunc(
-			acc.TestCheckResourceAttr(appEnvironmentAddr, "web.autoscaling.min_pods", "2"),
-			acc.TestCheckResourceAttr(appEnvironmentAddr, "web.autoscaling.max_pods", "6"),
-			acc.TestCheckResourceAttr(appEnvironmentAddr, "web.autoscaling.cpu_percent", "70"),
-			acc.TestCheckResourceAttr(appEnvironmentAddr, "web.replicas", "1"),
+			acc.TestCheckResourceAttr(appEnvironmentAddr, "runtime.autoscaling.min_pods", "2"),
+			acc.TestCheckResourceAttr(appEnvironmentAddr, "runtime.autoscaling.max_pods", "6"),
+			acc.TestCheckResourceAttr(appEnvironmentAddr, "runtime.autoscaling.cpu_percent", "70"),
+			acc.TestCheckResourceAttr(appEnvironmentAddr, "runtime.replicas", "1"),
 			acc.TestCheckResourceAttr(appEnvironmentAddr, "phase", "Running"),
 			expectReleases(1),
 		)},
@@ -865,7 +865,7 @@ func TestAccAppEnvironmentAutoscalingLifecycle(t *testing.T) {
 			plancheck.ExpectResourceAction(appEnvironmentAddr, plancheck.ResourceActionUpdate),
 			plancheck.ExpectUnknownValue(appEnvironmentAddr, tfjsonpath.New("requested_release")),
 		}}, Check: acc.ComposeTestCheckFunc(
-			acc.TestCheckResourceAttr(appEnvironmentAddr, "web.autoscaling.max_pods", "8"),
+			acc.TestCheckResourceAttr(appEnvironmentAddr, "runtime.autoscaling.max_pods", "8"),
 			acc.TestCheckResourceAttr(appEnvironmentAddr, "requested_release", "shop-production-2"),
 			expectReleases(2),
 		)},
@@ -874,10 +874,10 @@ func TestAccAppEnvironmentAutoscalingLifecycle(t *testing.T) {
 		{Config: replicasOnly, ConfigPlanChecks: acc.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
 			plancheck.ExpectResourceAction(appEnvironmentAddr, plancheck.ResourceActionUpdate),
 			plancheck.ExpectKnownValue(appEnvironmentAddr, tfjsonpath.New("requested_release"), knownvalue.StringExact("shop-production-2")),
-		}}, Check: acc.ComposeTestCheckFunc(acc.TestCheckResourceAttr(appEnvironmentAddr, "web.replicas", "3"), expectReleases(2))},
+		}}, Check: acc.ComposeTestCheckFunc(acc.TestCheckResourceAttr(appEnvironmentAddr, "runtime.replicas", "3"), expectReleases(2))},
 		{Config: removed, ConfigPlanChecks: acc.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
 			plancheck.ExpectUnknownValue(appEnvironmentAddr, tfjsonpath.New("requested_release")),
-		}}, Check: acc.ComposeTestCheckFunc(acc.TestCheckNoResourceAttr(appEnvironmentAddr, "web.autoscaling"), expectReleases(3))},
+		}}, Check: acc.ComposeTestCheckFunc(acc.TestCheckNoResourceAttr(appEnvironmentAddr, "runtime.autoscaling"), expectReleases(3))},
 		{Config: removed, PlanOnly: true},
 	}})
 	posts := appEnvironmentRequestBodies(mock, http.MethodPost)
@@ -885,19 +885,19 @@ func TestAccAppEnvironmentAutoscalingLifecycle(t *testing.T) {
 		t.Fatalf("create requests = %d, want 1", len(posts))
 	}
 	want := map[string]any{"minPods": float64(2), "maxPods": float64(6), "cpuPercent": float64(70)}
-	if got := posts[0]["web"].(map[string]any)["autoscaling"]; !reflect.DeepEqual(got, want) {
-		t.Fatalf("create sent web.autoscaling %#v, want %#v", got, want)
+	if got := posts[0]["runtime"].(map[string]any)["autoscaling"]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("create sent runtime.autoscaling %#v, want %#v", got, want)
 	}
 	patches := appEnvironmentRequestBodies(mock, http.MethodPatch)
 	if len(patches) != 3 {
 		t.Fatalf("PATCH requests = %d, want max_pods, replicas and the removal", len(patches))
 	}
-	if got := patches[0]["web"].(map[string]any)["autoscaling"].(map[string]any)["maxPods"]; got != float64(8) {
+	if got := patches[0]["runtime"].(map[string]any)["autoscaling"].(map[string]any)["maxPods"]; got != float64(8) {
 		t.Fatalf("max_pods change sent maxPods %v", got)
 	}
-	last := patches[2]["web"].(map[string]any)
+	last := patches[2]["runtime"].(map[string]any)
 	if got, ok := last["autoscaling"]; !ok || got != nil {
-		t.Fatalf(`removing the block sent web %#v, want "autoscaling":null`, last)
+		t.Fatalf(`removing the block sent runtime %#v, want "autoscaling":null`, last)
 	}
 }
 
@@ -923,11 +923,11 @@ func TestAccAppEnvironmentAPIWithoutAutoscalingPlansNoChange(t *testing.T) {
 	defer mock.close()
 	config := testAccAppEnvironmentConfig(mock.url(), "a", "")
 	acc.UnitTest(t, acc.TestCase{ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(), Steps: []acc.TestStep{
-		{Config: config, Check: acc.TestCheckNoResourceAttr(appEnvironmentAddr, "web.autoscaling")},
+		{Config: config, Check: acc.TestCheckNoResourceAttr(appEnvironmentAddr, "runtime.autoscaling")},
 		{Config: config, PlanOnly: true},
 	}})
-	body := appEnvironmentRequestBodies(mock, http.MethodPost)[0]["web"].(map[string]any)
+	body := appEnvironmentRequestBodies(mock, http.MethodPost)[0]["runtime"].(map[string]any)
 	if got, ok := body["autoscaling"]; !ok || got != nil {
-		t.Fatalf(`create without autoscaling sent web %#v, want "autoscaling":null`, body)
+		t.Fatalf(`create without autoscaling sent runtime %#v, want "autoscaling":null`, body)
 	}
 }

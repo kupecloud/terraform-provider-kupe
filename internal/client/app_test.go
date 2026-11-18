@@ -37,10 +37,10 @@ func TestAppEnvironmentPatchSendsCompleteListsAndProbeRemoval(t *testing.T) {
 	path := "/api/v1/tenants/acme/apps/shop/environments/staging"
 	mock.onJSON(http.MethodPatch, path, http.StatusOK, map[string]any{"app": "shop", "environment": "staging"})
 	emptySecrets, emptyDomains := []AppSecret{}, []string{}
-	web := &AppWeb{Image: "registry.example/shop@sha256:" + strings.Repeat("a", 64), Port: 8080, Replicas: 1,
+	runtime := &AppRuntime{Image: "registry.example/shop@sha256:" + strings.Repeat("a", 64), Port: 8080, Replicas: 1,
 		Command: []string{}, Args: []string{}, Env: []AppEnvVar{},
 		HealthChecks: AppHealthChecks{Readiness: &AppProbe{HTTP: &AppHTTPProbe{Path: "/ready"}}}}
-	_, _, err := mock.client("acme").PatchAppEnvironment(context.Background(), "shop", "staging", `"env.uid.23"`, PatchAppEnvironmentRequest{Web: web, Secrets: &emptySecrets, Domains: &emptyDomains})
+	_, _, err := mock.client("acme").PatchAppEnvironment(context.Background(), "shop", "staging", `"env.uid.23"`, PatchAppEnvironmentRequest{Runtime: runtime, Secrets: &emptySecrets, Domains: &emptyDomains})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,11 +57,11 @@ func TestAppEnvironmentPatchSendsCompleteListsAndProbeRemoval(t *testing.T) {
 	if _, present := body["deploymentRevision"]; present {
 		t.Fatal("retry revision reached PATCH")
 	}
-	actualWeb := body["web"].(map[string]any)
-	if values, ok := actualWeb["env"].([]any); !ok || len(values) != 0 {
+	actualRuntime := body["runtime"].(map[string]any)
+	if values, ok := actualRuntime["env"].([]any); !ok || len(values) != 0 {
 		t.Fatalf("env was omitted or null: %s", req.Body)
 	}
-	checks := actualWeb["healthChecks"].(map[string]any)
+	checks := actualRuntime["healthChecks"].(map[string]any)
 	readiness := checks["readiness"].(map[string]any)
 	if tcp, present := readiness["tcp"]; !present || tcp != nil {
 		t.Fatalf("switching to HTTP must explicitly remove TCP: %s", req.Body)

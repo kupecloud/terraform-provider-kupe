@@ -1,4 +1,4 @@
-data "kupe_app_image" "web" {
+data "kupe_app_image" "app" {
   image = "ghcr.io/kupecloud/hello-kupe:1.5.1"
 }
 
@@ -11,8 +11,8 @@ resource "kupe_app_environment" "this" {
   name    = "production"
   cluster = "europe"
 
-  web = {
-    image = data.kupe_app_image.web.reference
+  runtime = {
+    image = data.kupe_app_image.app.reference
     port  = 8080
     env = [{ name = "LOG_LEVEL", value = "info" }]
     health_checks = { readiness = { http = { path = "/healthz" } } }
@@ -23,7 +23,7 @@ resource "kupe_app_environment" "this" {
   }
 
   # Write values at this path in the console Vault page before referencing
-  # them in web.env. Do not target this environment's namespace separately.
+  # them in runtime.env. Do not target this environment's namespace separately.
   # secrets = [{ name = "payments", path = "apps/shop/production/payments" }]
 
   # Increase by one to retry an unchanged deployment.

@@ -41,7 +41,7 @@ type AppEnvironmentResourceModel struct {
 	Cluster               types.String   `tfsdk:"cluster"`
 	DeletionProtection    types.Bool     `tfsdk:"deletion_protection"`
 	DeploymentRevision    types.Int64    `tfsdk:"deployment_revision"`
-	Web                   types.Object   `tfsdk:"web"`
+	Runtime               types.Object   `tfsdk:"runtime"`
 	Secrets               types.List     `tfsdk:"secrets"`
 	Databases             types.List     `tfsdk:"databases"`
 	DatabaseStatus        types.List     `tfsdk:"database_status"`
@@ -71,7 +71,7 @@ var appHTTPTypes = map[string]attr.Type{"path": types.StringType}
 var appProbeTypes = map[string]attr.Type{"tcp": types.ObjectType{AttrTypes: map[string]attr.Type{}}, "http": types.ObjectType{AttrTypes: appHTTPTypes}}
 var appHealthTypes = map[string]attr.Type{"readiness": types.ObjectType{AttrTypes: appProbeTypes}, "liveness": types.ObjectType{AttrTypes: appProbeTypes}}
 var appAutoscalingTypes = map[string]attr.Type{"min_pods": types.Int64Type, "max_pods": types.Int64Type, "cpu_percent": types.Int64Type}
-var appWebTypes = map[string]attr.Type{
+var appRuntimeTypes = map[string]attr.Type{
 	"image": types.StringType, "port": types.Int64Type, "replicas": types.Int64Type,
 	"resources": types.ObjectType{AttrTypes: appResourcesTypes},
 	"command":   types.ListType{ElemType: types.StringType}, "args": types.ListType{ElemType: types.StringType},
@@ -103,8 +103,8 @@ func (r *AppEnvironmentResource) Schema(ctx context.Context, _ resource.SchemaRe
 		"cluster":             schema.StringAttribute{Required: true, Description: "Cluster that runs the environment. Changing it replaces the environment.", Validators: clusterRefValidators(), PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()}},
 		"deletion_protection": schema.BoolAttribute{Optional: true, Computed: true, Default: booldefault.StaticBool(true), Description: "Set to false and apply before destroying the environment."},
 		"deployment_revision": schema.Int64Attribute{Optional: true, Computed: true, Description: "Increase by one to retry the current deployment. An unchanged apply never retries.", Validators: []validator.Int64{int64validator.Between(1, 2147483647)}, PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()}},
-		"web":                 appWebAttribute(),
-		"secrets": schema.ListNestedAttribute{Optional: true, Computed: true, Default: listdefault.StaticValue(types.ListValueMust(types.ObjectType{AttrTypes: appSecretTypes}, []attr.Value{})), Description: "Vault paths referenced by the web workload. Write their values in the console Vault page.", Validators: []validator.List{listvalidator.SizeAtMost(20)}, NestedObject: schema.NestedAttributeObject{Attributes: map[string]schema.Attribute{
+		"runtime":             appRuntimeAttribute(),
+		"secrets": schema.ListNestedAttribute{Optional: true, Computed: true, Default: listdefault.StaticValue(types.ListValueMust(types.ObjectType{AttrTypes: appSecretTypes}, []attr.Value{})), Description: "Vault paths referenced by the app. Write their values in the console Vault page.", Validators: []validator.List{listvalidator.SizeAtMost(20)}, NestedObject: schema.NestedAttributeObject{Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{Required: true, Validators: []validator.String{stringvalidator.LengthAtMost(63), stringvalidator.RegexMatches(namespacePattern, "must be an RFC 1123 label")}, Description: "Name used by secret_key_ref."},
 			"path": schema.StringAttribute{Required: true, Description: "Tenant Vault path.", Validators: []validator.String{stringvalidator.LengthBetween(1, 512)}},
 		}}},
@@ -134,7 +134,7 @@ func (r *AppEnvironmentResource) Schema(ctx context.Context, _ resource.SchemaRe
 // connections. A list, like secrets, keeps element paths stable in
 // diagnostics; the API keys entries by name so order does not matter to it.
 func appDatabasesAttribute() schema.ListNestedAttribute {
-	return schema.ListNestedAttribute{Optional: true, Computed: true, Default: listdefault.StaticValue(types.ListValueMust(types.ObjectType{AttrTypes: appDatabaseTypes}, []attr.Value{})), Description: "Databases the web workload connects to, at most 5. Each connection puts the database's URL in an environment variable. Removing a connection keeps the database and its backups.", Validators: []validator.List{listvalidator.SizeAtMost(5)}, NestedObject: schema.NestedAttributeObject{Attributes: map[string]schema.Attribute{
+	return schema.ListNestedAttribute{Optional: true, Computed: true, Default: listdefault.StaticValue(types.ListValueMust(types.ObjectType{AttrTypes: appDatabaseTypes}, []attr.Value{})), Description: "Databases the app connects to, at most 5. Each connection puts the database's URL in an environment variable. Removing a connection keeps the database and its backups.", Validators: []validator.List{listvalidator.SizeAtMost(5)}, NestedObject: schema.NestedAttributeObject{Attributes: map[string]schema.Attribute{
 		"name":             schema.StringAttribute{Required: true, Validators: []validator.String{stringvalidator.LengthAtMost(55), stringvalidator.RegexMatches(namespacePattern, "must be an RFC 1123 label")}, Description: "Connection name: an RFC 1123 label of at most 55 characters."},
 		"database":         schema.StringAttribute{Required: true, Validators: databaseRefValidators(), Description: "Name of the database to connect, such as `kupe_database.orders.name`. It cannot change after the connection is created."},
 		"logical_database": schema.StringAttribute{Optional: true, Validators: logicalNameValidators(53), Description: "Entry in the database's `postgres.databases` to connect to. Without it, the connection uses the first entry. It cannot change after the connection is created."},
@@ -142,7 +142,7 @@ func appDatabasesAttribute() schema.ListNestedAttribute {
 	}}}
 }
 
-func appWebAttribute() schema.SingleNestedAttribute {
+func appRuntimeAttribute() schema.SingleNestedAttribute {
 	stringsList := func(description string) schema.ListAttribute {
 		return schema.ListAttribute{Optional: true, Computed: true, ElementType: types.StringType, Description: description, Default: listdefault.StaticValue(types.ListValueMust(types.StringType, []attr.Value{})), Validators: []validator.List{listvalidator.SizeAtMost(32)}}
 	}
@@ -182,8 +182,8 @@ func appWebAttribute() schema.SingleNestedAttribute {
 
 func appProbeAttribute(readiness bool) schema.SingleNestedAttribute {
 	attribute := schema.SingleNestedAttribute{Optional: true, Description: "Choose exactly one of tcp or http.", Attributes: map[string]schema.Attribute{
-		"tcp":  schema.SingleNestedAttribute{Optional: true, Description: "TCP probe on the web port.", Attributes: map[string]schema.Attribute{}},
-		"http": schema.SingleNestedAttribute{Optional: true, Description: "HTTP probe on the web port.", Attributes: map[string]schema.Attribute{"path": schema.StringAttribute{Required: true, Description: "HTTP path beginning with /."}}},
+		"tcp":  schema.SingleNestedAttribute{Optional: true, Description: "TCP probe on the app's port.", Attributes: map[string]schema.Attribute{}},
+		"http": schema.SingleNestedAttribute{Optional: true, Description: "HTTP probe on the app's port.", Attributes: map[string]schema.Attribute{"path": schema.StringAttribute{Required: true, Description: "HTTP path beginning with /."}}},
 	}}
 	if readiness {
 		attribute.Computed = true

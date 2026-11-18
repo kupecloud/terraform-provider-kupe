@@ -39,7 +39,7 @@ func (d *AppImageDataSource) Metadata(_ context.Context, req datasource.Metadata
 func (d *AppImageDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Resolves an image tag or digest to an immutable sha256 reference through the Kupe API. " +
-			"Use `reference` as `kupe_app_environment.web.image`. Every read resolves the image again, so a " +
+			"Use `reference` as `kupe_app_environment.runtime.image`. Every read resolves the image again, so a " +
 			"moving tag can change the next plan and deploy on apply. The provider sends no registry credentials.",
 		Attributes: map[string]schema.Attribute{
 			"image": schema.StringAttribute{

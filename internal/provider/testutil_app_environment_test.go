@@ -76,7 +76,7 @@ func (m *mockKupeAPI) serveAppEnvironment(w http.ResponseWriter, r *http.Request
 			mockError(w, http.StatusConflict, "", "environment already exists")
 			return
 		}
-		env := &client.AppEnvironment{App: app, Environment: request.Environment, Cluster: request.Cluster, UID: "env-" + m.nextRV(), Name: app + "-" + request.Environment, Generation: 1, DeploymentRevision: 1, Web: request.Web, Secrets: request.Secrets, Databases: mockDefaultAppDatabases(request.Databases), Domains: request.Domains, DeletionProtection: request.DeletionProtection == nil || *request.DeletionProtection, Status: &client.AppEnvironmentStatus{Phase: "Provisioning", Namespace: "app-" + app + "-" + request.Environment, Address: "https://" + app + "-" + request.Environment + ".example.com"}}
+		env := &client.AppEnvironment{App: app, Environment: request.Environment, Cluster: request.Cluster, UID: "env-" + m.nextRV(), Name: app + "-" + request.Environment, Generation: 1, DeploymentRevision: 1, Runtime: request.Runtime, Secrets: request.Secrets, Databases: mockDefaultAppDatabases(request.Databases), Domains: request.Domains, DeletionProtection: request.DeletionProtection == nil || *request.DeletionProtection, Status: &client.AppEnvironmentStatus{Phase: "Provisioning", Namespace: "app-" + app + "-" + request.Environment, Address: "https://" + app + "-" + request.Environment + ".example.com"}}
 		m.appEnvironments[key] = env
 		m.appMockRelease(key, env)
 		m.appEnvironmentOnGet = m.appEnvironmentAfterWrite
@@ -155,7 +155,7 @@ func (m *mockKupeAPI) serveAppEnvironment(w http.ResponseWriter, r *http.Request
 			mockError(w, http.StatusBadRequest, "", "deploymentRevision cannot be patched")
 			return
 		}
-		priorWeb, priorSecrets, priorDatabases := env.Web, mockReleaseSecrets(env.Web, env.Secrets), env.Databases
+		priorRuntime, priorSecrets, priorDatabases := env.Runtime, mockReleaseSecrets(env.Runtime, env.Secrets), env.Databases
 		data, err := json.Marshal(body)
 		if err != nil {
 			panic(err)
@@ -164,8 +164,8 @@ func (m *mockKupeAPI) serveAppEnvironment(w http.ResponseWriter, r *http.Request
 		if err := json.Unmarshal(data, &patch); err != nil {
 			panic(err)
 		}
-		if patch.Web != nil {
-			env.Web = patch.Web
+		if patch.Runtime != nil {
+			env.Runtime = patch.Runtime
 		}
 		if patch.Secrets != nil {
 			env.Secrets = *patch.Secrets
@@ -180,7 +180,7 @@ func (m *mockKupeAPI) serveAppEnvironment(w http.ResponseWriter, r *http.Request
 			env.DeletionProtection = *patch.DeletionProtection
 		}
 		env.Generation++
-		if !reflect.DeepEqual(mockReleaseWeb(priorWeb), mockReleaseWeb(env.Web)) || !reflect.DeepEqual(priorSecrets, mockReleaseSecrets(env.Web, env.Secrets)) || !reflect.DeepEqual(priorDatabases, env.Databases) {
+		if !reflect.DeepEqual(mockReleaseRuntime(priorRuntime), mockReleaseRuntime(env.Runtime)) || !reflect.DeepEqual(priorSecrets, mockReleaseSecrets(env.Runtime, env.Secrets)) || !reflect.DeepEqual(priorDatabases, env.Databases) {
 			m.appMockRelease(key, env)
 		} else {
 			env.Status.ObservedGeneration = env.Generation
@@ -222,9 +222,9 @@ func (m *mockKupeAPI) appMockRelease(key string, env *client.AppEnvironment) {
 	if phase == "" {
 		phase = "Succeeded"
 	}
-	web := mockReleaseWeb(env.Web)
-	release := client.AppRelease{Name: name, Number: number, DeploymentRevision: env.DeploymentRevision, Trigger: "Deploy", Runtime: client.AppReleaseRuntime{AppWeb: web, Secrets: []client.AppReleaseSecret{}}, Status: client.AppReleaseStatus{Phase: phase, Reason: "TestOutcome"}}
-	release.Runtime.Secrets = mockReleaseSecrets(env.Web, env.Secrets)
+	runtime := mockReleaseRuntime(env.Runtime)
+	release := client.AppRelease{Name: name, Number: number, DeploymentRevision: env.DeploymentRevision, Trigger: "Deploy", Runtime: client.AppReleaseRuntime{AppRuntime: runtime, Secrets: []client.AppReleaseSecret{}}, Status: client.AppReleaseStatus{Phase: phase, Reason: "TestOutcome"}}
+	release.Runtime.Secrets = mockReleaseSecrets(env.Runtime, env.Secrets)
 	// The runtime is a map keyed by name, so it is not in configured order.
 	release.Runtime.Databases = append([]client.AppDatabase{}, env.Databases...)
 	sort.Slice(release.Runtime.Databases, func(i, j int) bool { return release.Runtime.Databases[i].Name > release.Runtime.Databases[j].Name })
@@ -259,37 +259,37 @@ func (m *mockKupeAPI) appMockRelease(key string, env *client.AppEnvironment) {
 	m.appReleases[key] = append([]client.AppRelease{release}, m.appReleases[key]...)
 }
 
-// mockReleaseWeb is a deep copy of web as the operator records it in a
+// mockReleaseRuntime is a deep copy of runtime as the operator records it in a
 // release: under autoscaling, replicas is minPods and a missing cpuPercent is
 // the default.
-func mockReleaseWeb(source *client.AppWeb) client.AppWeb {
+func mockReleaseRuntime(source *client.AppRuntime) client.AppRuntime {
 	data, err := json.Marshal(source)
 	if err != nil {
 		panic(err)
 	}
-	var web client.AppWeb
-	if err := json.Unmarshal(data, &web); err != nil {
+	var runtime client.AppRuntime
+	if err := json.Unmarshal(data, &runtime); err != nil {
 		panic(err)
 	}
-	if web.Autoscaling != nil {
-		if web.Autoscaling.CPUPercent == 0 {
-			web.Autoscaling.CPUPercent = appDefaultCPUPercent
+	if runtime.Autoscaling != nil {
+		if runtime.Autoscaling.CPUPercent == 0 {
+			runtime.Autoscaling.CPUPercent = appDefaultCPUPercent
 		}
-		web.Replicas = web.Autoscaling.MinPods
+		runtime.Replicas = runtime.Autoscaling.MinPods
 	}
-	return web
+	return runtime
 }
 
-// mockReleaseSecrets returns the secrets a release records: only those the
-// web env references. A change to any other secret does not make a release.
-func mockReleaseSecrets(web *client.AppWeb, secrets []client.AppSecret) []client.AppReleaseSecret {
+// mockReleaseSecrets returns the secrets a release records: only those
+// runtime.env references. A change to any other secret does not make a release.
+func mockReleaseSecrets(runtime *client.AppRuntime, secrets []client.AppSecret) []client.AppReleaseSecret {
 	out := []client.AppReleaseSecret{}
-	if web == nil {
+	if runtime == nil {
 		return out
 	}
 	for _, secret := range secrets {
 		keys := map[string]bool{}
-		for _, value := range web.Env {
+		for _, value := range runtime.Env {
 			if value.ValueFrom != nil && value.ValueFrom.SecretKeyRef.Secret == secret.Name {
 				keys[value.ValueFrom.SecretKeyRef.Key] = true
 			}
