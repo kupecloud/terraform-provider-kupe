@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"net/http"
 	"reflect"
 	"sort"
 	"strings"
@@ -733,4 +734,24 @@ func testTerraformJSON(t *testing.T, value tftypes.Value) []byte {
 		t.Fatal(err)
 	}
 	return data
+}
+
+// TestAppEnvironmentDeleteDiagnosticsNameVaultEntry pins what the refusal and
+// the still-terminating warning say happens to the environment's own Vault
+// entry, the cluster and the other Vault entries.
+func TestAppEnvironmentDeleteDiagnosticsNameVaultEntry(t *testing.T) {
+	m := &AppEnvironmentResourceModel{App: types.StringValue("shop"), Name: types.StringValue("production")}
+	want := "Its own Vault entry `apps/shop/production`, where secrets added in the console are stored, is permanently deleted unless another secret still uses it. The cluster and other Vault entries are kept."
+	refusal := fmt.Errorf("delete app environment: %w",
+		&client.APIError{StatusCode: http.StatusConflict, Code: client.CodeDeletionProtected, Message: "deletion protection is on"})
+	summary, detail, ok := appEnvironmentKind.deleteRefused(m, refusal)
+	if !ok || summary != "app environment has deletion protection enabled" {
+		t.Fatalf("deleteRefused() = %q, %v", summary, ok)
+	}
+	if !strings.HasSuffix(detail, "Destroying an environment deletes its namespace and everything in it. "+want) {
+		t.Errorf("refusal detail = %q", detail)
+	}
+	if got := appEnvironmentKind.stillDeleting(m); !strings.HasSuffix(got, "Its name stays reserved until cleanup finishes. "+want) {
+		t.Errorf("stillDeleting = %q", got)
+	}
 }
