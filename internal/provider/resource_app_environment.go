@@ -37,6 +37,12 @@ const appReleaseUnidentified = "the environment changed before its release could
 // settings change. Refresh may expose that drift and a user may apply it again.
 const appChangeRecordedNotice = "The request was accepted and is recorded in Terraform state. The provider will not send it again during this apply. An unchanged configuration plans no change while the accepted settings remain current. A later refresh may show another client's changes; review the next plan before applying."
 
+// appEnvironmentVaultNotice says what destroying the environment does to its
+// own Vault entry, the one the console stores secrets in.
+func appEnvironmentVaultNotice(m *AppEnvironmentResourceModel) string {
+	return fmt.Sprintf("Its own Vault entry `apps/%s/%s`, where secrets added in the console are stored, is permanently deleted unless another secret still uses it. The cluster and other Vault entries are kept.", m.App.ValueString(), m.Name.ValueString())
+}
+
 func NewAppEnvironmentResource() resource.Resource {
 	return &AppEnvironmentResource{managedResource[AppEnvironmentResourceModel, client.AppEnvironment]{kind: &appEnvironmentKind}}
 }
@@ -56,7 +62,7 @@ var appEnvironmentKind = serviceKind[AppEnvironmentResourceModel, client.AppEnvi
 	settingsChanged: appEnvironmentSettingsChanged,
 	deleteRefused: func(m *AppEnvironmentResourceModel, err error) (string, string, bool) {
 		if client.IsDeletionProtected(err) {
-			return "app environment has deletion protection enabled", fmt.Sprintf("Environment %q was kept. Set `deletion_protection = false`, run `terraform apply`, then destroy it. Destroying an environment deletes its namespace and everything in it. The cluster and Vault entries are kept.", m.App.ValueString()+"/"+m.Name.ValueString()), true
+			return "app environment has deletion protection enabled", fmt.Sprintf("Environment %q was kept. Set `deletion_protection = false`, run `terraform apply`, then destroy it. Destroying an environment deletes its namespace and everything in it. ", m.App.ValueString()+"/"+m.Name.ValueString()) + appEnvironmentVaultNotice(m), true
 		}
 		if client.ErrorCode(err) == "namespace_in_use" {
 			return "app environment namespace is in use", apiErrorDetail(err) + "\n\nRemove independent secret deliveries and service bindings targeting the environment's namespace, then destroy it again.", true
@@ -64,7 +70,7 @@ var appEnvironmentKind = serviceKind[AppEnvironmentResourceModel, client.AppEnvi
 		return "", "", false
 	},
 	stillDeleting: func(m *AppEnvironmentResourceModel) string {
-		return fmt.Sprintf("DELETE was accepted but environment %q is still terminating after the delete timeout. Terraform has removed it from state; cleanup continues in the background. Its name stays reserved until cleanup finishes. The cluster and Vault entries are kept.", m.App.ValueString()+"/"+m.Name.ValueString())
+		return fmt.Sprintf("DELETE was accepted but environment %q is still terminating after the delete timeout. Terraform has removed it from state; cleanup continues in the background. Its name stays reserved until cleanup finishes. ", m.App.ValueString()+"/"+m.Name.ValueString()) + appEnvironmentVaultNotice(m)
 	},
 }
 
