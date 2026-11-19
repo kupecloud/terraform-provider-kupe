@@ -206,7 +206,7 @@ func (r *SecretResource) Schema(ctx context.Context, _ resource.SchemaRequest, r
 				Optional:    true, Validators: []validator.Int64{int64validator.AtLeast(1)}, // codespell:ignore atleast
 			},
 			"source_version": schema.Int64Attribute{
-				Description: "Version of the Vault entry, read from its metadata, or null when there is no entry. A value write checks the version shown in the plan and refuses to overwrite a change made since.",
+				Description: "Version of the Vault entry, or null when there is no entry. A value write checks the version shown in the plan and refuses to overwrite a change made since.",
 				Computed:    true, PlanModifiers: []planmodifier.Int64{secretSourceVersionModifier{}},
 			},
 			"name": schema.StringAttribute{Description: "Secret name. Changing it replaces the secret.", Required: true,

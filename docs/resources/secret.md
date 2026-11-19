@@ -45,17 +45,17 @@ resource "kupe_secret" "app_config" {
 
 Write-only values need OpenTofu 1.11 or later, or Terraform 1.11.1 or later. CI tests OpenTofu 1.11.0 and 1.13.2 and Terraform 1.11.1 and 1.17.1.
 
-Pass `values_wo` through an ephemeral, sensitive variable, as in the example. The values never reach the plan or state, and the provider only reads the entry's metadata. Keep the values themselves out of configuration files, variable defaults, outputs and shell history.
+Pass `values_wo` through an ephemeral, sensitive variable, as in the example. The values never reach the plan or state, and the provider reads only the entry's version, never its values. Keep the values themselves out of configuration files, variable defaults, outputs and shell history.
 
 Set `values_wo` together with a positive `values_wo_version`. Each time you change the version, the provider replaces the whole stored map, so keys you leave out are removed from the entry. Changing `values_wo` without changing the version sends nothing. Removing both sends nothing and keeps the stored values.
 
-On create, there must be no entry at the path yet, including a soft-deleted one. To manage an existing entry, apply the resource once without the two inputs, then add them. Import reads `source_version` from the metadata and leaves `values_wo_version` null.
+On create, there must be no entry at the path yet, including one marked as deleted. To manage an existing entry, apply the resource once without the two inputs, then add them. Import reads `source_version` from the entry and leaves `values_wo_version` null.
 
 An update checks that the entry is still at the `source_version` shown in the plan. A conflict means another client changed it after the plan read it: run plan again and review the new version before you apply. If the provider cannot tell whether a write was saved, it keeps the previous `values_wo_version`, and the next apply after a fresh plan sends the values again. The provider never retries a value write on its own.
 
 After a confirmed write, the provider records the new `values_wo_version` and `source_version` before it waits for delivery. If an update then times out on delivery, the error says “values saved as version V; delivery is still in progress”, and the next plan does not send the values again. Check delivery in the Kupe console, and change the version only when you want to replace the values again.
 
-Destroy removes the definition and withdraws its delivered copies. Every stored value and version stays in Vault; the provider cannot purge them.
+Destroy removes the definition and withdraws its delivered copies. The stored values stay in Vault, and Terraform cannot delete them: use `kupe secret purge --path PATH`.
 
 ### Select keys
 
@@ -101,7 +101,7 @@ The create, update and delete timeouts default to 2 minutes. Set longer ones wit
 - `created_at` (String) Timestamp when the managed secret definition was created.
 - `etag` (String) Resource version used for optimistic locking during updates.
 - `phase` (String) `Pending`, `Active`, `Degraded` or `Deleting`. `Active` on its own does not confirm that the current values were delivered; see `sync_status`.
-- `source_version` (Number) Version of the Vault entry, read from its metadata, or null when there is no entry. A value write checks the version shown in the plan and refuses to overwrite a change made since.
+- `source_version` (Number) Version of the Vault entry, or null when there is no entry. A value write checks the version shown in the plan and refuses to overwrite a change made since.
 - `sync_status` (Attributes List) Delivery status of each target, sorted by cluster then namespace. A removed target stays `Withdrawing` until the platform has withdrawn it. (see [below for nested schema](#nestedatt--sync_status))
 
 <a id="nestedatt--sync"></a>

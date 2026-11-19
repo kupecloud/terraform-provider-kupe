@@ -29,10 +29,10 @@ data "kupe_cluster" "prod" {
 
 - `display_name` (String, Deprecated) **Deprecated.** Clusters have no separate display name, so this is the same as `name`. Use `name` instead.
 - `endpoint` (String) Cluster API server endpoint.
-- `ha_configured` (Boolean) True once all 3 API server replicas and all 3 etcd replicas have been `Ready` for the first time. etcd counts because it runs in its own pods: losing etcd quorum blocks writes even while the API server pods are healthy.
+- `ha_configured` (Boolean) True once all API server replicas and all replicas of the control plane's datastore have been `Ready` for the first time.
 - `ha_enabled_at` (String) When `ha_configured` first became true. HA is billed from this moment.
-- `ha_etcd_replicas_desired` (Number) Target number of HA etcd replicas: 3 when `high_availability = true`, otherwise 0.
-- `ha_etcd_replicas_ready` (Number) Number of etcd replicas that are `Ready`. Reported separately because etcd runs in its own pods: losing etcd quorum stops the cluster serving writes even while the API server replicas are healthy.
+- `ha_etcd_replicas_desired` (Number) Target number of replicas of the control plane's datastore: 3 when `high_availability = true`, otherwise 0.
+- `ha_etcd_replicas_ready` (Number) Number of replicas of the control plane's datastore that are `Ready`. The cluster stops accepting changes when most of them are down, even while the API server replicas are healthy.
 - `ha_phase` (String) Summary of HA health: `pending`, `ha-healthy`, `ha-degraded` or `ha-unavailable`. Empty for a cluster without HA.
 - `ha_replicas_desired` (Number) Target number of HA API server replicas: 3 when `high_availability = true`, otherwise 0.
 - `ha_replicas_ready` (Number) Number of HA control-plane (API server) replicas that are `Ready`.
