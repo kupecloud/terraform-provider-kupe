@@ -189,8 +189,13 @@ func TestAPIErrorDetail(t *testing.T) {
 				StatusCode: http.StatusConflict, Code: client.CodePaymentSetupRequired,
 				Message: "tenant acme is awaiting payment setup; add a payment method before creating databases",
 			},
-			wantSubstr:   []string{"Add a payment method on the Billing page of the Kupe Console"},
-			wantNoSubstr: []string{"already exists"},
+			wantSubstr: []string{
+				"Error code: payment_setup_required",
+				"\n\nYour tenant has no payment card on file, so nothing new can be created and nothing can be " +
+					"made larger. Add a payment method on the Billing page of the Kupe console, then run " +
+					"`terraform apply` again.",
+			},
+			wantNoSubstr: []string{"already exists", "Contact Kupe Cloud support", "£"},
 		},
 		{
 			name:         "409 with a code this provider does not know shows the API's words only",
