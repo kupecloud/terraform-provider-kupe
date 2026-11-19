@@ -37,8 +37,8 @@ resource "kupe_cluster" "prod" {
   }
 }
 
-# An HA cluster: 3 API server replicas and 3 etcd replicas on different
-# nodes. HA adds an hourly charge; see your plan's HA rate.
+# An HA cluster keeps its Kubernetes API available during maintenance or a
+# single-node failure. HA adds an hourly charge; see your plan's HA rate.
 #
 # high_availability can only be set when the cluster is created. Changing it
 # later replaces the cluster (destroy, then create). To move to HA, create a
@@ -78,7 +78,7 @@ output "prod_eu1_ha_ready" {
 ### Optional
 
 - `display_name` (String, Deprecated) **Deprecated.** Clusters have no separate display name: `name` is shown everywhere, including the console, the CLI and kubeconfig contexts. The API ignores this value, and the provider keeps it in state exactly as configured. Remove it from your configuration. Before provider v1.6.1 this attribute was required, and comparing it with the API's empty echo tainted every new cluster with "inconsistent result after apply" and replaced it on the next apply.
-- `high_availability` (Boolean) Runs a highly available control plane: 3 API server replicas and a separate 3-replica etcd, kept on different nodes by hard anti-affinity. HA adds an hourly charge; `data.kupe_plan` shows the rate. When unset, a new cluster is created without HA and an existing or imported cluster keeps its current setting, so removing the attribute does not turn HA off.
+- `high_availability` (Boolean) Runs a highly available control plane, which keeps the cluster's Kubernetes API available during maintenance or a single-node failure. HA adds an hourly charge; `data.kupe_plan` shows the rate. When unset, a new cluster is created without HA and an existing or imported cluster keeps its current setting, so removing the attribute does not turn HA off.
 
 **Set at creation only.** Changing it on an existing cluster makes Terraform **replace** the cluster (destroy, then create), because the platform refuses to turn HA on or off in place (`HA_ENABLE_ON_EXISTING_UNSUPPORTED`, `HA_DISABLE_UNSUPPORTED`). To move to HA, create a new HA cluster, redeploy your workloads to it, move the traffic across, then destroy the old one.
 - `resources` (Attributes) CPU, memory and storage limits for the cluster. An update sends only the fields you set here, and the platform keeps the current value of any field you leave out, so write each field you want to change. Removing the whole `resources` block sends an empty `resources` object, which asks the platform to clear the limits. (see [below for nested schema](#nestedatt--resources))
@@ -91,10 +91,10 @@ output "prod_eu1_ha_ready" {
 - `created_at` (String) Timestamp when the cluster was created.
 - `endpoint` (String) Cluster API server endpoint.
 - `etag` (String) Resource version used for optimistic locking during updates.
-- `ha_configured` (Boolean) True once all 3 API server replicas and all 3 etcd replicas have been `Ready` for the first time. etcd counts because it runs in its own pods: losing etcd quorum blocks writes even while the API server pods are healthy. `high_availability` is the setting you asked for; read this attribute when automation needs to wait until HA is working.
+- `ha_configured` (Boolean) True once all API server replicas and all replicas of the control plane's datastore have been `Ready` for the first time. `high_availability` is the setting you asked for; read this attribute when automation needs to wait until HA is working.
 - `ha_enabled_at` (String) When `ha_configured` first became true. HA is billed from this moment. It is set once and never changed or cleared.
-- `ha_etcd_replicas_desired` (Number) Target number of HA etcd replicas: 3 when `high_availability = true`, otherwise 0.
-- `ha_etcd_replicas_ready` (Number) Number of etcd replicas that are `Ready`. Reported separately because etcd runs in its own pods: losing etcd quorum stops the cluster serving writes even while the API server replicas are healthy.
+- `ha_etcd_replicas_desired` (Number) Target number of replicas of the control plane's datastore: 3 when `high_availability = true`, otherwise 0.
+- `ha_etcd_replicas_ready` (Number) Number of replicas of the control plane's datastore that are `Ready`. The cluster stops accepting changes when most of them are down, even while the API server replicas are healthy.
 - `ha_phase` (String) Summary of HA health: `pending`, `ha-healthy`, `ha-degraded` or `ha-unavailable`. Empty for a cluster without HA. Use it in automation instead of reading individual conditions.
 - `ha_replicas_desired` (Number) Target number of HA API server replicas: 3 when `high_availability = true`, otherwise 0.
 - `ha_replicas_ready` (Number) Number of HA control-plane (API server) replicas that are `Ready`. Zero for a cluster without HA.

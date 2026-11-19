@@ -256,8 +256,8 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				},
 			},
 			"high_availability": schema.BoolAttribute{
-				Description: "Runs a highly available control plane: 3 API server replicas and a separate 3-replica " +
-					"etcd, kept on different nodes by hard anti-affinity. HA adds an hourly charge; " +
+				Description: "Runs a highly available control plane, which keeps the cluster's Kubernetes API available " +
+					"during maintenance or a single-node failure. HA adds an hourly charge; " +
 					"`data.kupe_plan` shows the rate. When " +
 					"unset, a new cluster is created without HA and an existing or imported cluster keeps its " +
 					"current setting, so removing the attribute does not turn HA off.\n\n" +
@@ -286,9 +286,8 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				Computed:    true,
 			},
 			"ha_configured": schema.BoolAttribute{
-				Description: "True once all 3 API server replicas and all 3 etcd replicas have been `Ready` for the first time. " +
-					"etcd counts because it runs in its own pods: losing etcd quorum blocks writes even while the API " +
-					"server pods are healthy. `high_availability` is the setting you asked for; read this attribute " +
+				Description: "True once all API server replicas and all replicas of the control plane's datastore have been " +
+					"`Ready` for the first time. `high_availability` is the setting you asked for; read this attribute " +
 					"when automation needs to wait until HA is working.",
 				Computed: true,
 			},
@@ -311,13 +310,12 @@ func (r *ClusterResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				Computed:    true,
 			},
 			"ha_etcd_replicas_ready": schema.Int64Attribute{
-				Description: "Number of etcd replicas that are `Ready`. Reported separately because etcd runs in its own " +
-					"pods: losing etcd quorum stops the cluster serving writes even while the API server replicas " +
-					"are healthy.",
+				Description: "Number of replicas of the control plane's datastore that are `Ready`. The cluster stops " +
+					"accepting changes when most of them are down, even while the API server replicas are healthy.",
 				Computed: true,
 			},
 			"ha_etcd_replicas_desired": schema.Int64Attribute{
-				Description: "Target number of HA etcd replicas: 3 when `high_availability = true`, otherwise 0.",
+				Description: "Target number of replicas of the control plane's datastore: 3 when `high_availability = true`, otherwise 0.",
 				Computed:    true,
 			},
 			"etag":       etagAttribute(),

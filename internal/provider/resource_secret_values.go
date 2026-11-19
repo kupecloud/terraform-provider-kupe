@@ -44,7 +44,7 @@ func (secretSourceVersionModifier) PlanModifyInt64(ctx context.Context, req plan
 	}
 }
 
-// Read uses the shared definition lifecycle, then only the entry metadata.
+// Read uses the shared definition lifecycle, then only the entry version.
 func (r *SecretResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	r.managedResource.Read(ctx, req, resp)
 	if resp.Diagnostics.HasError() || resp.State.Raw.IsNull() {
@@ -71,7 +71,7 @@ func (r *SecretResource) readSourceVersion(ctx context.Context, m *SecretResourc
 	}
 	var apiErr *client.APIError
 	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusServiceUnavailable {
-		diags.AddWarning("secret source version unavailable", "The stored entry metadata is temporarily unavailable. The previous source_version is kept; run plan again before changing values.")
+		diags.AddWarning("secret source version unavailable", "The stored entry's version is temporarily unavailable. The previous source_version is kept; run plan again before changing values.")
 		return
 	}
 	// The response to a value endpoint must never echo values into a diagnostic,

@@ -9,8 +9,8 @@ resource "kupe_cluster" "prod" {
   }
 }
 
-# An HA cluster: 3 API server replicas and 3 etcd replicas on different
-# nodes. HA adds an hourly charge; see your plan's HA rate.
+# An HA cluster keeps its Kubernetes API available during maintenance or a
+# single-node failure. HA adds an hourly charge; see your plan's HA rate.
 #
 # high_availability can only be set when the cluster is created. Changing it
 # later replaces the cluster (destroy, then create). To move to HA, create a
