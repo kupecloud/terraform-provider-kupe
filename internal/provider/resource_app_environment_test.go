@@ -760,7 +760,7 @@ func testTerraformJSON(t *testing.T, value tftypes.Value) []byte {
 // entry, the cluster and the other Vault entries.
 func TestAppEnvironmentDeleteDiagnosticsNameVaultEntry(t *testing.T) {
 	m := &AppEnvironmentResourceModel{App: types.StringValue("shop"), Name: types.StringValue("production")}
-	entry := "Its own Vault entry `apps/shop/production`, where secrets added in the console are stored, "
+	entry := "Its own Vault entry `apps/shop/production`, where its secrets are stored by default, "
 	rule := " permanently deleted unless a secret or another environment outside this one still uses it. The cluster and other Vault entries are kept."
 	refusal := fmt.Errorf("delete app environment: %w",
 		&client.APIError{StatusCode: http.StatusConflict, Code: client.CodeDeletionProtected, Message: "deletion protection is on"})

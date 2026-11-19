@@ -41,7 +41,7 @@ const appChangeRecordedNotice = "The request was accepted and is recorded in Ter
 // own Vault entry, the one the console stores secrets in. verb is "is" for the
 // general rule and "will be" once the delete is under way.
 func appEnvironmentVaultNotice(m *AppEnvironmentResourceModel, verb string) string {
-	return fmt.Sprintf("Its own Vault entry `apps/%s/%s`, where secrets added in the console are stored, %s permanently deleted unless a secret or another environment outside this one still uses it. The cluster and other Vault entries are kept.", m.App.ValueString(), m.Name.ValueString(), verb)
+	return fmt.Sprintf("Its own Vault entry `apps/%s/%s`, where its secrets are stored by default, %s permanently deleted unless a secret or another environment outside this one still uses it. The cluster and other Vault entries are kept.", m.App.ValueString(), m.Name.ValueString(), verb)
 }
 
 func NewAppEnvironmentResource() resource.Resource {
