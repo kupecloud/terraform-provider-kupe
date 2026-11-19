@@ -310,7 +310,7 @@ func TestAccDatabaseResource_CodedRefusals(t *testing.T) {
 				},
 				Config: config,
 				ExpectError: regexp.MustCompile(`(?s)failed to create database.*Error code: payment_setup_required.*` +
-					wrappedText("Add a payment method on the Billing page of the Kupe Console")),
+					wrappedText("Your tenant has no payment card on file, so nothing new can be created and nothing can be made larger. Add a payment method on the Billing page of the Kupe console")),
 			},
 			{Config: config},
 			{

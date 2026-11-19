@@ -415,6 +415,10 @@ func apiErrorDetail(err error) string {
 		case client.CodeTenantSuspended:
 			return base + "\n\nYour tenant is suspended, so nothing new can be created in it and nothing can be " +
 				"made larger. Contact Kupe Cloud support to lift the suspension."
+		case client.CodePaymentSetupRequired:
+			return base + "\n\nYour tenant has no payment card on file, so nothing new can be created and " +
+				"nothing can be made larger. Add a payment method on the Billing page of the Kupe console, then " +
+				"run `terraform apply` again."
 		case client.CodeRegistryAlreadyExists:
 			// Same code for a registry still being deleted (kupe-api's
 			// "it is being deleted; try again when it is gone"): no import
@@ -442,9 +446,6 @@ func apiErrorDetail(err error) string {
 		case client.CodeDatabaseNotReady:
 			return base + "\n\nThe database is not running, so no backup was taken. Wait until its phase is " +
 				"Running, then run `terraform apply` again."
-		case client.CodePaymentSetupRequired:
-			return base + "\n\nAdd a payment method on the Billing page of the Kupe Console, then run " +
-				"`terraform apply` again."
 		}
 		return base
 	case http.StatusPreconditionFailed:
