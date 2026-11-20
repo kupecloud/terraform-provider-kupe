@@ -83,6 +83,7 @@ jobs:
       - name: Upload release artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
         # Narrow the glob to the registry-consumed artifacts. `dist/*` would
         # also match GoReleaser's per-platform build directories (e.g.
         # `terraform-provider-kupe_darwin_amd64_v1/`) and its bookkeeping
@@ -91,7 +92,7 @@ jobs:
         # only need the platform zips, the SHA256SUMS file, and its
         # signature.
         run: |
-          gh release upload "v${{ inputs.version }}" \
+          gh release upload "v${VERSION}" \
             dist/*.zip \
             dist/*_SHA256SUMS \
             dist/*_SHA256SUMS.sig \
