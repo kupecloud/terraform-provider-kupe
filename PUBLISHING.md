@@ -185,9 +185,14 @@ compromised release will see verification warnings until they upgrade.
 
 * **`gh release view <tag>` shows no assets.** The publish job either
   did not run (secrets missing, or the `if:` gate evaluated to false
-  for that commit) or failed mid-way. Look at the workflow run logs;
-  re-running the publish job is idempotent because of `gh release
-  upload --clobber`.
+  for that commit) or failed mid-way. Look at the workflow run logs.
+  If publish ran and failed, re-run it; the upload is idempotent because
+  of `gh release upload --clobber`. If publish was skipped (for example
+  semantic-release tagged the release and then failed in a later step),
+  re-running Main does not help: semantic-release finds the tag on HEAD
+  and reports no new release. Dispatch Publish for that version instead:
+  `gh workflow run publish.yaml -R kupecloud/terraform-provider-kupe -f version=<x.y.z>`.
+  It builds from the tag `v<x.y.z>`, not from main.
 * **Goreleaser fails with `gpg: signing failed: No such file or
   directory`.** Either `GPG_PRIVATE_KEY` is malformed (must be ASCII-
   armored, including the `-----BEGIN PGP PRIVATE KEY BLOCK-----`

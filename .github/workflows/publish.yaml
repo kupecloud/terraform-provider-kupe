@@ -12,6 +12,16 @@ on:
         required: true
       GPG_PASSPHRASE:
         required: true
+  # Republish an existing release whose publish job never ran, e.g. when
+  # semantic-release tagged and created the release but failed afterwards.
+  # Re-running Main cannot do this: semantic-release sees the tag on HEAD,
+  # reports no new release, and the `publish` job stays skipped.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Existing release version without the leading v (e.g. 1.21.3)
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -23,9 +33,21 @@ jobs:
     env:
       GORELEASER_VERSION: v2.15.2
     steps:
+      - name: Check version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::version must be MAJOR.MINOR.PATCH without a leading v, got: $VERSION"
+            exit 1
+          fi
+
+      # Build from the release tag in both paths: on a dispatch the default
+      # ref is main, which may have moved past the release.
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: refs/tags/v${{ inputs.version }}
           fetch-depth: 0
 
       - name: Set up Go
