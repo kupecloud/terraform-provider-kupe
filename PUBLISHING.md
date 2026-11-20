@@ -192,7 +192,11 @@ compromised release will see verification warnings until they upgrade.
   re-running Main does not help: semantic-release finds the tag on HEAD
   and reports no new release. Dispatch Publish for that version instead:
   `gh workflow run publish.yaml -R kupecloud/terraform-provider-kupe -f version=<x.y.z>`.
-  It builds from the tag `v<x.y.z>`, not from main.
+  It builds from the tag `v<x.y.z>`, not from main, and refuses a release
+  that already has assets: the build is not byte-reproducible, so
+  overwriting assets the registries recorded breaks checksum checks.
+  Afterwards confirm both registries list the version; if not, resync
+  it from the registry's provider settings.
 * **Goreleaser fails with `gpg: signing failed: No such file or
   directory`.** Either `GPG_PRIVATE_KEY` is malformed (must be ASCII-
   armored, including the `-----BEGIN PGP PRIVATE KEY BLOCK-----`

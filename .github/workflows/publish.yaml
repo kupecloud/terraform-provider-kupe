@@ -37,8 +37,25 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
         run: |
+          set -euo pipefail
           if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "::error::version must be MAJOR.MINOR.PATCH without a leading v, got: $VERSION"
+            exit 1
+          fi
+
+      # A dispatch only fills a release that has no assets. The build is not
+      # byte-reproducible, so re-uploading over assets the registries already
+      # recorded would break checksum verification for that version.
+      - name: Refuse a release that already has assets
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          count=$(gh release view "v${VERSION}" -R "$GITHUB_REPOSITORY" --json assets -q '.assets | length')
+          if [ "$count" -ne 0 ]; then
+            echo "::error::release v${VERSION} already has ${count} assets; dispatch only republishes a release with none"
             exit 1
           fi
 
@@ -92,6 +109,7 @@ jobs:
         # only need the platform zips, the SHA256SUMS file, and its
         # signature.
         run: |
+          set -euo pipefail
           gh release upload "v${VERSION}" \
             dist/*.zip \
             dist/*_SHA256SUMS \
