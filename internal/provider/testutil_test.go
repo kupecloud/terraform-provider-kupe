@@ -151,6 +151,13 @@ func newMockKupeAPI(decorators ...func(http.Handler) http.Handler) *mockKupeAPI 
 		tenant: map[string]any{
 			"name": "acme", "displayName": "Acme Corp",
 			"contactEmail": "admin@acme.com", "plan": "starter",
+			// kupe-api's tenant response: overage with its spend cap (an
+			// amount the provider must not surface), and the deprecated
+			// enforce flags it still sends for one release (CREDIT-15).
+			"overage": map[string]any{
+				"spendCap": "50.00", "clusters": false, "databases": false,
+				"logs": false, "metrics": false, "choiceMadeAt": "2026-11-19T09:30:00Z",
+			},
 			"enforceMetricsLimit": true, "enforceLogLimit": true,
 			"resourceVersion": "1", "createdAt": "2024-01-01T00:00:00Z",
 		},

@@ -23,7 +23,9 @@ data "kupe_tenant" "current" {}
 
 - `contact_email` (String) Tenant's main contact email address.
 - `display_name` (String) Tenant display name.
-- `enforce_log_limit` (Boolean) Whether the tenant blocks log ingestion over its plan's allowance.
-- `enforce_metrics_limit` (Boolean) Whether the tenant blocks metrics ingestion over its plan's allowance.
 - `name` (String) Tenant name.
+- `overage_clusters` (Boolean) Whether usage of clusters may continue past the plan's credit, up to the tenant's spend cap.
+- `overage_databases` (Boolean) Whether usage of databases may continue past the plan's credit, up to the tenant's spend cap.
+- `overage_logs` (Boolean) Whether usage of logs may continue past the plan's credit, up to the tenant's spend cap.
+- `overage_metrics` (Boolean) Whether usage of metrics may continue past the plan's credit, up to the tenant's spend cap.
 - `plan` (String) Name of the tenant's current plan.

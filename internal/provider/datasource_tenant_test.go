@@ -2,9 +2,11 @@ package provider
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 func TestAccTenantDataSource(t *testing.T) {
@@ -32,6 +34,78 @@ data "kupe_tenant" "current" {}
 			},
 		},
 	})
+}
+
+// TestAccTenantDataSource_OverageSwitches pins the overage switches
+// (CREDIT-41): each attribute reads its own field of the API's overage, one
+// switch on at a time so a crossed mapping goes red. The mock also sends the
+// spend cap (an amount) and the deprecated enforce flags; neither reaches
+// state.
+func TestAccTenantDataSource_OverageSwitches(t *testing.T) {
+	switches := []struct{ api, attr string }{
+		{"clusters", "overage_clusters"},
+		{"databases", "overage_databases"},
+		{"logs", "overage_logs"},
+		{"metrics", "overage_metrics"},
+	}
+	cases := []string{"none"}
+	for _, s := range switches {
+		cases = append(cases, s.api)
+	}
+	for _, on := range cases {
+		t.Run(on+" on", func(t *testing.T) {
+			mock := newMockKupeAPI()
+			defer mock.close()
+			overage := mock.tenant["overage"].(map[string]any)
+			checks := []resource.TestCheckFunc{noTenantAmountOrEnforce}
+			for _, s := range switches {
+				overage[s.api] = s.api == on
+				want := "false"
+				if s.api == on {
+					want = "true"
+				}
+				checks = append(checks, resource.TestCheckResourceAttr("data.kupe_tenant.current", s.attr, want))
+			}
+
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+				Steps: []resource.TestStep{
+					{
+						Config: fmt.Sprintf(`
+provider "kupe" {
+  host    = %q
+  tenant  = "acme"
+  api_key = "kupe_test_key"
+}
+
+data "kupe_tenant" "current" {}
+`, mock.url()),
+						Check: resource.ComposeAggregateTestCheckFunc(checks...),
+					},
+				},
+			})
+		})
+	}
+}
+
+// noTenantAmountOrEnforce fails when the tenant's state carries the spend
+// cap, any amount the mock serves, or the removed enforce attributes.
+func noTenantAmountOrEnforce(s *terraform.State) error {
+	rs, ok := s.RootModule().Resources["data.kupe_tenant.current"]
+	if !ok {
+		return fmt.Errorf("data.kupe_tenant.current not in state")
+	}
+	for k, v := range rs.Primary.Attributes {
+		for _, banned := range []string{"enforce", "spend", "cap"} {
+			if strings.Contains(k, banned) {
+				return fmt.Errorf("state carries attribute %q", k)
+			}
+		}
+		if strings.Contains(v, "50.00") {
+			return fmt.Errorf("state carries the spend cap in %q = %q", k, v)
+		}
+	}
+	return nil
 }
 
 func TestAccPlanDataSource(t *testing.T) {

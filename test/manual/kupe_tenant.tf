@@ -2,7 +2,7 @@
 #
 # Reads the current tenant (the one in the provider's `tenant` field —
 # kupe-test on dev). Returns name, displayName, plan, contactEmail, and
-# the enforce* booleans.
+# the overage_* switches (no spend cap amount).
 #
 # Verifies:
 #   - GET /api/v1/tenants/kupe-test responds 200
