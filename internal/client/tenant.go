@@ -8,16 +8,26 @@ import (
 
 // Tenant represents a tenant in the API response.
 type Tenant struct {
-	Name                string `json:"name"`
-	DisplayName         string `json:"displayName"`
-	ContactEmail        string `json:"contactEmail"`
-	Plan                string `json:"plan"`
-	EnforceMetricsLimit bool   `json:"enforceMetricsLimit"`
-	EnforceLogLimit     bool   `json:"enforceLogLimit"`
-	ResourceVersion     string `json:"resourceVersion"`
-	CreatedAt           string `json:"createdAt"`
-	Status              any    `json:"status,omitempty"`
-	Members             any    `json:"members,omitempty"`
+	Name            string        `json:"name"`
+	DisplayName     string        `json:"displayName"`
+	ContactEmail    string        `json:"contactEmail"`
+	Plan            string        `json:"plan"`
+	Overage         TenantOverage `json:"overage"`
+	ResourceVersion string        `json:"resourceVersion"`
+	CreatedAt       string        `json:"createdAt"`
+	Status          any           `json:"status,omitempty"`
+	Members         any           `json:"members,omitempty"`
+}
+
+// TenantOverage is which services may run past the plan's credit, up to the
+// tenant's spend cap. The spend cap is an amount and is not decoded: the
+// provider carries no money (as kupe-cli). Do not add a spendCap field here.
+// Overage is changed in the console.
+type TenantOverage struct {
+	Clusters  bool `json:"clusters"`
+	Databases bool `json:"databases"`
+	Logs      bool `json:"logs"`
+	Metrics   bool `json:"metrics"`
 }
 
 // GetTenant returns the tenant's details.

@@ -17,12 +17,14 @@ type TenantDataSource struct {
 }
 
 type TenantDataSourceModel struct {
-	Name                types.String `tfsdk:"name"`
-	DisplayName         types.String `tfsdk:"display_name"`
-	ContactEmail        types.String `tfsdk:"contact_email"`
-	Plan                types.String `tfsdk:"plan"`
-	EnforceMetricsLimit types.Bool   `tfsdk:"enforce_metrics_limit"`
-	EnforceLogLimit     types.Bool   `tfsdk:"enforce_log_limit"`
+	Name             types.String `tfsdk:"name"`
+	DisplayName      types.String `tfsdk:"display_name"`
+	ContactEmail     types.String `tfsdk:"contact_email"`
+	Plan             types.String `tfsdk:"plan"`
+	OverageClusters  types.Bool   `tfsdk:"overage_clusters"`
+	OverageDatabases types.Bool   `tfsdk:"overage_databases"`
+	OverageLogs      types.Bool   `tfsdk:"overage_logs"`
+	OverageMetrics   types.Bool   `tfsdk:"overage_metrics"`
 }
 
 func NewTenantDataSource() datasource.DataSource {
@@ -53,15 +55,20 @@ func (d *TenantDataSource) Schema(_ context.Context, _ datasource.SchemaRequest,
 				Description: "Name of the tenant's current plan.",
 				Computed:    true,
 			},
-			"enforce_metrics_limit": schema.BoolAttribute{
-				Description: "Whether the tenant blocks metrics ingestion over its plan's allowance.",
-				Computed:    true,
-			},
-			"enforce_log_limit": schema.BoolAttribute{
-				Description: "Whether the tenant blocks log ingestion over its plan's allowance.",
-				Computed:    true,
-			},
+			"overage_clusters":  overageAttribute("clusters"),
+			"overage_databases": overageAttribute("databases"),
+			"overage_logs":      overageAttribute("logs"),
+			"overage_metrics":   overageAttribute("metrics"),
 		},
+	}
+}
+
+// overageAttribute is one of the tenant's overage switches. The spend cap is
+// an amount and has no attribute: the provider carries no money.
+func overageAttribute(service string) schema.BoolAttribute {
+	return schema.BoolAttribute{
+		Description: "Whether usage of " + service + " may continue past the plan's credit, up to the tenant's spend cap.",
+		Computed:    true,
 	}
 }
 
@@ -77,12 +84,14 @@ func (d *TenantDataSource) Read(ctx context.Context, _ datasource.ReadRequest, r
 	}
 
 	state := TenantDataSourceModel{
-		Name:                types.StringValue(tenant.Name),
-		DisplayName:         types.StringValue(tenant.DisplayName),
-		ContactEmail:        types.StringValue(tenant.ContactEmail),
-		Plan:                types.StringValue(tenant.Plan),
-		EnforceMetricsLimit: types.BoolValue(tenant.EnforceMetricsLimit),
-		EnforceLogLimit:     types.BoolValue(tenant.EnforceLogLimit),
+		Name:             types.StringValue(tenant.Name),
+		DisplayName:      types.StringValue(tenant.DisplayName),
+		ContactEmail:     types.StringValue(tenant.ContactEmail),
+		Plan:             types.StringValue(tenant.Plan),
+		OverageClusters:  types.BoolValue(tenant.Overage.Clusters),
+		OverageDatabases: types.BoolValue(tenant.Overage.Databases),
+		OverageLogs:      types.BoolValue(tenant.Overage.Logs),
+		OverageMetrics:   types.BoolValue(tenant.Overage.Metrics),
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
