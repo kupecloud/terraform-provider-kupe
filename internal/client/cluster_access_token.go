@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 )
 
 // ClusterAccessTokensNotServedError is a 404 from an access token route of a
@@ -12,8 +13,9 @@ import (
 // not find. It says nothing about whether a token exists, so IsNotFound is
 // false for it: refresh keeps the token in state, and delete does not report
 // a revoke that never happened. kupe-api's own 404 for a token or its
-// cluster names it (`access token "cat-..." not found`, `cluster "dev" not
-// found`), as registryNotFoundMessage matches.
+// cluster carries CLUSTER_NOT_FOUND or ACCESS_TOKEN_NOT_FOUND, or on an
+// older kupe-api names the requested one (`access token "cat-..." not
+// found`, `cluster "dev" not found`).
 type ClusterAccessTokensNotServedError struct {
 	Err *APIError
 }
@@ -31,14 +33,43 @@ func IsClusterAccessTokensNotServed(err error) bool {
 	return errors.As(err, &notServed)
 }
 
-// clusterAccessTokenRequest is request for an access token route, a 404 that
-// carries no code and names nothing classified as
-// *ClusterAccessTokensNotServedError.
-func (c *Client) clusterAccessTokenRequest(ctx context.Context, method, path string, body, result any) error {
+// accessTokenNotFound reports whether a 404 from an access token route is
+// kupe-api's own answer for this cluster or token. The code decides when
+// there is one. Without a code (a kupe-api older than the codes) the message
+// must name the requested cluster or token id: any other 404, including one
+// that names something else, is not evidence about this token.
+func accessTokenNotFound(apiErr *APIError, cluster, id string) bool {
+	switch apiErr.Code {
+	case CodeAccessTokenNotFound, CodeClusterNotFound:
+		return true
+	case "":
+		if id == "" {
+			return strings.Contains(apiErr.Message, `cluster "`+cluster+`" not found`)
+		}
+		return strings.Contains(apiErr.Message, `access token "`+id+`" not found`) || strings.Contains(apiErr.Message, `cluster "`+cluster+`" not found`)
+	}
+	return false
+}
+
+// RequestDelivered reports whether the kupe API received a request that
+// ended in err: a success, a 5xx (it may have acted before it failed) or a
+// transport error (the request may have arrived). A 4xx is a refusal that
+// did nothing.
+func RequestDelivered(err error) bool {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode >= http.StatusInternalServerError
+	}
+	return true
+}
+
+// clusterAccessTokenRequest is request for an access token route of cluster
+// and token id (empty for a create). A 404 that is not kupe-api's own for
+// that cluster or token is classified as *ClusterAccessTokensNotServedError.
+func (c *Client) clusterAccessTokenRequest(ctx context.Context, method, path, cluster, id string, body, result any) error {
 	_, err := c.request(ctx, method, path, body, result)
 	var apiErr *APIError
-	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound && apiErr.Code == "" &&
-		!registryNotFoundMessage.MatchString(apiErr.Message) {
+	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound && !accessTokenNotFound(apiErr, cluster, id) {
 		return &ClusterAccessTokensNotServedError{Err: apiErr}
 	}
 	return err
@@ -101,7 +132,7 @@ type CollectedClusterAccessToken struct {
 // GetClusterAccessToken returns a cluster access token, without the token.
 func (c *Client) GetClusterAccessToken(ctx context.Context, cluster, id string) (*ClusterAccessToken, error) {
 	var token ClusterAccessToken
-	if err := c.clusterAccessTokenRequest(ctx, http.MethodGet, c.tenantPath("clusters", cluster, "access-tokens", id), nil, &token); err != nil {
+	if err := c.clusterAccessTokenRequest(ctx, http.MethodGet, c.tenantPath("clusters", cluster, "access-tokens", id), cluster, id, nil, &token); err != nil {
 		return nil, err
 	}
 	return &token, nil
@@ -111,7 +142,7 @@ func (c *Client) GetClusterAccessToken(ctx context.Context, cluster, id string) 
 // carries no token: collect it once it is Ready.
 func (c *Client) CreateClusterAccessToken(ctx context.Context, cluster string, req CreateClusterAccessTokenRequest) (*ClusterAccessToken, error) {
 	var token ClusterAccessToken
-	if err := c.clusterAccessTokenRequest(ctx, http.MethodPost, c.tenantPath("clusters", cluster, "access-tokens"), req, &token); err != nil {
+	if err := c.clusterAccessTokenRequest(ctx, http.MethodPost, c.tenantPath("clusters", cluster, "access-tokens"), cluster, "", req, &token); err != nil {
 		return nil, err
 	}
 	return &token, nil
@@ -122,7 +153,7 @@ func (c *Client) CreateClusterAccessToken(ctx context.Context, cluster string, r
 // never retries it.
 func (c *Client) CollectClusterAccessToken(ctx context.Context, cluster, id string) (*CollectedClusterAccessToken, error) {
 	var collected CollectedClusterAccessToken
-	if err := c.clusterAccessTokenRequest(ctx, http.MethodPost, c.tenantPath("clusters", cluster, "access-tokens", id, "token"), nil, &collected); err != nil {
+	if err := c.clusterAccessTokenRequest(ctx, http.MethodPost, c.tenantPath("clusters", cluster, "access-tokens", id, "token"), cluster, id, nil, &collected); err != nil {
 		return nil, err
 	}
 	return &collected, nil
@@ -130,5 +161,5 @@ func (c *Client) CollectClusterAccessToken(ctx context.Context, cluster, id stri
 
 // DeleteClusterAccessToken revokes a cluster access token.
 func (c *Client) DeleteClusterAccessToken(ctx context.Context, cluster, id string) error {
-	return c.clusterAccessTokenRequest(ctx, http.MethodDelete, c.tenantPath("clusters", cluster, "access-tokens", id), nil, nil)
+	return c.clusterAccessTokenRequest(ctx, http.MethodDelete, c.tenantPath("clusters", cluster, "access-tokens", id), cluster, id, nil, nil)
 }
