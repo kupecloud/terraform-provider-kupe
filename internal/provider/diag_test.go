@@ -590,7 +590,8 @@ func TestWaitForCondition_DoneOnFirstCheck(t *testing.T) {
 	// the time apply hits the GET" case.
 	shrinkPollInterval(t)
 	// The deadline is far above any load delay and the assertion is the call
-	// count, not elapsed time: one check, no poll interval waited.
+	// count, not elapsed time: a done first check means a single call. Elapsed
+	// time against the poll interval would reintroduce a wall-clock assertion.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 

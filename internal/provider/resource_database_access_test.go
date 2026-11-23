@@ -236,9 +236,16 @@ func TestAccDatabaseBindingRotationErrors(t *testing.T) {
 			mock := newMockKupeAPI()
 			defer mock.close()
 			shrinkPollInterval(t)
+			// Only the deadline case ends by expiry; the others end on their
+			// outcome and get a deadline far above any load delay. The timeout
+			// also bounds the rotation request that precedes the wait.
+			timeout := "1m"
+			if test == "deadline" {
+				timeout = "2s"
+			}
 			config := func(trigger string) string {
 				return testAccDatabaseBindingConfig(mock.url(), "prod", ns("api"), "readwrite", `credentials = { dedicated = true`+trigger+` }
-timeouts = { update = "100ms" }`)
+timeouts = { update = "`+timeout+`" }`)
 			}
 			steps := []resource.TestStep{{Config: config("")}, {Config: config(`, rotation_trigger = "new"`), PreConfig: func() {
 				mock.mu.Lock()
@@ -325,7 +332,7 @@ func TestAccDatabaseExtensionChangeWaitShowsReadyReason(t *testing.T) {
 	mock := newMockKupeAPI()
 	defer mock.close()
 	shrinkPollInterval(t)
-	config := testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false), updateTimeout: "3s"})
+	config := testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false), updateTimeout: "2s"})
 	changed := strings.Replace(config, `name = "orders-db"`, `name = "orders-db"`+`
  postgres = {extensions=[{name="pgcrypto"}]}`, 1)
 	resource.UnitTest(t, resource.TestCase{ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(), Steps: []resource.TestStep{
