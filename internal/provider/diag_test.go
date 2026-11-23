@@ -199,6 +199,49 @@ func TestAPIErrorDetail(t *testing.T) {
 			wantNoSubstr: []string{"already exists", "Contact Kupe Cloud support", "£"},
 		},
 		{
+			name: "409 credit_exhausted says to turn on overage on the Billing page",
+			err: &client.APIError{
+				StatusCode: http.StatusConflict, Code: client.CodeCreditExhausted,
+				Message: "tenant acme's credit for this billing period can't cover another database; turn on overage for databases",
+			},
+			wantSubstr: []string{
+				"Error code: credit_exhausted",
+				"\n\nThis billing period's credit can't cover it, so nothing new can be created and nothing can " +
+					"be made larger. Turn on overage on the Billing page of the Kupe console, then run " +
+					"`terraform apply` again.",
+			},
+			wantNoSubstr: []string{"already exists", "£", "wait until", "spend cap"},
+		},
+		{
+			name: "409 spend_cap_reached says to raise the spend cap on the Billing page",
+			err: &client.APIError{
+				StatusCode: http.StatusConflict, Code: client.CodeSpendCapReached,
+				Message: "tenant acme's spend cap for this billing period can't cover growing this cluster; raise the spend cap",
+			},
+			wantSubstr: []string{
+				"Error code: spend_cap_reached",
+				"\n\nYour spend cap for this billing period can't cover it, so nothing new can be created and " +
+					"nothing can be made larger. Raise the spend cap on the Billing page of the Kupe console, then " +
+					"run `terraform apply` again.",
+			},
+			wantNoSubstr: []string{"already exists", "£", "wait until", "Turn on overage"},
+		},
+		{
+			name: "409 backup_allowance_reached says to turn on overage for databases",
+			err: &client.APIError{
+				StatusCode: http.StatusConflict, Code: client.CodeBackupAllowanceReached,
+				Message: "Backups are at your plan's allowance. Turn on database overage in Billing to take this backup",
+			},
+			wantSubstr: []string{
+				"Error code: backup_allowance_reached",
+				"Turn on overage for databases",
+				"\n\nThis backup would take the database's backups past the free allowance, and overage for " +
+					"databases is off, so no backup was taken. Turn on overage for databases on the Billing page " +
+					"of the Kupe console, then run `terraform apply` again.",
+			},
+			wantNoSubstr: []string{"already exists", "£", "keeps 20 manual backups"},
+		},
+		{
 			name:         "409 with a code this provider does not know shows the API's words only",
 			err:          &client.APIError{StatusCode: http.StatusConflict, Code: "something_new", Message: "refused"},
 			wantSubstr:   []string{"kupe API returned 409: refused", "Error code: something_new"},

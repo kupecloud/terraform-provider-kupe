@@ -387,6 +387,15 @@ func TestAccDatabaseBackupResource_Refusals(t *testing.T) {
 			},
 			wantErr: `(?s)Error code: terminating.*` + wrappedText("The database is being deleted, so it cannot be backed up."),
 		},
+		{
+			name: "past the free allowance with overage for databases off",
+			setup: func(m *mockKupeAPI) {
+				m.backupRefusal = &mockRefusal{http.StatusConflict, client.CodeBackupAllowanceReached,
+					"Backups are at your plan's allowance. Turn on database overage in Billing to take this backup"}
+			},
+			wantErr: `(?s)failed to create database backup.*Error code: backup_allowance_reached.*` +
+				wrappedText("This backup would take the database's backups past the free allowance, and overage for databases is off, so no backup was taken. Turn on overage for databases on the Billing page of the Kupe console"),
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
