@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -89,9 +90,15 @@ func TestCodeWireValues_MatchKupeAPI(t *testing.T) {
 	}
 }
 
-// TestCodeWireValues_CoverEveryConstant fails when a Code* constant is
-// added to the package without a row in codeWireValues, or a row names a
-// constant that no longer exists.
+// TestCodeWireValues_CoverEveryConstant reads each constant's value from
+// the package source and checks it against its row's expected value. So it
+// fails when a Code* constant is added without a row, a row names a
+// constant that no longer exists, or a row's name and the constant it
+// references disagree (a copied row with only the name edited).
+//
+// It finds constants by name only: an exported const whose name starts
+// with "Code". An error code declared under any other name is not found
+// and needs its own row added by hand.
 func TestCodeWireValues_CoverEveryConstant(t *testing.T) {
 	declared := declaredCodeConstants(t)
 
@@ -101,39 +108,40 @@ func TestCodeWireValues_CoverEveryConstant(t *testing.T) {
 			t.Errorf("%s has more than one row", tt.name)
 		}
 		inTable[tt.name] = true
+
+		value, ok := declared[tt.name]
+		if !ok {
+			t.Errorf("row %s names a constant that is not declared", tt.name)
+			continue
+		}
+		if value != tt.want {
+			t.Errorf("%s is declared as %q; its row expects %q", tt.name, value, tt.want)
+		}
 	}
 
-	var missing, stale []string
+	var missing []string
 	for name := range declared {
 		if !inTable[name] {
 			missing = append(missing, name)
 		}
 	}
-	for name := range inTable {
-		if !declared[name] {
-			stale = append(stale, name)
-		}
-	}
 	sort.Strings(missing)
-	sort.Strings(stale)
 	if len(missing) > 0 {
 		t.Errorf("constants without a wire-value row (copy the value from kupe-api internal/errors/errors.go): %v", missing)
 	}
-	if len(stale) > 0 {
-		t.Errorf("rows for constants that are not declared: %v", stale)
-	}
 }
 
-// declaredCodeConstants returns the names of the exported Code* constants
-// declared in the package's non-test Go files.
-func declaredCodeConstants(t *testing.T) map[string]bool {
+// declaredCodeConstants returns each exported Code* constant declared in
+// the package's non-test Go files, mapped to its string value as written
+// in the source. Only constants named Code* are found.
+func declaredCodeConstants(t *testing.T) map[string]string {
 	t.Helper()
 	entries, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatalf("read package dir: %v", err)
 	}
 	fset := token.NewFileSet()
-	names := map[string]bool{}
+	values := map[string]string{}
 	for _, e := range entries {
 		file := e.Name()
 		if e.IsDir() || !strings.HasSuffix(file, ".go") || strings.HasSuffix(file, "_test.go") {
@@ -149,16 +157,29 @@ func declaredCodeConstants(t *testing.T) map[string]bool {
 				continue
 			}
 			for _, spec := range gen.Specs {
-				for _, ident := range spec.(*ast.ValueSpec).Names {
-					if strings.HasPrefix(ident.Name, "Code") && ident.IsExported() {
-						names[ident.Name] = true
+				vs := spec.(*ast.ValueSpec)
+				for i, ident := range vs.Names {
+					if !strings.HasPrefix(ident.Name, "Code") || !ident.IsExported() {
+						continue
 					}
+					if i >= len(vs.Values) {
+						t.Fatalf("%s: %s has no value of its own", file, ident.Name)
+					}
+					lit, ok := vs.Values[i].(*ast.BasicLit)
+					if !ok || lit.Kind != token.STRING {
+						t.Fatalf("%s: %s is not a string literal", file, ident.Name)
+					}
+					value, err := strconv.Unquote(lit.Value)
+					if err != nil {
+						t.Fatalf("%s: unquote %s: %v", file, ident.Name, err)
+					}
+					values[ident.Name] = value
 				}
 			}
 		}
 	}
-	if len(names) == 0 {
+	if len(values) == 0 {
 		t.Fatal("found no Code* constants; the package layout changed")
 	}
-	return names
+	return values
 }
