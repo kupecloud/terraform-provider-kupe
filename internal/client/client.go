@@ -176,11 +176,12 @@ func (e *APIError) Error() string {
 // IsNotFound returns true if the error is a 404 for the requested resource.
 // A 404 meaning a whole feature is unavailable (CodeDatabasesUnavailable,
 // CodeRegistriesUnavailable, CodeBackupsUnavailable) is excluded, and so is a registry route the API
-// does not serve at all (IsRegistriesNotServed): treating either as "not
+// does not serve at all (IsRegistriesNotServed), or a cluster access token
+// route (IsClusterAccessTokensNotServed): treating either as "not
 // found" would drop existing resources from state on refresh and report
 // deletes as complete.
 func IsNotFound(err error) bool {
-	if IsRegistriesNotServed(err) {
+	if IsRegistriesNotServed(err) || IsClusterAccessTokensNotServed(err) {
 		return false
 	}
 	var apiErr *APIError

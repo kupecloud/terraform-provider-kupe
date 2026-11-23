@@ -147,3 +147,57 @@ func TestClusterAccessTokenCodesExactCase(t *testing.T) {
 		}
 	}
 }
+
+// TestClusterAccessTokenNotFoundKinds: only kupe-api's named 404 (the token
+// or its cluster) is not found; a 404 that carries no code and names nothing
+// is a route the API does not serve, which must never read as revoked.
+func TestClusterAccessTokenNotFoundKinds(t *testing.T) {
+	const id = "cat-0a1b2c3d4e5f6a7b"
+	tests := []struct {
+		name, contentType, body     string
+		wantNotFound, wantNotServed bool
+	}{
+		{name: "token not found", body: `{"error":"access token \"` + id + `\" not found"}`, wantNotFound: true},
+		{name: "cluster not found", body: `{"error":"cluster \"dev\" not found"}`, wantNotFound: true},
+		{name: "router 404", contentType: "text/plain; charset=utf-8", body: "404 page not found\n", wantNotServed: true},
+		{name: "unnamed JSON 404", body: `{"error":"not found"}`, wantNotServed: true},
+	}
+	calls := map[string]func(*Client) error{
+		"get": func(c *Client) error { _, err := c.GetClusterAccessToken(context.Background(), "dev", id); return err },
+		"collect": func(c *Client) error {
+			_, err := c.CollectClusterAccessToken(context.Background(), "dev", id)
+			return err
+		},
+		"delete": func(c *Client) error { return c.DeleteClusterAccessToken(context.Background(), "dev", id) },
+	}
+	for _, tt := range tests {
+		for call, do := range calls {
+			t.Run(tt.name+"/"+call, func(t *testing.T) {
+				mock := newMockAPI()
+				defer mock.close()
+				answer := func(w http.ResponseWriter, _ *http.Request) {
+					ct := tt.contentType
+					if ct == "" {
+						ct = "application/json"
+					}
+					w.Header().Set("Content-Type", ct)
+					w.WriteHeader(http.StatusNotFound)
+					_, _ = w.Write([]byte(tt.body))
+				}
+				mock.on("GET", catPath+"/"+id, answer)
+				mock.on("POST", catPath+"/"+id+"/token", answer)
+				mock.on("DELETE", catPath+"/"+id, answer)
+				err := do(mock.client("acme"))
+				if err == nil {
+					t.Fatal("error = nil")
+				}
+				if got := IsNotFound(err); got != tt.wantNotFound {
+					t.Errorf("IsNotFound() = %v, want %v (%v)", got, tt.wantNotFound, err)
+				}
+				if got := IsClusterAccessTokensNotServed(err); got != tt.wantNotServed {
+					t.Errorf("IsClusterAccessTokensNotServed() = %v, want %v (%v)", got, tt.wantNotServed, err)
+				}
+			})
+		}
+	}
+}

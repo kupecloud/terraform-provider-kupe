@@ -39,6 +39,16 @@ type mockClusterAccessTokenState struct {
 	// catRevokeOnCollect deletes the token when it is collected, as a revoke
 	// landing during the collect does: the answer is 404.
 	catRevokeOnCollect bool
+	// catLoseCollectAfterClaim claims the token at its collect and then
+	// answers 500, as kupe-api does when it cannot build the kubeconfig
+	// after the claim: the token is lost.
+	catLoseCollectAfterClaim bool
+	// catRevokeAfterGet deletes the token once a GET has answered, as a
+	// revoke landing during the wait does: later requests answer 404.
+	catRevokeAfterGet bool
+	// catRoutesMissing answers every access token route like a kupe-api
+	// older than them: the HTTP router's plain-text 404.
+	catRoutesMissing bool
 	// catRequests records every access token request in order.
 	catRequests []mockRegistryRequest
 }
@@ -89,6 +99,12 @@ func (m *mockKupeAPI) serveClusterAccessTokens(w http.ResponseWriter, r *http.Re
 	var logged map[string]any
 	_ = json.Unmarshal(raw, &logged)
 	m.catRequests = append(m.catRequests, mockRegistryRequest{method: r.Method, path: r.URL.Path, body: logged})
+	if m.catRoutesMissing {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, "404 page not found\n")
+		return
+	}
 
 	segs := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, mockClustersPath), "/"), "/")
 	cluster := segs[0]
@@ -109,6 +125,9 @@ func (m *mockKupeAPI) serveClusterAccessTokens(w http.ResponseWriter, r *http.Re
 		m.createClusterAccessToken(w, r, cluster)
 	case len(segs) == 3 && r.Method == http.MethodGet:
 		m.getClusterAccessToken(w, token)
+		if m.catRevokeAfterGet {
+			delete(m.catTokens, segs[2])
+		}
 	case len(segs) == 3 && r.Method == http.MethodDelete:
 		delete(m.catTokens, segs[2])
 		w.WriteHeader(http.StatusNoContent)
@@ -208,6 +227,10 @@ func (m *mockKupeAPI) collectClusterAccessToken(w http.ResponseWriter, token map
 	}
 	token["collected"] = true
 	token["collectedAt"] = "2026-11-22T10:00:05Z"
+	if m.catLoseCollectAfterClaim {
+		mockError(w, http.StatusInternalServerError, "", "internal server error")
+		return
+	}
 	cluster := token["cluster"].(string)
 	w.Header().Set("Cache-Control", "no-store")
 	mustEncodeJSON(w, map[string]any{

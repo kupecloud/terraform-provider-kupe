@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
@@ -880,5 +881,151 @@ func TestClusterAccessTokenRead_ExpiredWarns(t *testing.T) {
 				t.Error("Read did not keep the token and kubeconfig from state")
 			}
 		})
+	}
+}
+
+// TestAccClusterAccessTokenResource_CollectAnswerLost: the platform claims
+// the token at this apply's collect and the answer never arrives (here a 500
+// after the claim). Create says the token could not be delivered, never that
+// it was collected outside the apply; it is tainted and replaced next.
+func TestAccClusterAccessTokenResource_CollectAnswerLost(t *testing.T) {
+	shrinkPollInterval(t)
+	mock := newMockKupeAPI()
+	defer mock.close()
+	seedCATClusters(mock, "dev")
+	mock.setState(func(m *mockKupeAPI) { m.catLoseCollectAfterClaim = true })
+	config := testAccClusterAccessTokenConfig(mock.url(), "dev", "ci", "admin", "")
+	acc.UnitTest(t, acc.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		CheckDestroy:             testAccCheckNoClusterAccessTokens(mock),
+		Steps: []acc.TestStep{
+			{
+				Config: config,
+				ExpectError: regexp.MustCompile(`(?s)could not be delivered.*served\s+access\s+token\s+"cat-[a-f0-9]{16}"\s+to\s+this\s+apply.*` +
+					wrappedText("revokes it and creates a new one.")),
+			},
+			{
+				PreConfig:        func() { mock.setState(func(m *mockKupeAPI) { m.catLoseCollectAfterClaim = false }) },
+				Config:           config,
+				ConfigPlanChecks: expectCATAction(plancheck.ResourceActionReplace),
+				Check:            acc.TestCheckResourceAttr(catAddr, "collected", "true"),
+			},
+		},
+	})
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	for _, req := range mock.catRequests {
+		if req.method == http.MethodDelete {
+			return
+		}
+	}
+	t.Error("the replace never revoked the lost token")
+}
+
+// TestAccClusterAccessTokenResource_RevokedDuringWait: a token gone (404 on
+// GET) while Create waits for Ready is removed from state at once, not
+// polled to the timeout; the next apply creates a new one.
+func TestAccClusterAccessTokenResource_RevokedDuringWait(t *testing.T) {
+	shrinkPollInterval(t)
+	mock := newMockKupeAPI()
+	defer mock.close()
+	seedCATClusters(mock, "dev")
+	mock.setState(func(m *mockKupeAPI) {
+		m.catPhases = []string{"Pending"}
+		m.catRevokeAfterGet = true
+	})
+	config := testAccClusterAccessTokenConfig(mock.url(), "dev", "ci", "admin", "")
+	// firstApply is how many requests the failed apply made.
+	firstApply := 0
+	acc.UnitTest(t, acc.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		CheckDestroy:             testAccCheckNoClusterAccessTokens(mock),
+		Steps: []acc.TestStep{
+			{
+				Config:      config,
+				ExpectError: regexp.MustCompile(`(?s)removed before it was collected.*nothing\s+to\s+revoke`),
+			},
+			{
+				PreConfig: func() {
+					mock.setState(func(m *mockKupeAPI) {
+						firstApply = len(m.catRequests)
+						m.catPhases, m.catRevokeAfterGet = nil, false
+					})
+				},
+				Config:           config,
+				ConfigPlanChecks: expectCATAction(plancheck.ResourceActionCreate),
+			},
+		},
+	})
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	for _, req := range mock.catRequests[:firstApply] {
+		if strings.HasSuffix(req.path, "/token") {
+			t.Errorf("a token gone while Pending was collected: %s %s", req.method, req.path)
+		}
+	}
+	if gets := len(mock.catRequests[:firstApply]); gets > 3 {
+		t.Errorf("the failed apply made %d requests, want the POST and two GETs (no polling to the timeout)", gets)
+	}
+}
+
+// TestAccClusterAccessTokenResource_RoutesNotServed: a 404 with no code that
+// names nothing (a kupe API without these routes, a misrouted ingress) is an
+// error with the hint, never a revoke: refresh keeps the token in state, and
+// it is still there once the routes answer again.
+func TestAccClusterAccessTokenResource_RoutesNotServed(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+	seedCATClusters(mock, "dev")
+	config := testAccClusterAccessTokenConfig(mock.url(), "dev", "ci", "admin", "")
+	var id string
+	acc.UnitTest(t, acc.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		CheckDestroy:             testAccCheckNoClusterAccessTokens(mock),
+		Steps: []acc.TestStep{
+			{Config: config, Check: func(*terraform.State) error { id = catID(mock); return nil }},
+			{
+				PreConfig: func() { mock.setState(func(m *mockKupeAPI) { m.catRoutesMissing = true }) },
+				Config:    config,
+				ExpectError: regexp.MustCompile(`(?s)failed to read cluster access token.*` +
+					wrappedText("does not offer cluster access tokens yet")),
+			},
+			{
+				PreConfig: func() { mock.setState(func(m *mockKupeAPI) { m.catRoutesMissing = false }) },
+				Config:    config,
+				ConfigPlanChecks: acc.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+				Check: func(s *terraform.State) error {
+					attrs := s.RootModule().Resources[catAddr].Primary.Attributes
+					if attrs["id"] != id || attrs["token"] != mockClusterAccessToken(id) {
+						return fmt.Errorf("state lost the token: id %q (was %q), token length %d", attrs["id"], id, len(attrs["token"]))
+					}
+					return nil
+				},
+			},
+		},
+	})
+}
+
+// TestClusterAccessTokenDelete_RoutesNotServed: a destroy against an API
+// without the routes fails rather than report a revoke that never happened.
+func TestClusterAccessTokenDelete_RoutesNotServed(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+	seedCATClusters(mock, "dev")
+	mock.setState(func(m *mockKupeAPI) { m.catRoutesMissing = true })
+	r := NewClusterAccessTokenResource().(*ClusterAccessTokenResource)
+	r.client = client.New(mock.url(), "acme", "kupe_test_key")
+	s := testResourceSchema(t, r)
+	raw := testCATPlan(t, s)
+	state := tfsdk.State{Schema: s.Schema, Raw: raw}
+	if diags := state.SetAttribute(context.Background(), path.Root("id"), "cat-0a1b2c3d4e5f6a7b"); diags.HasError() {
+		t.Fatal(diags)
+	}
+	var resp resource.DeleteResponse
+	r.Delete(context.Background(), resource.DeleteRequest{State: state}, &resp)
+	if errs := resp.Diagnostics.Errors(); len(errs) != 1 || !strings.Contains(errs[0].Detail(), "does not offer cluster access tokens yet") {
+		t.Fatalf("diagnostics = %v, want the not-served error", resp.Diagnostics)
 	}
 }

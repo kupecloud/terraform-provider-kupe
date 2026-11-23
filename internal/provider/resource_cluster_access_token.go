@@ -257,6 +257,7 @@ var (
 	errClusterAccessTokenFailed    = errors.New("cluster access token failed")
 	errClusterAccessTokenGone      = errors.New("cluster access token removed")
 	errClusterAccessTokenCollected = errors.New("cluster access token already collected")
+	errClusterAccessTokenLost      = errors.New("cluster access token collected but not delivered")
 )
 
 // collectRefusal is a collect the API refused for good: the token failed,
@@ -276,6 +277,10 @@ func (e *collectRefusal) Unwrap() error { return e.err }
 func (r *ClusterAccessTokenResource) waitAndCollect(ctx context.Context, timeout time.Duration, m *ClusterAccessTokenResourceModel, state *tfsdk.State, diags *diag.Diagnostics) {
 	cluster, id := m.Cluster.ValueString(), m.ID.ValueString()
 	var last *client.ClusterAccessToken
+	// collectSent is set once a collect has been sent: a later "already
+	// collected" may then be this apply's own collect whose answer was lost
+	// (in transit, at the deadline, or a 500 after the platform's claim).
+	collectSent := false
 	err := pollUntil(ctx, timeout, func(c context.Context) (bool, error) {
 		token, err := r.client.GetClusterAccessToken(c, cluster, id)
 		if client.IsNotFound(err) {
@@ -295,9 +300,18 @@ func (r *ClusterAccessTokenResource) waitAndCollect(ctx context.Context, timeout
 			return false, nil
 		}
 		if token.Collected {
+			if collectSent {
+				return true, errClusterAccessTokenLost
+			}
 			return true, errClusterAccessTokenCollected
 		}
-		return r.collect(c, m, state, diags)
+		sentBefore := collectSent
+		collectSent = true
+		done, err := r.collect(c, m, state, diags)
+		if sentBefore && errors.Is(err, errClusterAccessTokenCollected) {
+			return true, errClusterAccessTokenLost
+		}
+		return done, err
 	})
 
 	const tainted = "\n\nTerraform keeps the token in state, marked tainted, so the next `terraform apply` replaces it."
@@ -315,6 +329,11 @@ func (r *ClusterAccessTokenResource) waitAndCollect(ctx context.Context, timeout
 			detail += "\n\nStatus message: " + last.Status.Message
 		}
 		diags.AddError("cluster access token failed", detail+tainted)
+	case errors.Is(err, errClusterAccessTokenLost):
+		diags.AddError("cluster access token could not be delivered",
+			fmt.Sprintf("The platform served access token %q to this apply, but its answer did not reach "+
+				"Terraform, so the token is lost: it cannot be shown again. It is tainted, and the next "+
+				"`terraform apply` revokes it and creates a new one.", id))
 	case errors.Is(err, errClusterAccessTokenCollected):
 		diags.AddError("cluster access token already collected",
 			fmt.Sprintf("access token %q was collected outside this apply, so Terraform cannot hold it; it is "+

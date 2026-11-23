@@ -31,6 +31,20 @@ The CI job writes the secret to a file and points `KUBECONFIG` at it.
 
 A token never changes in place. When it expires, the platform removes it, and the next `terraform plan` shows it being created again, with a new token and kubeconfig. Until then a refresh warns that it has expired. To renew earlier, change `display_name` or `expires_in_days`, or run `terraform apply -replace=kupe_cluster_access_token.ci`.
 
+A replacement revokes the old token before it creates the new one, so for a while CI has no working credential. For a token CI depends on, create the new one first:
+
+```terraform
+resource "kupe_cluster_access_token" "ci" {
+  # ...
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+```
+
+The old token is revoked once the new one is collected and anything that reads its `kubeconfig` (such as the CI secret above) has been updated. Both count toward the cluster's limit of 20 access tokens while the replacement runs.
+
 ### Keep the token out of state
 
 `token` and `kubeconfig` are stored in Terraform state in plain text; marking them sensitive only hides them in plan and apply output. The platform shows them once, when Terraform collects them during create, and never again: Terraform keeps them in state and never collects again. If an apply stops after the token is created but before it is collected, the token stays in state, marked tainted, and the next apply replaces it. If your state backend is not encrypted and access-controlled, create the token outside Terraform instead, and store the kubeconfig in your CI system's secret store.
