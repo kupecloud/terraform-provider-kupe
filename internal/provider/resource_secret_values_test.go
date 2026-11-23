@@ -694,7 +694,7 @@ func TestSecretConfirmedCreateTimeoutWarningAndTerminalError(t *testing.T) {
 	// outcome and gets a timeout far above any load delay; the timeout case can
 	// only end by expiry, so a long deadline delays it but cannot change it.
 	const settleTimeout = "1m"
-	const expireTimeout = "3s"
+	const expireTimeout = "2s"
 	for _, terminal := range []bool{false, true} {
 		t.Run(fmt.Sprintf("terminal %v", terminal), func(t *testing.T) {
 			timeout := expireTimeout

@@ -207,8 +207,16 @@ func TestSecretCreateRecordsStateBeforeFirstPoll(t *testing.T) {
 
 func TestSecretDeleteWaitAndTimeoutWarning(t *testing.T) {
 	shrinkPollInterval(t)
+	// The delete timeout also bounds the delete request before the wait. The
+	// lag case ends on its outcome (404) and gets a deadline far above any load
+	// delay; the never-withdrawn case can only end by expiry, so a long deadline
+	// delays it but cannot change its result.
 	for _, lag := range []int{3, -1} {
 		t.Run(fmt.Sprintf("lag %d", lag), func(t *testing.T) {
+			timeout := "1m"
+			if lag < 0 {
+				timeout = "2s"
+			}
 			mock := newMockKupeAPI()
 			defer mock.close()
 			c := client.New(mock.url(), "acme", "kupe_test_key")
@@ -224,7 +232,7 @@ func TestSecretDeleteWaitAndTimeoutWarning(t *testing.T) {
 			for key, typ := range timeoutType.AttributeTypes {
 				timeoutValues[key] = tftypes.NewValue(typ, nil)
 			}
-			timeoutValues["delete"] = tftypes.NewValue(tftypes.String, "80ms")
+			timeoutValues["delete"] = tftypes.NewValue(tftypes.String, timeout)
 			raw := testPlanValue(t, s, map[string]tftypes.Value{"name": tftypes.NewValue(tftypes.String, "db-password"), "timeouts": tftypes.NewValue(timeoutType, timeoutValues)})
 			var resp resource.DeleteResponse
 			r.Delete(context.Background(), resource.DeleteRequest{State: tfsdk.State{Schema: s.Schema, Raw: raw}}, &resp)
