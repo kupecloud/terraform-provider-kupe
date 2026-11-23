@@ -312,6 +312,17 @@ func TestAccDatabaseResource_CodedRefusals(t *testing.T) {
 				ExpectError: regexp.MustCompile(`(?s)failed to create database.*Error code: payment_setup_required.*` +
 					wrappedText("Your tenant has no payment card on file, so nothing new can be created and nothing can be made larger. Add a payment method on the Billing page of the Kupe console")),
 			},
+			{
+				PreConfig: func() {
+					mock.setState(func(m *mockKupeAPI) {
+						m.databaseRefusals = map[string]mockRefusal{"POST": {http.StatusConflict, client.CodeCreditExhausted,
+							"tenant acme's credit for this billing period can't cover another database; turn on overage for databases"}}
+					})
+				},
+				Config: config,
+				ExpectError: regexp.MustCompile(`(?s)failed to create database.*Error code: credit_exhausted.*` +
+					wrappedText("This billing period's credit can't cover it, so nothing new can be created and nothing can be made larger. Turn on overage on the Billing page of the Kupe console")),
+			},
 			{Config: config},
 			{
 				PreConfig: func() {
@@ -323,6 +334,17 @@ func TestAccDatabaseResource_CodedRefusals(t *testing.T) {
 				Config: testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false), cpu: "1"}),
 				ExpectError: regexp.MustCompile(`(?s)failed to update database.*Error code: terminating.*` +
 					wrappedText("It is being deleted, so it can no longer be changed or bound.")),
+			},
+			{
+				PreConfig: func() {
+					mock.setState(func(m *mockKupeAPI) {
+						m.databaseRefusals = map[string]mockRefusal{"PATCH": {http.StatusConflict, client.CodeSpendCapReached,
+							"tenant acme's spend cap for this billing period can't cover growing this database; raise the spend cap"}}
+					})
+				},
+				Config: testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false), cpu: "1"}),
+				ExpectError: regexp.MustCompile(`(?s)failed to update database.*Error code: spend_cap_reached.*` +
+					wrappedText("Your spend cap for this billing period can't cover it, so nothing new can be created and nothing can be made larger. Raise the spend cap on the Billing page of the Kupe console")),
 			},
 			{
 				// The platform stops offering backups: a backup change is

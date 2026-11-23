@@ -430,6 +430,16 @@ func apiErrorDetail(err error) string {
 			return base + "\n\nYour tenant has no payment card on file, so nothing new can be created and " +
 				"nothing can be made larger. Add a payment method on the Billing page of the Kupe console, then " +
 				"run `terraform apply` again."
+		case client.CodeCreditExhausted:
+			// No wait advice: kupe-api's sentence adds "or wait until
+			// <date>" when waiting can help.
+			return base + "\n\nThis billing period's credit can't cover it, so nothing new can be created and " +
+				"nothing can be made larger. Turn on overage on the Billing page of the Kupe console, then run " +
+				"`terraform apply` again."
+		case client.CodeSpendCapReached:
+			return base + "\n\nYour spend cap for this billing period can't cover it, so nothing new can be " +
+				"created and nothing can be made larger. Raise the spend cap on the Billing page of the Kupe " +
+				"console, then run `terraform apply` again."
 		case client.CodeRegistryAlreadyExists:
 			// Same code for a registry still being deleted (kupe-api's
 			// "it is being deleted; try again when it is gone"): no import
@@ -457,6 +467,10 @@ func apiErrorDetail(err error) string {
 		case client.CodeBackupLimitReached:
 			return base + "\n\nThe database already keeps 20 manual backups, the most it can, so no backup was " +
 				"taken. Delete one you no longer need, then run `terraform apply` again."
+		case client.CodeBackupAllowanceReached:
+			return base + "\n\nThis backup would take the database's backups past the free allowance, and " +
+				"overage for databases is off, so no backup was taken. Turn on overage for databases on the " +
+				"Billing page of the Kupe console, then run `terraform apply` again."
 		case client.CodeDatabaseNotReady:
 			return base + "\n\nThe database is not running, so no backup was taken. Wait until its phase is " +
 				"Running, then run `terraform apply` again."

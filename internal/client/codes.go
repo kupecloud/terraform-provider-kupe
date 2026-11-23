@@ -39,6 +39,14 @@ const (
 	// CodePaymentSetupRequired comes with a 409 when creating or growing a
 	// cluster or database before the tenant has added a payment method.
 	CodePaymentSetupRequired = "payment_setup_required"
+	// CodeCreditExhausted comes with a 409 when creating or growing a
+	// cluster or database that this billing period's credit cannot cover
+	// while overage for it is off.
+	CodeCreditExhausted = "credit_exhausted"
+	// CodeSpendCapReached comes with a 409 when creating or growing a
+	// cluster or database that the spend cap for this billing period cannot
+	// cover.
+	CodeSpendCapReached = "spend_cap_reached"
 	// CodePlanLimitReached comes with a 400 when the tenant's plan has no
 	// room for another cluster or database.
 	CodePlanLimitReached = "plan_limit_reached"
@@ -72,6 +80,10 @@ const (
 	// CodeBackupLimitReached comes with a 409 when the database already
 	// keeps as many manual backups as it may.
 	CodeBackupLimitReached = "backup_limit_reached"
+	// CodeBackupAllowanceReached comes with a 409 when a manual backup would
+	// take the database's backups past the free allowance while overage for
+	// databases is off.
+	CodeBackupAllowanceReached = "backup_allowance_reached"
 	// CodeRestoreSourceNotFound comes with a 400 when the backup or database
 	// a restore names does not exist.
 	CodeRestoreSourceNotFound = "restore_source_not_found"
