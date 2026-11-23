@@ -338,6 +338,9 @@ func apiErrorDetail(err error) string {
 		case client.CodeRegistryTokenExpiryInvalid:
 			return base + "\n\nSet `expires_in_days` to a number of days the platform accepts, then run " +
 				"`terraform apply` again."
+		case client.CodeAccessTokenExpiryInvalid:
+			return base + "\n\nSet `expires_in_days` to a number of days the platform accepts, then run " +
+				"`terraform apply` again."
 		case client.CodeBackupsUnavailable:
 			return base + "\n\n" + backupsUnavailableHint(apiErr.Field)
 		case client.CodeDatabasePoolerUnavailable:
@@ -437,6 +440,9 @@ func apiErrorDetail(err error) string {
 		case client.CodeRegistryTokenLimitReached:
 			return base + "\n\nThe registry holds as many access tokens as it can. Revoke one you no longer use " +
 				"(destroy its `kupe_registry_token`, or revoke it in the Kupe Console), then run `terraform apply` again."
+		case client.CodeAccessTokenLimitReached:
+			return base + "\n\nThe cluster holds as many access tokens as it can. Revoke one you no longer use " +
+				"(destroy its `kupe_cluster_access_token`, or revoke it in the Kupe Console), then run `terraform apply` again."
 		case client.CodeRestoreSourceNotReady:
 			return base + "\n\nThe backup named in `source` has not completed, or the database named in `source` " +
 				"has no restore window yet, so nothing was created. Wait for it, then run `terraform apply` again."

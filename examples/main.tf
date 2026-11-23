@@ -85,6 +85,22 @@ output "cicd_api_key" {
   sensitive = true
 }
 
+# A cluster access token for CI deploys to prod: collected once during
+# apply, its kubeconfig is kept (sensitive) in state
+resource "kupe_cluster_access_token" "ci" {
+  cluster      = kupe_cluster.prod.name
+  display_name = "CI/CD Pipeline"
+  access = {
+    role = "admin"
+  }
+  expires_in_days = 30
+}
+
+output "ci_kubeconfig" {
+  value     = kupe_cluster_access_token.ci.kubeconfig
+  sensitive = true
+}
+
 output "prod_endpoint" {
   value = kupe_cluster.prod.endpoint
 }
