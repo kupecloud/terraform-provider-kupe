@@ -197,6 +197,11 @@ const backupsNotOfferedHint = "This Kupe platform does not offer manual backups 
 const registriesNotServedHint = "The kupe API at this host does not offer registries yet, so nothing was " +
 	"changed and Terraform state is kept unchanged. Check the provider's `host`, or contact Kupe Cloud support."
 
+// clusterAccessTokensNotServedHint explains an access token route the API
+// does not have: the kupe API at this host predates cluster access tokens.
+const clusterAccessTokensNotServedHint = "The kupe API at this host does not offer cluster access tokens yet, so " +
+	"nothing was changed and Terraform state is kept unchanged. Check the provider's `host`, or contact Kupe Cloud support."
+
 // registryMissingHint explains a cluster connection or access token create
 // that found no registry: in one configuration, nothing ordered it after the
 // registry's own create (F-2).
@@ -247,7 +252,7 @@ func apiErrorSummary(apiErr *client.APIError) string {
 // not enabled are permanent and included, as is a registry route the API does
 // not serve at all.
 func isTerminalAPIError(err error) bool {
-	if client.IsRegistriesNotServed(err) {
+	if client.IsRegistriesNotServed(err) || client.IsClusterAccessTokensNotServed(err) {
 		return true
 	}
 	var apiErr *client.APIError
@@ -291,6 +296,9 @@ func apiErrorDetail(err error) string {
 	}
 	if client.IsRegistriesNotServed(err) {
 		return base + "\n\n" + registriesNotServedHint
+	}
+	if client.IsClusterAccessTokensNotServed(err) {
+		return base + "\n\n" + clusterAccessTokensNotServedHint
 	}
 	switch apiErr.Code {
 	case client.CodeRoleReserved:
