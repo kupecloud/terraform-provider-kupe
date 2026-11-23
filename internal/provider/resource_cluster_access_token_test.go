@@ -575,6 +575,39 @@ func TestAccClusterAccessTokenResource_CollectedElsewhere(t *testing.T) {
 	}
 }
 
+// TestAccClusterAccessTokenResource_RefusedCollectIsNotLost: a collect the
+// API refuses (409 not ready) was never delivered, so a token reported
+// collected afterwards was collected elsewhere, not lost by this apply.
+func TestAccClusterAccessTokenResource_RefusedCollectIsNotLost(t *testing.T) {
+	shrinkPollInterval(t)
+	var mock *mockKupeAPI
+	mock = newMockKupeAPI(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r)
+			if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/token") {
+				mock.setState(func(m *mockKupeAPI) {
+					for _, tok := range m.catTokens {
+						tok["collected"], tok["collectedAt"] = true, "2026-11-22T10:00:01Z"
+					}
+				})
+			}
+		})
+	})
+	defer mock.close()
+	seedCATClusters(mock, "dev")
+	mock.setState(func(m *mockKupeAPI) {
+		m.catCollectAnswers = []mockCollectAnswer{{status: http.StatusConflict, code: client.CodeAccessTokenNotReady}}
+	})
+	acc.UnitTest(t, acc.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		CheckDestroy:             testAccCheckNoClusterAccessTokens(mock),
+		Steps: []acc.TestStep{{
+			Config:      testAccClusterAccessTokenConfig(mock.url(), "dev", "ci", "admin", ""),
+			ExpectError: regexp.MustCompile(`(?s)already collected.*was\s+collected\s+outside\s+this\s+apply`),
+		}},
+	})
+}
+
 // TestAccClusterAccessTokenResource_RevokedDuringCollect: a token gone (404)
 // at the collect is removed from state, with nothing left to revoke; the
 // next apply creates a new one.

@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
 )
@@ -134,6 +135,8 @@ func TestClusterAccessTokenCollectErrors(t *testing.T) {
 // internal/errors/errors.go).
 func TestClusterAccessTokenCodesExactCase(t *testing.T) {
 	codes := map[string]string{
+		CodeAccessTokenNotFound:           "ACCESS_TOKEN_NOT_FOUND",
+		CodeClusterNotFound:               "CLUSTER_NOT_FOUND",
 		CodeAccessTokenExpiryInvalid:      "ACCESS_TOKEN_EXPIRY_INVALID",
 		CodeAccessTokenLimitReached:       "ACCESS_TOKEN_LIMIT_REACHED",
 		CodeAccessTokenNotReady:           "ACCESS_TOKEN_NOT_READY",
@@ -144,6 +147,26 @@ func TestClusterAccessTokenCodesExactCase(t *testing.T) {
 	for got, want := range codes {
 		if got != want {
 			t.Errorf("code %q, want %q", got, want)
+		}
+	}
+}
+
+// TestRequestDelivered: a refusal (4xx) did nothing; a success, a 5xx and a
+// transport error may have.
+func TestRequestDelivered(t *testing.T) {
+	for name, tt := range map[string]struct {
+		err  error
+		want bool
+	}{
+		"success":   {nil, true},
+		"409":       {&APIError{StatusCode: 409}, false},
+		"410":       {&APIError{StatusCode: 410}, false},
+		"404":       {&ClusterAccessTokensNotServedError{Err: &APIError{StatusCode: 404}}, false},
+		"500":       {&APIError{StatusCode: 500}, true},
+		"transport": {errors.New("connection reset"), true},
+	} {
+		if got := RequestDelivered(tt.err); got != tt.want {
+			t.Errorf("%s: RequestDelivered() = %v, want %v", name, got, tt.want)
 		}
 	}
 }
@@ -159,6 +182,11 @@ func TestClusterAccessTokenNotFoundKinds(t *testing.T) {
 	}{
 		{name: "token not found", body: `{"error":"access token \"` + id + `\" not found"}`, wantNotFound: true},
 		{name: "cluster not found", body: `{"error":"cluster \"dev\" not found"}`, wantNotFound: true},
+		{name: "coded token", body: `{"error":"gone","code":"ACCESS_TOKEN_NOT_FOUND"}`, wantNotFound: true},
+		{name: "coded cluster", body: `{"error":"gone","code":"CLUSTER_NOT_FOUND"}`, wantNotFound: true},
+		{name: "uncoded other token", body: `{"error":"access token \"cat-ffffffffffffffff\" not found"}`, wantNotServed: true},
+		{name: "uncoded other cluster", body: `{"error":"cluster \"prod\" not found"}`, wantNotServed: true},
+		{name: "unknown code", body: `{"error":"gone","code":"SOMETHING_ELSE"}`, wantNotServed: true},
 		{name: "router 404", contentType: "text/plain; charset=utf-8", body: "404 page not found\n", wantNotServed: true},
 		{name: "unnamed JSON 404", body: `{"error":"not found"}`, wantNotServed: true},
 	}

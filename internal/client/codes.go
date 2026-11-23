@@ -129,6 +129,12 @@ const (
 // Cluster access token codes, kupe-api's own (kupe-api docs/agent-notes.md,
 // "Error codes").
 const (
+	// CodeAccessTokenNotFound comes with a 404 for a cluster access token
+	// that does not exist.
+	CodeAccessTokenNotFound = "ACCESS_TOKEN_NOT_FOUND" // #nosec G101 -- an error code, not a credential
+	// CodeClusterNotFound comes with a 404 on a cluster access token route
+	// whose cluster does not exist.
+	CodeClusterNotFound = "CLUSTER_NOT_FOUND"
 	// CodeAccessTokenExpiryInvalid comes with a 400 when a cluster access
 	// token's lifetime is out of range.
 	CodeAccessTokenExpiryInvalid = "ACCESS_TOKEN_EXPIRY_INVALID" // #nosec G101 -- an error code, not a credential

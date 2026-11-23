@@ -49,6 +49,9 @@ type mockClusterAccessTokenState struct {
 	// catRoutesMissing answers every access token route like a kupe-api
 	// older than them: the HTTP router's plain-text 404.
 	catRoutesMissing bool
+	// catUncodedNotFound answers 404s without their codes, as a kupe-api
+	// older than them does.
+	catUncodedNotFound bool
 	// catRequests records every access token request in order.
 	catRequests []mockRegistryRequest
 }
@@ -109,14 +112,14 @@ func (m *mockKupeAPI) serveClusterAccessTokens(w http.ResponseWriter, r *http.Re
 	segs := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, mockClustersPath), "/"), "/")
 	cluster := segs[0]
 	if _, ok := m.clusters[cluster]; !ok {
-		mockNotFound(w, "cluster", cluster)
+		m.catNotFound(w, "cluster", cluster, client.CodeClusterNotFound)
 		return
 	}
 	var token map[string]any
 	if len(segs) >= 3 {
 		token = m.catTokens[segs[2]]
 		if token == nil || token["cluster"] != cluster {
-			mockNotFound(w, "access token", segs[2])
+			m.catNotFound(w, "access token", segs[2], client.CodeAccessTokenNotFound)
 			return
 		}
 	}
@@ -206,7 +209,7 @@ func (m *mockKupeAPI) collectClusterAccessToken(w http.ResponseWriter, token map
 	}
 	if m.catRevokeOnCollect {
 		delete(m.catTokens, id)
-		mockNotFound(w, "access token", id)
+		m.catNotFound(w, "access token", id, client.CodeAccessTokenNotFound)
 		return
 	}
 	switch token["status"].(map[string]any)["phase"] {
@@ -253,4 +256,13 @@ func (m *mockKupeAPI) mockCATRequestsOf(method, path string) []mockRegistryReque
 		}
 	}
 	return out
+}
+
+// catNotFound is kupe-api's 404 for a cluster or token: coded, or only
+// named when catUncodedNotFound is set.
+func (m *mockKupeAPI) catNotFound(w http.ResponseWriter, noun, name, code string) {
+	if m.catUncodedNotFound {
+		code = ""
+	}
+	mockError(w, http.StatusNotFound, code, fmt.Sprintf("%s %q not found", noun, name))
 }

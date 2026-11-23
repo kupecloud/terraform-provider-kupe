@@ -277,7 +277,8 @@ func (e *collectRefusal) Unwrap() error { return e.err }
 func (r *ClusterAccessTokenResource) waitAndCollect(ctx context.Context, timeout time.Duration, m *ClusterAccessTokenResourceModel, state *tfsdk.State, diags *diag.Diagnostics) {
 	cluster, id := m.Cluster.ValueString(), m.ID.ValueString()
 	var last *client.ClusterAccessToken
-	// collectSent is set once a collect has been sent: a later "already
+	// collectSent is set once a collect was delivered (answered 2xx, or a
+	// 5xx or transport error after sending), not when it was refused: a later "already
 	// collected" may then be this apply's own collect whose answer was lost
 	// (in transit, at the deadline, or a 500 after the platform's claim).
 	collectSent := false
@@ -306,8 +307,10 @@ func (r *ClusterAccessTokenResource) waitAndCollect(ctx context.Context, timeout
 			return true, errClusterAccessTokenCollected
 		}
 		sentBefore := collectSent
-		collectSent = true
-		done, err := r.collect(c, m, state, diags)
+		done, delivered, err := r.collect(c, m, state, diags)
+		if delivered {
+			collectSent = true
+		}
 		if sentBefore && errors.Is(err, errClusterAccessTokenCollected) {
 			return true, errClusterAccessTokenLost
 		}
@@ -359,9 +362,16 @@ func (r *ClusterAccessTokenResource) waitAndCollect(ctx context.Context, timeout
 
 // collect makes the one collect of a Ready token and records the token and
 // kubeconfig in state. It reports done=false to try again on 409
-// ACCESS_TOKEN_NOT_READY and on any transient error.
-func (r *ClusterAccessTokenResource) collect(ctx context.Context, m *ClusterAccessTokenResourceModel, state *tfsdk.State, diags *diag.Diagnostics) (bool, error) {
+// ACCESS_TOKEN_NOT_READY and on any transient error. delivered is whether
+// the request reached the API rather than being refused.
+func (r *ClusterAccessTokenResource) collect(ctx context.Context, m *ClusterAccessTokenResourceModel, state *tfsdk.State, diags *diag.Diagnostics) (done, delivered bool, _ error) {
 	collected, err := r.client.CollectClusterAccessToken(ctx, m.Cluster.ValueString(), m.ID.ValueString())
+	delivered = client.RequestDelivered(err)
+	done, err = r.collected(ctx, m, state, diags, collected, err)
+	return done, delivered, err
+}
+
+func (r *ClusterAccessTokenResource) collected(ctx context.Context, m *ClusterAccessTokenResourceModel, state *tfsdk.State, diags *diag.Diagnostics, collected *client.CollectedClusterAccessToken, err error) (bool, error) {
 	switch code := client.ErrorCode(err); {
 	case err == nil:
 	case client.IsNotFound(err):
