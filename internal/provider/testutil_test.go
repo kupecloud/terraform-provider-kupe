@@ -118,6 +118,8 @@ type mockKupeAPI struct {
 	// The registry, its cluster connections and access tokens
 	// (testutil_registry_test.go).
 	mockRegistryState
+	// Cluster access tokens (testutil_cluster_access_token_test.go).
+	mockClusterAccessTokenState
 	mockSecretState
 	mockAppState
 	// Manual backups and restores (testutil_backup_test.go).
@@ -143,11 +145,12 @@ func newMockKupeAPI(decorators ...func(http.Handler) http.Handler) *mockKupeAPI 
 		amETag:      `"1"`,
 		rvCounter:   1,
 
-		mockRegistryState: newMockRegistryState(),
-		mockAppState:      newMockAppState(),
-		mockBackupState:   newMockBackupState(),
-		databases:         make(map[string]map[string]any),
-		databaseBindings:  make(map[string]map[string]any),
+		mockRegistryState:           newMockRegistryState(),
+		mockClusterAccessTokenState: newMockClusterAccessTokenState(),
+		mockAppState:                newMockAppState(),
+		mockBackupState:             newMockBackupState(),
+		databases:                   make(map[string]map[string]any),
+		databaseBindings:            make(map[string]map[string]any),
 		tenant: map[string]any{
 			"name": "acme", "displayName": "Acme Corp",
 			"contactEmail": "admin@acme.com", "plan": "starter",
@@ -247,6 +250,8 @@ func (m *mockKupeAPI) handler(w http.ResponseWriter, r *http.Request) {
 		m.serveAppImage(w, r)
 	case strings.HasPrefix(r.URL.Path, mockAppsPath):
 		m.serveApps(w, r)
+	case isMockClusterAccessTokenPath(r.URL.Path):
+		m.serveClusterAccessTokens(w, r)
 
 	// Plans
 	case r.Method == "GET" && r.URL.Path == "/api/v1/plans":

@@ -154,6 +154,7 @@ func (p *KupeProvider) Resources(_ context.Context) []func() resource.Resource {
 		NewRegistryResource,
 		NewRegistryBindingResource,
 		NewRegistryTokenResource,
+		NewClusterAccessTokenResource,
 	}
 }
 

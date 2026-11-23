@@ -126,6 +126,29 @@ const (
 	CodeRegistryTokenLimitReached = "REGISTRY_TOKEN_LIMIT_REACHED" // #nosec G101 -- an error code, not a credential
 )
 
+// Cluster access token codes, kupe-api's own (kupe-api docs/agent-notes.md,
+// "Error codes").
+const (
+	// CodeAccessTokenExpiryInvalid comes with a 400 when a cluster access
+	// token's lifetime is out of range.
+	CodeAccessTokenExpiryInvalid = "ACCESS_TOKEN_EXPIRY_INVALID" // #nosec G101 -- an error code, not a credential
+	// CodeAccessTokenLimitReached comes with a 409 when the cluster already
+	// holds the most access tokens it may.
+	CodeAccessTokenLimitReached = "ACCESS_TOKEN_LIMIT_REACHED" // #nosec G101 -- an error code, not a credential
+	// CodeAccessTokenNotReady comes with a 409 on a collect before the token
+	// is issued, or one whose claim kept conflicting. Retry it.
+	CodeAccessTokenNotReady = "ACCESS_TOKEN_NOT_READY" // #nosec G101 -- an error code, not a credential
+	// CodeAccessTokenFailed comes with a 409 on a collect of a token that
+	// could not be issued and never will be.
+	CodeAccessTokenFailed = "ACCESS_TOKEN_FAILED" // #nosec G101 -- an error code, not a credential
+	// CodeAccessTokenAlreadyCollected comes with a 410 on a collect of a
+	// token already served once: it cannot be served again.
+	CodeAccessTokenAlreadyCollected = "ACCESS_TOKEN_ALREADY_COLLECTED" // #nosec G101 -- an error code, not a credential
+	// CodeAccessTokenCollectCreatorOnly comes with a 403 on a collect by
+	// anyone but the member or API key that created the token.
+	CodeAccessTokenCollectCreatorOnly = "ACCESS_TOKEN_COLLECT_CREATOR_ONLY" // #nosec G101 -- an error code, not a credential
+)
+
 // CodeAppsUnavailable is a disabled App service, never a missing instance.
 const CodeAppsUnavailable = "apps_unavailable"
 

@@ -30,7 +30,8 @@ the rest of your infrastructure code.
 
 * apps with `kupe_app`, deployed per environment with `kupe_app_environment`
 * image tags resolved to immutable digests with `data.kupe_app_image`
-* clusters with `kupe_cluster`
+* clusters with `kupe_cluster`, and access tokens for CI with
+  `kupe_cluster_access_token`
 * PostgreSQL databases with `kupe_database`, bound into cluster
   namespaces with `kupe_database_binding`; manual backups with
   `kupe_database_backup`, and new databases restored from them with

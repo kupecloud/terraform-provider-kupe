@@ -1,0 +1,46 @@
+---
+page_title: "{{.Name}} {{.Type}} - {{.ProviderName}}"
+subcategory: ""
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# {{.Name}} ({{.Type}})
+
+{{ .Description | trimspace }}
+
+## Example Usage
+
+{{ tffile "examples/resources/kupe_cluster_access_token/resource.tf" }}
+
+### Write the kubeconfig to a CI secret
+
+Pass the kubeconfig straight to your CI system's secret store, so CI jobs run `kubectl` without anyone handling the token. With the GitHub provider, for example:
+
+```terraform
+resource "github_actions_secret" "kubeconfig" {
+  repository      = "deploy"
+  secret_name     = "KUBECONFIG_DEV"
+  plaintext_value = kupe_cluster_access_token.ci.kubeconfig
+}
+```
+
+The CI job writes the secret to a file and points `KUBECONFIG` at it.
+
+### Renew a token
+
+A token never changes in place. When it expires, the platform removes it, and the next `terraform plan` shows it being created again, with a new token and kubeconfig. Until then a refresh warns that it has expired. To renew earlier, change `display_name` or `expires_in_days`, or run `terraform apply -replace=kupe_cluster_access_token.ci`.
+
+### Keep the token out of state
+
+`token` and `kubeconfig` are stored in Terraform state in plain text; marking them sensitive only hides them in plan and apply output. The platform shows them once, when Terraform collects them during create, and never again: Terraform keeps them in state and never collects again. If an apply stops after the token is created but before it is collected, the token stays in state, marked tainted, and the next apply replaces it. If your state backend is not encrypted and access-controlled, create the token outside Terraform instead, and store the kubeconfig in your CI system's secret store.
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Import
+
+Import is supported using the following syntax:
+
+{{ codefile "shell" "examples/resources/kupe_cluster_access_token/import.sh" }}
+
+An imported token's `token` and `kubeconfig` cannot be read back: they are null after import. To get a credential in state, replace the token with `terraform apply -replace=kupe_cluster_access_token.ci`.

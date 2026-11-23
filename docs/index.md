@@ -32,13 +32,14 @@ Use an `https://` host. The provider accepts plain HTTP only for `localhost` and
 
 ## State contains secrets
 
-`kupe_api_key.key` and `kupe_registry_token.secret` are stored in Terraform state in plain text. Both are marked sensitive, which hides them in plan and apply output, but they are still in the state file. Keep state in an encrypted backend with restricted access, or create API keys and access tokens outside Terraform.
+`kupe_api_key.key`, `kupe_registry_token.secret`, `kupe_cluster_access_token.token` and `kupe_cluster_access_token.kubeconfig` are stored in Terraform state in plain text. All are marked sensitive, which hides them in plan and apply output, but they are still in the state file. Keep state in an encrypted backend with restricted access, or create API keys and access tokens outside Terraform.
 
 ## Resources
 
 - `kupe_app`
 - `kupe_app_environment`
 - `kupe_cluster`
+- `kupe_cluster_access_token`
 - `kupe_database`
 - `kupe_database_binding`
 - `kupe_database_backup`
