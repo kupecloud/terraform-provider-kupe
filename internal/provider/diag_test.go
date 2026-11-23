@@ -589,18 +589,21 @@ func TestWaitForCondition_DoneOnFirstCheck(t *testing.T) {
 	// poll interval. Mirrors the "delete that already completed by
 	// the time apply hits the GET" case.
 	shrinkPollInterval(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	// The deadline is far above any load delay and the assertion is the call
+	// count, not elapsed time: one check, no poll interval waited.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
-	start := time.Now()
+	calls := 0
 	err := waitForCondition(ctx, func(context.Context) (bool, error) {
+		calls++
 		return true, nil
 	})
 	if err != nil {
 		t.Fatalf("expected nil on immediate done, got %v", err)
 	}
-	if elapsed := time.Since(start); elapsed > 20*time.Millisecond {
-		t.Errorf("expected immediate return, took %v", elapsed)
+	if calls != 1 {
+		t.Errorf("expected exactly one check, got %d", calls)
 	}
 }
 
@@ -608,7 +611,7 @@ func TestWaitForCondition_DoneAfterRetries(t *testing.T) {
 	// Resource reaches the target state after several polls. Verifies
 	// the loop converges rather than the exact timing.
 	shrinkPollInterval(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
 	calls := 0
@@ -648,7 +651,7 @@ func TestWaitForCondition_TerminalErrorSurfaces(t *testing.T) {
 	// future "phase=Degraded with reason" path could use this). The
 	// helper must surface that error rather than returning nil.
 	shrinkPollInterval(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
 	terminalErr := errors.New("resource entered terminal failure state")
@@ -665,7 +668,7 @@ func TestWaitForCondition_DeletePredicate(t *testing.T) {
 	// reports done=true when the API returns 404. Mirrors what the
 	// cluster/secret Delete handlers do internally.
 	shrinkPollInterval(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
 	calls := 0
@@ -709,7 +712,13 @@ func TestDeleteUntilAccepted(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			shrinkPollInterval(t)
 			calls := 0
-			err := deleteUntilAccepted(context.Background(), 50*time.Millisecond, func(context.Context) error {
+			// Only the persistent cases end by expiry; the rest end on their
+			// outcome and get a deadline far above any load delay.
+			timeout := time.Minute
+			if errors.Is(tt.wantErr, conflict) || errors.Is(tt.wantErr, errDeleteNotAccepted) {
+				timeout = 50 * time.Millisecond
+			}
+			err := deleteUntilAccepted(context.Background(), timeout, func(context.Context) error {
 				resp := tt.responses[min(calls, len(tt.responses)-1)]
 				calls++
 				return resp

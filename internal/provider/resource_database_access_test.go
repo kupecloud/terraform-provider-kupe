@@ -325,7 +325,7 @@ func TestAccDatabaseExtensionChangeWaitShowsReadyReason(t *testing.T) {
 	mock := newMockKupeAPI()
 	defer mock.close()
 	shrinkPollInterval(t)
-	config := testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false), updateTimeout: "50ms"})
+	config := testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false), updateTimeout: "3s"})
 	changed := strings.Replace(config, `name = "orders-db"`, `name = "orders-db"`+`
  postgres = {extensions=[{name="pgcrypto"}]}`, 1)
 	resource.UnitTest(t, resource.TestCase{ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(), Steps: []resource.TestStep{
