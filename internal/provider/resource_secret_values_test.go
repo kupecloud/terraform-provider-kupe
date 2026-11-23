@@ -688,8 +688,19 @@ func TestSecretValuesDiagnosticsAndPriorState(t *testing.T) {
 
 func TestSecretConfirmedCreateTimeoutWarningAndTerminalError(t *testing.T) {
 	shrinkPollInterval(t)
+	// The create timeout also bounds the vault write and the create request
+	// that run before the wait, so a sub-second value can expire before the
+	// wait starts when the machine is loaded. The terminal case ends on its
+	// outcome and gets a timeout far above any load delay; the timeout case can
+	// only end by expiry, so a long deadline delays it but cannot change it.
+	const settleTimeout = "1m"
+	const expireTimeout = "3s"
 	for _, terminal := range []bool{false, true} {
 		t.Run(fmt.Sprintf("terminal %v", terminal), func(t *testing.T) {
+			timeout := expireTimeout
+			if terminal {
+				timeout = settleTimeout
+			}
 			mock := newMockKupeAPI()
 			defer mock.close()
 			status := map[string]any{"observedGeneration": 0}
@@ -705,7 +716,7 @@ func TestSecretConfirmedCreateTimeoutWarningAndTerminalError(t *testing.T) {
 			for key, typ := range timeoutType.AttributeTypes {
 				timeoutValues[key] = tftypes.NewValue(typ, nil)
 			}
-			timeoutValues["create"] = tftypes.NewValue(tftypes.String, "80ms")
+			timeoutValues["create"] = tftypes.NewValue(tftypes.String, timeout)
 			raw := testPlanValue(t, s, map[string]tftypes.Value{"name": tftypes.NewValue(tftypes.String, "db-password"), "secret_path": tftypes.NewValue(tftypes.String, "production/db-password"), "values_wo_version": tftypes.NewValue(tftypes.Number, 1), "timeouts": tftypes.NewValue(timeoutType, timeoutValues)})
 			plan := tfsdk.Plan{Schema: s.Schema, Raw: raw}
 			resp := resource.CreateResponse{State: tfsdk.State{Schema: s.Schema, Raw: raw.Copy()}}
