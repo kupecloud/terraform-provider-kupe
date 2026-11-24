@@ -1002,6 +1002,8 @@ func (m *mockKupeAPI) getDatabase(w http.ResponseWriter, name string) {
 		"lastBackupAt":       "",
 		"recoveryWindow":     nil,
 		"backupSizeBytes":    0,
+		// The operator records the end of support of the major it runs.
+		"versionEndOfSupport": mockEndOfSupport[mockMajor(mockRunningVersion(db))],
 	}
 	if pg, _ := db["postgres"].(map[string]any); pg != nil {
 		if pooler, _ := pg["pooler"].(map[string]any); pooler != nil && pooler["enabled"] == true {
@@ -1509,6 +1511,11 @@ func mockRunningVersion(db map[string]any) string {
 	}
 	return db["version"].(string) + ".0"
 }
+
+// mockEndOfSupport is the end-of-support date per major the mock reports,
+// as the operator's published config has them; a major missing from it
+// reads "" (not recorded).
+var mockEndOfSupport = map[int]string{17: "2029-11-08", 18: "2030-11-14"}
 
 // mockMajor is the major of a version, -1 when it has none.
 func mockMajor(v string) int {

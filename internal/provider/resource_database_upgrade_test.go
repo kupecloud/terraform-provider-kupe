@@ -62,17 +62,23 @@ func TestAccDatabaseResource_MajorUpgrade(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config: testAccDatabaseConfig(mock.url(), upgradeDB("17", "")),
-				Check:  resource.TestCheckResourceAttr(addr, "current_version", "17.0"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(addr, "current_version", "17.0"),
+					resource.TestCheckResourceAttr(addr, "version_end_of_support", "2029-11-08"),
+				),
 			},
 			{
 				Config: testAccDatabaseConfig(mock.url(), upgradeDB("18", "")),
 				ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
 					plancheck.ExpectResourceAction(addr, plancheck.ResourceActionUpdate),
 					plancheck.ExpectKnownValue(addr, tfjsonpath.New("version"), knownvalue.StringExact("18")),
+					// The date follows the major, so it is not known until the upgrade ends.
+					plancheck.ExpectUnknownValue(addr, tfjsonpath.New("version_end_of_support")),
 				}},
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(addr, "version", "18"),
 					resource.TestCheckResourceAttr(addr, "current_version", "18.1"),
+					resource.TestCheckResourceAttr(addr, "version_end_of_support", "2030-11-14"),
 					resource.TestCheckResourceAttr(addr, "phase", "Running"),
 					testAccCheckDatabaseStatusesPlayed(mock),
 					testAccCheckDatabaseVersionRequests(mock, "18"),

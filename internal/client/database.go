@@ -49,6 +49,10 @@ type DatabaseStatus struct {
 	// BackupSizeBytes is the storage every full backup and all WAL kept for
 	// the database take up, 0 until measured.
 	BackupSizeBytes int64 `json:"backupSizeBytes"`
+	// VersionEndOfSupport is the YYYY-MM-DD end-of-support date of the
+	// database's major version, "" until the platform records it. Support
+	// ends at 00:00 UTC on that date.
+	VersionEndOfSupport string `json:"versionEndOfSupport"`
 }
 
 // DatabaseBackup is a database's backup settings. A nil field is unset: a
