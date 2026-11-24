@@ -37,14 +37,15 @@ data "kupe_tenant" "current" {}
 }
 
 // TestAccTenantDataSource_OverageSwitches pins the overage switches
-// (CREDIT-41): each attribute reads its own field of the API's overage, one
-// switch on at a time so a crossed mapping goes red. The mock also sends the
-// spend cap (an amount) and the deprecated enforce flags; neither reaches
-// state.
+// (CREDIT-41, registry CREDIT-85): each attribute reads its own field of the
+// API's overage, one switch on at a time so a crossed mapping goes red. The
+// mock also sends the spend cap (an amount) and the deprecated enforce flags;
+// neither reaches state.
 func TestAccTenantDataSource_OverageSwitches(t *testing.T) {
 	switches := []struct{ api, attr string }{
 		{"clusters", "overage_clusters"},
 		{"databases", "overage_databases"},
+		{"registry", "overage_registry"},
 		{"logs", "overage_logs"},
 		{"metrics", "overage_metrics"},
 	}
@@ -86,6 +87,39 @@ data "kupe_tenant" "current" {}
 			})
 		})
 	}
+}
+
+// TestAccTenantDataSource_OverageRegistryMissing pins that a tenant response
+// without `registry` in its overage (a kupe-api older than CREDIT-83) reads
+// overage_registry as false. Clusters overage is on, so reading the registry
+// from the clusters switch goes red.
+func TestAccTenantDataSource_OverageRegistryMissing(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+	overage := mock.tenant["overage"].(map[string]any)
+	delete(overage, "registry")
+	overage["clusters"] = true
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config: fmt.Sprintf(`
+provider "kupe" {
+  host    = %q
+  tenant  = "acme"
+  api_key = "kupe_test_key"
+}
+
+data "kupe_tenant" "current" {}
+`, mock.url()),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("data.kupe_tenant.current", "overage_clusters", "true"),
+					resource.TestCheckResourceAttr("data.kupe_tenant.current", "overage_registry", "false"),
+				),
+			},
+		},
+	})
 }
 
 // noTenantAmountOrEnforce fails when the tenant's state carries the spend

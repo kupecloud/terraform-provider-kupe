@@ -28,4 +28,5 @@ data "kupe_tenant" "current" {}
 - `overage_databases` (Boolean) Whether usage of databases may continue past the plan's credit, up to the tenant's spend cap.
 - `overage_logs` (Boolean) Whether usage of logs may continue past the plan's credit, up to the tenant's spend cap.
 - `overage_metrics` (Boolean) Whether usage of metrics may continue past the plan's credit, up to the tenant's spend cap.
+- `overage_registry` (Boolean) Whether usage of registry storage above the plan's included storage may continue past the plan's credit, up to the tenant's spend cap.
 - `plan` (String) Name of the tenant's current plan.
