@@ -40,6 +40,8 @@ var codeWireValues = []struct {
 	{"CodeDatabaseNameTooLong", CodeDatabaseNameTooLong, "DATABASE_NAME_TOO_LONG"},
 	{"CodeDatabaseNotReady", CodeDatabaseNotReady, "database_not_ready"},
 	{"CodeDatabasePoolerUnavailable", CodeDatabasePoolerUnavailable, "DATABASE_POOLER_UNAVAILABLE"},
+	{"CodeDatabaseUpgradeInProgress", CodeDatabaseUpgradeInProgress, "DATABASE_UPGRADE_IN_PROGRESS"},
+	{"CodeDatabaseUpgradeNotReady", CodeDatabaseUpgradeNotReady, "DATABASE_UPGRADE_NOT_READY"},
 	{"CodeDatabasesUnavailable", CodeDatabasesUnavailable, "databases_unavailable"},
 	{"CodeDedicatedCredentialsIrreversible", CodeDedicatedCredentialsIrreversible, "dedicated_credentials_irreversible"},
 	{"CodeDeletionProtected", CodeDeletionProtected, "deletion_protected"},
