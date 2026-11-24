@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -431,6 +432,12 @@ func TestAPIErrorDetail(t *testing.T) {
 			for _, want := range tt.wantSubstr {
 				if !strings.Contains(got, want) {
 					t.Errorf("missing substring %q in:\n%s", want, got)
+				}
+				// The code line is matched whole, so a constant whose
+				// value only gained a prefix or suffix (e.g.
+				// "terminating_v2") still fails.
+				if strings.HasPrefix(want, "Error code: ") && !slices.Contains(strings.Split(got, "\n"), want) {
+					t.Errorf("missing line %q in:\n%s", want, got)
 				}
 			}
 			for _, unwanted := range tt.wantNoSubstr {
