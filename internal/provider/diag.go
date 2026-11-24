@@ -328,6 +328,9 @@ func apiErrorDetail(err error) string {
 			return base + "\n\nTenant Alertmanager email is not supported yet: the platform has no managed " +
 				"sender. Remove `email_configs` receivers and the `smtp_*` global fields from `body_json`, " +
 				"and use another receiver type such as `slack_configs` or `webhook_configs`."
+		case client.CodeMajorUpgradeUnavailable:
+			return base + "\n\nMajor version upgrades are not offered on this platform right now, so nothing " +
+				"changed. Keep the current `version`, and run `terraform apply` again when upgrades are offered."
 		case client.CodeStorageShrinkUnsupported:
 			return base + "\n\nDatabase storage can only grow. Keep the current size or set a larger one."
 		case client.CodePlanLimitReached:
@@ -461,6 +464,14 @@ func apiErrorDetail(err error) string {
 		case client.CodeAccessTokenLimitReached:
 			return base + "\n\nThe cluster holds as many access tokens as it can. Revoke one you no longer use " +
 				"(destroy its `kupe_cluster_access_token`, or revoke it in the Kupe Console), then run `terraform apply` again."
+		case client.CodeDatabaseUpgradeNotReady:
+			return base + "\n\nThe database cannot be upgraded yet, so nothing changed. The message says why: " +
+				"it must be running and healthy, have a recent backup and room for one more, and `version` must be " +
+				"one major above the one it runs. Fix that, then run `terraform apply` again."
+		case client.CodeDatabaseUpgradeInProgress:
+			return base + "\n\nThe database is being upgraded, so nothing changed. Wait for the upgrade to " +
+				"finish, then run `terraform apply` again. Until the database is offline for the upgrade, setting " +
+				"`version` back to the major it runs cancels it."
 		case client.CodeRestoreSourceNotReady:
 			return base + "\n\nThe backup named in `source` has not completed, or the database named in `source` " +
 				"has no restore window yet, so nothing was created. Wait for it, then run `terraform apply` again."

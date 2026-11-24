@@ -76,6 +76,53 @@ func (m storageNeverShrinksModifier) PlanModifyString(_ context.Context, req pla
 			req.Path, req.StateValue.ValueString(), req.PlanValue.ValueString()))
 }
 
+// versionMovesUp fails the plan when an engine major version moves down,
+// except back to the major the database runs: that cancels an upgrade that
+// is waiting, taking its backup, rolled back or failed, and the API admits
+// it whatever the platform offers. A raise passes and plans as an update in
+// place: whether the platform offers major upgrades is for the API to say at
+// apply time, since the provider cannot see the switch. Versions it cannot
+// read, and a lowering when the running version is not known yet, are left
+// for the API to validate.
+func versionMovesUp() planmodifier.String {
+	return versionMovesUpModifier{}
+}
+
+type versionMovesUpModifier struct{}
+
+func (m versionMovesUpModifier) Description(_ context.Context) string {
+	return "The major version can only move up, or back to the major the database runs."
+}
+
+func (m versionMovesUpModifier) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (m versionMovesUpModifier) PlanModifyString(ctx context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() || req.PlanValue.IsUnknown() || req.PlanValue.IsNull() ||
+		req.StateValue.IsNull() || req.PlanValue.Equal(req.StateValue) {
+		return
+	}
+	planned, okPlanned := majorOf(req.PlanValue.ValueString())
+	current, okCurrent := majorOf(req.StateValue.ValueString())
+	if !okPlanned || !okCurrent || planned >= current {
+		return
+	}
+	var running types.String
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("current_version"), &running)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	runningMajorVersion, okRunning := majorOf(running.ValueString())
+	if !okRunning || planned == runningMajorVersion {
+		return
+	}
+	resp.Diagnostics.AddAttributeError(req.Path, "Database major version can only move up",
+		fmt.Sprintf("%s is %q and cannot change to %q: a database's major version can only move up. Set it "+
+			"back to the major the database runs (%d) only to cancel an upgrade.",
+			req.Path, req.StateValue.ValueString(), req.PlanValue.ValueString(), runningMajorVersion))
+}
+
 // databaseBindingNameDefault plans the binding name when it is not
 // configured. kupe-api requires a name and has no default, so the provider
 // derives "{database}-{cluster}-{role}" for an omitted/null logical selection
