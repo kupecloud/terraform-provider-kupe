@@ -141,6 +141,7 @@ func TestAccDatabaseResource(t *testing.T) {
 					resource.TestCheckResourceAttr(addr, "engine", "postgres"),
 					resource.TestCheckResourceAttr(addr, "version", "18"),
 					resource.TestCheckResourceAttr(addr, "current_version", "18.0"),
+					resource.TestCheckResourceAttr(addr, "version_end_of_support", "2030-11-14"),
 					resource.TestCheckResourceAttr(addr, "phase", "Running"),
 					resource.TestCheckResourceAttr(addr, "high_availability", "false"),
 					resource.TestCheckResourceAttr(addr, "deletion_protection", "true"),
@@ -645,6 +646,7 @@ data "kupe_database" "test" {
 					resource.TestCheckResourceAttr(addr, "engine", "postgres"),
 					resource.TestCheckResourceAttr(addr, "version", "18"),
 					resource.TestCheckResourceAttr(addr, "current_version", "18.0"),
+					resource.TestCheckResourceAttr(addr, "version_end_of_support", "2030-11-14"),
 					resource.TestCheckResourceAttr(addr, "phase", "Running"),
 					resource.TestCheckResourceAttr(addr, "resources.memory", "1Gi"),
 					resource.TestCheckResourceAttr(addr, "deletion_protection", "false"),
@@ -654,6 +656,44 @@ data "kupe_database" "test" {
 					resource.TestCheckResourceAttr(addr, "recovery_window.earliest", "2026-10-14T03:17:00Z"),
 					resource.TestCheckResourceAttr(addr, "recovery_window.latest", "2026-10-21T09:00:00Z"),
 					resource.TestCheckResourceAttr(addr, "backup_size_bytes", "5368709120"),
+				),
+			},
+		},
+	})
+}
+
+// TestAccDatabase_VersionEndOfSupportNotRecorded: before the platform has
+// recorded a date the resource and the data source read "", and a refresh
+// that brings the date plans no change.
+func TestAccDatabase_VersionEndOfSupportNotRecorded(t *testing.T) {
+	mock := newMockKupeAPI()
+	defer mock.close()
+	mock.setState(func(m *mockKupeAPI) { m.databaseStatuses = []map[string]any{{"versionEndOfSupport": ""}} })
+	dataSource := `
+data "kupe_database" "test" {
+  name = kupe_database.test.name
+}
+`
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories(),
+		CheckDestroy:             testAccCheckNoDatabases(mock),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false)}) + dataSource,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("kupe_database.test", "version_end_of_support", ""),
+					resource.TestCheckResourceAttr("data.kupe_database.test", "version_end_of_support", ""),
+				),
+			},
+			{
+				PreConfig: func() { mock.setState(func(m *mockKupeAPI) { m.databaseStatuses = nil }) },
+				Config:    testAccDatabaseConfig(mock.url(), testDatabase{protection: boolPtr(false)}) + dataSource,
+				ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+					plancheck.ExpectResourceAction("kupe_database.test", plancheck.ResourceActionNoop),
+				}},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("kupe_database.test", "version_end_of_support", "2030-11-14"),
+					resource.TestCheckResourceAttr("data.kupe_database.test", "version_end_of_support", "2030-11-14"),
 				),
 			},
 		},

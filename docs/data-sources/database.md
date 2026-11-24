@@ -45,6 +45,7 @@ output "orders_db_running_version" {
 - `resources` (Attributes) Resources of each instance. (see [below for nested schema](#nestedatt--resources))
 - `source` (Attributes) What the database was restored from. Null for a database that was not restored. (see [below for nested schema](#nestedatt--source))
 - `version` (String) Engine major version you asked for, for example `18`.
+- `version_end_of_support` (String) The date (YYYY-MM-DD) support ends for the major version the database runs, at 00:00 UTC. The database keeps running after it; move it to a newer major before then (raise `version` where the platform offers major upgrades). Empty until the platform records the date.
 
 <a id="nestedatt--backup"></a>
 ### Nested Schema for `backup`

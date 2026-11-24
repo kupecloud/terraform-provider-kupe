@@ -259,6 +259,7 @@ Grant access with [`kupe_database_binding`](database_binding.md). Each binding p
 - `last_backup_at` (String) When the newest full backup finished (RFC 3339). Empty until the first backup completes.
 - `phase` (String) Current phase: Pending, Provisioning, Running, Upgrading, Degraded or Terminating. It is `Upgrading` while a major version upgrade is running and the database is offline.
 - `recovery_window` (Attributes) The restore window: the oldest and newest points you can restore the database to. Null until the backups report them. (see [below for nested schema](#nestedatt--recovery_window))
+- `version_end_of_support` (String) The date (YYYY-MM-DD) support ends for the major version the database runs, at 00:00 UTC. The database keeps running after it; move it to a newer major before then (raise `version` where the platform offers major upgrades). Empty until the platform records the date.
 
 <a id="nestedatt--resources"></a>
 ### Nested Schema for `resources`

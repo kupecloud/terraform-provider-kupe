@@ -337,6 +337,7 @@ func (r *DatabaseResource) ModifyPlan(ctx context.Context, req resource.ModifyPl
 	}
 	plan.Phase = state.Phase
 	plan.CurrentVersion = state.CurrentVersion
+	plan.VersionEndOfSupport = state.VersionEndOfSupport
 	plan.LastBackupAt = state.LastBackupAt
 	plan.RecoveryWindow = state.RecoveryWindow
 	plan.BackupSizeBytes = state.BackupSizeBytes

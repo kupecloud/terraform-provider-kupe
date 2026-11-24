@@ -123,6 +123,10 @@ func (d *DatabaseDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 				Description: "Full engine version the database runs, for example `18.0`.",
 				Computed:    true,
 			},
+			"version_end_of_support": schema.StringAttribute{
+				Description: versionEndOfSupportDescription,
+				Computed:    true,
+			},
 			"last_backup_at": schema.StringAttribute{
 				Description: lastBackupAtDescription,
 				Computed:    true,

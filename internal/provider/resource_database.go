@@ -108,6 +108,9 @@ const (
 		"for every day; `DailyThenWeekly` keeps one for each of the last 7 days and one a week before that. The " +
 		"points you can restore to are the same either way; restoring to an older point takes longer. Default " +
 		"`Daily`."
+	versionEndOfSupportDescription = "The date (YYYY-MM-DD) support ends for the major version the database " +
+		"runs, at 00:00 UTC. The database keeps running after it; move it to a newer major before then " +
+		"(raise `version` where the platform offers major upgrades). Empty until the platform records the date."
 	lastBackupAtDescription = "When the newest full backup finished (RFC 3339). Empty until the first backup " +
 		"completes."
 	recoveryWindowDescription = "The restore window: the oldest and newest points you can restore the database " +
@@ -178,13 +181,14 @@ type databaseModel struct {
 	// pointer cannot represent.
 	Backup types.Object `tfsdk:"backup"`
 	// Source is null on a database that was not restored.
-	Source          types.Object `tfsdk:"source"`
-	Phase           types.String `tfsdk:"phase"`
-	CurrentVersion  types.String `tfsdk:"current_version"`
-	LastBackupAt    types.String `tfsdk:"last_backup_at"`
-	RecoveryWindow  types.Object `tfsdk:"recovery_window"`
-	BackupSizeBytes types.Int64  `tfsdk:"backup_size_bytes"`
-	CreatedAt       types.String `tfsdk:"created_at"`
+	Source              types.Object `tfsdk:"source"`
+	Phase               types.String `tfsdk:"phase"`
+	CurrentVersion      types.String `tfsdk:"current_version"`
+	VersionEndOfSupport types.String `tfsdk:"version_end_of_support"`
+	LastBackupAt        types.String `tfsdk:"last_backup_at"`
+	RecoveryWindow      types.Object `tfsdk:"recovery_window"`
+	BackupSizeBytes     types.Int64  `tfsdk:"backup_size_bytes"`
+	CreatedAt           types.String `tfsdk:"created_at"`
 }
 
 // databaseBackupAttrTypes are the attributes of `backup`.
@@ -490,6 +494,10 @@ func (r *DatabaseResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 			},
 			"current_version": schema.StringAttribute{
 				Description: "Full engine version running, e.g. `18.0`.",
+				Computed:    true,
+			},
+			"version_end_of_support": schema.StringAttribute{
+				Description: versionEndOfSupportDescription,
 				Computed:    true,
 			},
 			"last_backup_at": schema.StringAttribute{
@@ -825,21 +833,22 @@ func databaseModelFromAPI(db *client.Database) databaseModel {
 		status = &client.DatabaseStatus{}
 	}
 	return databaseModel{
-		Postgres:           postgresFromAPI(db.Postgres),
-		Name:               types.StringValue(db.Name),
-		Engine:             types.StringValue(db.Engine),
-		Version:            types.StringValue(db.Version),
-		Resources:          resources,
-		HighAvailability:   types.BoolValue(db.HighAvailability),
-		DeletionProtection: types.BoolValue(db.DeletionProtection),
-		Backup:             backupFromAPI(db.Backup),
-		Source:             sourceFromAPI(db.Source),
-		Phase:              types.StringValue(status.Phase),
-		CurrentVersion:     types.StringValue(status.CurrentVersion),
-		LastBackupAt:       types.StringValue(status.LastBackupAt),
-		RecoveryWindow:     recoveryWindowFromAPI(status.RecoveryWindow),
-		BackupSizeBytes:    types.Int64Value(status.BackupSizeBytes),
-		CreatedAt:          types.StringValue(db.CreatedAt),
+		Postgres:            postgresFromAPI(db.Postgres),
+		Name:                types.StringValue(db.Name),
+		Engine:              types.StringValue(db.Engine),
+		Version:             types.StringValue(db.Version),
+		Resources:           resources,
+		HighAvailability:    types.BoolValue(db.HighAvailability),
+		DeletionProtection:  types.BoolValue(db.DeletionProtection),
+		Backup:              backupFromAPI(db.Backup),
+		Source:              sourceFromAPI(db.Source),
+		Phase:               types.StringValue(status.Phase),
+		CurrentVersion:      types.StringValue(status.CurrentVersion),
+		VersionEndOfSupport: types.StringValue(status.VersionEndOfSupport),
+		LastBackupAt:        types.StringValue(status.LastBackupAt),
+		RecoveryWindow:      recoveryWindowFromAPI(status.RecoveryWindow),
+		BackupSizeBytes:     types.Int64Value(status.BackupSizeBytes),
+		CreatedAt:           types.StringValue(db.CreatedAt),
 	}
 }
 
