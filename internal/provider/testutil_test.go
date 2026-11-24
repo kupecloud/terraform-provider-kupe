@@ -159,7 +159,7 @@ func newMockKupeAPI(decorators ...func(http.Handler) http.Handler) *mockKupeAPI 
 			// enforce flags it still sends for one release (CREDIT-15).
 			"overage": map[string]any{
 				"spendCap": "50.00", "clusters": false, "databases": false,
-				"logs": false, "metrics": false, "choiceMadeAt": "2026-11-19T09:30:00Z",
+				"registry": false, "logs": false, "metrics": false, "choiceMadeAt": "2026-11-19T09:30:00Z",
 			},
 			"enforceMetricsLimit": true, "enforceLogLimit": true,
 			"resourceVersion": "1", "createdAt": "2024-01-01T00:00:00Z",

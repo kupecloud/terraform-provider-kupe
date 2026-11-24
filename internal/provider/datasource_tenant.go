@@ -23,6 +23,7 @@ type TenantDataSourceModel struct {
 	Plan             types.String `tfsdk:"plan"`
 	OverageClusters  types.Bool   `tfsdk:"overage_clusters"`
 	OverageDatabases types.Bool   `tfsdk:"overage_databases"`
+	OverageRegistry  types.Bool   `tfsdk:"overage_registry"`
 	OverageLogs      types.Bool   `tfsdk:"overage_logs"`
 	OverageMetrics   types.Bool   `tfsdk:"overage_metrics"`
 }
@@ -57,6 +58,7 @@ func (d *TenantDataSource) Schema(_ context.Context, _ datasource.SchemaRequest,
 			},
 			"overage_clusters":  overageAttribute("clusters"),
 			"overage_databases": overageAttribute("databases"),
+			"overage_registry":  overageAttribute("registry storage above the plan's included storage"),
 			"overage_logs":      overageAttribute("logs"),
 			"overage_metrics":   overageAttribute("metrics"),
 		},
@@ -90,6 +92,7 @@ func (d *TenantDataSource) Read(ctx context.Context, _ datasource.ReadRequest, r
 		Plan:             types.StringValue(tenant.Plan),
 		OverageClusters:  types.BoolValue(tenant.Overage.Clusters),
 		OverageDatabases: types.BoolValue(tenant.Overage.Databases),
+		OverageRegistry:  types.BoolValue(tenant.Overage.Registry),
 		OverageLogs:      types.BoolValue(tenant.Overage.Logs),
 		OverageMetrics:   types.BoolValue(tenant.Overage.Metrics),
 	}

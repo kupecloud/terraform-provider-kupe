@@ -205,7 +205,7 @@ func (r *RegistryResource) Schema(ctx context.Context, _ resource.SchemaRequest,
 			},
 			"storage_limit_bytes": schema.Int64Attribute{
 				Description: "The storage limit in force, in bytes: the lowest of `storage_limit`, the plan's maximum and, " +
-					"while overage for clusters is off, the plan's included storage. " +
+					"while overage for the registry is off, the plan's included storage. " +
 					"`-1` means unlimited. Null until the platform has applied a limit.",
 				Computed: true,
 			},

@@ -86,7 +86,7 @@ The timeouts default to 10 minutes for create, 5 minutes for update and 15 minut
 - `etag` (String) Resource version used for optimistic locking during updates.
 - `phase` (String) Current phase: `Pending`, `Provisioning`, `Running`, `Degraded` or `Terminating`.
 - `repository_count` (Number) Number of repositories in the registry.
-- `storage_limit_bytes` (Number) The storage limit in force, in bytes: the lowest of `storage_limit`, the plan's maximum and, while overage for clusters is off, the plan's included storage. `-1` means unlimited. Null until the platform has applied a limit.
+- `storage_limit_bytes` (Number) The storage limit in force, in bytes: the lowest of `storage_limit`, the plan's maximum and, while overage for the registry is off, the plan's included storage. `-1` means unlimited. Null until the platform has applied a limit.
 - `storage_used_bytes` (Number) What the registry stores, in bytes, as last measured by the platform.
 
 <a id="nestedatt--timeouts"></a>

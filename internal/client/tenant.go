@@ -26,6 +26,7 @@ type Tenant struct {
 type TenantOverage struct {
 	Clusters  bool `json:"clusters"`
 	Databases bool `json:"databases"`
+	Registry  bool `json:"registry"`
 	Logs      bool `json:"logs"`
 	Metrics   bool `json:"metrics"`
 }
